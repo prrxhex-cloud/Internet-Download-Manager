@@ -1,0 +1,331 @@
+<UserControl x:Class="PRRX.IDM.Views.Tabs.VideoDownloaderTab"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+             xmlns:converters="clr-namespace:PRRX.IDM.Converters"
+             mc:Ignorable="d" 
+             d:DesignHeight="850" d:DesignWidth="900">
+    <UserControl.Resources>
+        <converters:BoolToVisibilityConverter x:Key="BoolToVis"/>
+        <converters:InverseBoolToVisibilityConverter x:Key="InvBoolToVis"/>
+        <converters:InverseBoolConverter x:Key="InvBool"/>
+        <converters:NullToVisibilityConverter x:Key="NullToVis"/>
+    </UserControl.Resources>
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <Grid Margin="24,16,24,24">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <!-- Header with Liquid Glass Badge -->
+            <StackPanel Grid.Row="0" Margin="0,0,0,16">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="Video Downloader" FontSize="24" FontWeight="Bold"/>
+                    <Border Background="#200078D4" BorderBrush="#400078D4" BorderThickness="1" 
+                            CornerRadius="12" Padding="8,2" Margin="12,0,0,0" VerticalAlignment="Center">
+                        <StackPanel Orientation="Horizontal">
+                            <ui:SymbolIcon Symbol="Flash24" Foreground="#0078D4" Margin="0,0,4,0"/>
+                            <TextBlock Text="16x Turbo Acceleration" FontSize="11" FontWeight="SemiBold" Foreground="#0078D4"/>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+                <TextBlock Text="Instant video extraction with multi-threaded segment accelerator and full metadata detection." 
+                           Opacity="0.75" FontSize="13" Margin="0,4,0,0"/>
+            </StackPanel>
+
+            <!-- Input & Download Bar Card (Liquid Glass Style) -->
+            <Border Grid.Row="1" Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" 
+                    CornerRadius="10" Padding="16" Margin="0,0,0,14"
+                    BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+                <StackPanel>
+                    <Grid Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <ui:TextBox Text="{Binding InputUrl, UpdateSourceTrigger=PropertyChanged}" 
+                                    PlaceholderText="Paste any video link here (YouTube, TikTok, Twitter, Vimeo, etc.)" 
+                                    FontSize="14" Height="42" Margin="0,0,10,0"/>
+
+                        <ui:Button Grid.Column="1" Content="Paste" Icon="{ui:SymbolIcon Symbol=ClipboardPaste24}" 
+                                   Command="{Binding PasteClipboardCommand}" Margin="0,0,10,0" Height="42"/>
+
+                        <ui:Button Grid.Column="2" Content="Analyze Link" Icon="{ui:SymbolIcon Symbol=Search24}" 
+                                   Appearance="Secondary" Command="{Binding ProbeUrlCommand}" 
+                                   IsEnabled="{Binding IsProbing, Converter={StaticResource InvBool}}" Height="42"/>
+                    </Grid>
+
+                    <!-- Quality Selection & Action Row -->
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <TextBlock Text="Resolution Quality:" VerticalAlignment="Center" FontWeight="Medium" Margin="0,0,12,0"/>
+
+                        <ComboBox Grid.Column="1" ItemsSource="{Binding AvailableFormats}" 
+                                  SelectedItem="{Binding SelectedFormat}"
+                                  DisplayMemberPath="DisplayLabel" Height="38" Margin="0,0,12,0"/>
+
+                        <ui:Button Grid.Column="2" Content="Download Video (Turbo)" Icon="{ui:SymbolIcon Symbol=ArrowDownload24}"
+                                   Appearance="Primary" Command="{Binding StartDownloadCommand}"
+                                   IsEnabled="{Binding IsDownloading, Converter={StaticResource InvBool}}" Height="38" Padding="20,0"/>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- Status / Feedback Banner -->
+            <Border Grid.Row="2" Background="{DynamicResource SubtleFillColorSecondaryBrush}" 
+                    CornerRadius="8" Padding="14,10" Margin="0,0,0,14"
+                    BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <ui:SymbolIcon Symbol="Info24" Margin="0,0,10,0" VerticalAlignment="Center" 
+                                   Visibility="{Binding HasError, Converter={StaticResource InvBoolToVis}}"/>
+
+                    <ui:SymbolIcon Symbol="Warning24" Margin="0,0,10,0" VerticalAlignment="Center" Foreground="#E81123"
+                                   Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}"/>
+
+                    <TextBlock Grid.Column="1" Text="{Binding StatusMessage}" VerticalAlignment="Center" 
+                               FontWeight="Medium" TextTrimming="CharacterEllipsis"/>
+
+                    <ui:ProgressRing Grid.Column="2" IsIndeterminate="True" Width="20" Height="20" Margin="10,0,0,0"
+                                     Visibility="{Binding IsProbing, Converter={StaticResource BoolToVis}}"/>
+                </Grid>
+            </Border>
+
+            <!-- Rich Video Metadata Card (Appears on Link Analysis) -->
+            <Border Grid.Row="3" Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" 
+                    CornerRadius="10" Padding="16" Margin="0,0,0,14"
+                    BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1"
+                    Visibility="{Binding CurrentProbeResult, Converter={StaticResource NullToVis}}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="220"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <!-- Video Thumbnail Image -->
+                    <Border Grid.Column="0" CornerRadius="8" ClipToBounds="True" Background="#1A000000" Height="130" VerticalAlignment="Top" Margin="0,0,16,0">
+                        <Grid>
+                            <Image Source="{Binding CurrentProbeResult.ThumbnailUrl}" Stretch="UniformToFill"/>
+                            <Border Background="#60000000" HorizontalAlignment="Right" VerticalAlignment="Bottom" 
+                                    CornerRadius="4" Padding="6,2" Margin="6">
+                                <TextBlock Text="{Binding CurrentProbeResult.DurationFormatted}" Foreground="White" FontSize="11" FontWeight="Bold"/>
+                            </Border>
+                        </Grid>
+                    </Border>
+
+                    <!-- Rich Details Column -->
+                    <StackPanel Grid.Column="1">
+                        <!-- Video Title -->
+                        <TextBlock Text="{Binding CurrentProbeResult.Title}" FontSize="16" FontWeight="Bold" 
+                                   TextWrapping="Wrap" Margin="0,0,0,8"/>
+
+                        <!-- Publisher Name & Publish Date Badges -->
+                        <WrapPanel Margin="0,0,0,8">
+                            <!-- Publisher Name -->
+                            <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="6" Padding="8,4" Margin="0,0,8,4">
+                                <StackPanel Orientation="Horizontal">
+                                    <ui:SymbolIcon Symbol="Person24" Margin="0,0,6,0" FontSize="13"/>
+                                    <TextBlock Text="Publisher Name: " FontWeight="SemiBold" FontSize="12"/>
+                                    <TextBlock Text="{Binding CurrentProbeResult.PublisherName}" FontWeight="Bold" FontSize="12" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"/>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Published Date -->
+                            <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="6" Padding="8,4" Margin="0,0,8,4">
+                                <StackPanel Orientation="Horizontal">
+                                    <ui:SymbolIcon Symbol="Calendar24" Margin="0,0,6,0" FontSize="13"/>
+                                    <TextBlock Text="Published Date: " FontWeight="SemiBold" FontSize="12"/>
+                                    <TextBlock Text="{Binding CurrentProbeResult.PublishedDate}" FontSize="12"/>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Views -->
+                            <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="6" Padding="8,4" Margin="0,0,8,4">
+                                <StackPanel Orientation="Horizontal">
+                                    <ui:SymbolIcon Symbol="Eye24" Margin="0,0,6,0" FontSize="13"/>
+                                    <TextBlock Text="{Binding CurrentProbeResult.ViewCountFormatted}" FontSize="12"/>
+                                </StackPanel>
+                            </Border>
+                        </WrapPanel>
+
+                        <!-- Music / Artist Details Section (If Music Video) -->
+                        <Border Background="{DynamicResource SubtleFillColorTertiaryBrush}" CornerRadius="6" Padding="10,8" Margin="0,0,0,8"
+                                Visibility="{Binding CurrentProbeResult.IsMusic, Converter={StaticResource BoolToVis}}">
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                    <ui:SymbolIcon Symbol="MusicNote224" Margin="0,0,6,0" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"/>
+                                    <TextBlock Text="Music &amp; Artist Details" FontWeight="Bold" FontSize="12"/>
+                                </StackPanel>
+                                <WrapPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,2,14,2">
+                                        <TextBlock Text="Musician / Artist: " FontWeight="SemiBold" FontSize="11" Opacity="0.8"/>
+                                        <TextBlock Text="{Binding CurrentProbeResult.Musician}" FontWeight="Bold" FontSize="11"/>
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,2,14,2">
+                                        <TextBlock Text="Album: " FontWeight="SemiBold" FontSize="11" Opacity="0.8"/>
+                                        <TextBlock Text="{Binding CurrentProbeResult.Album}" FontSize="11"/>
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,2,0,2">
+                                        <TextBlock Text="Genre: " FontWeight="SemiBold" FontSize="11" Opacity="0.8"/>
+                                        <TextBlock Text="{Binding CurrentProbeResult.Genre}" FontSize="11"/>
+                                    </StackPanel>
+                                </WrapPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Description Snippet -->
+                        <TextBlock Text="{Binding CurrentProbeResult.Description}" FontSize="12" Opacity="0.75" 
+                                   TextWrapping="Wrap" MaxHeight="38" TextTrimming="CharacterEllipsis"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <!-- Download Progress Card -->
+            <Border Grid.Row="4" Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" 
+                    CornerRadius="10" Padding="16" Margin="0,0,0,14"
+                    BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1"
+                    Visibility="{Binding IsDownloading, Converter={StaticResource BoolToVis}}">
+                <StackPanel>
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Orientation="Horizontal">
+                            <ui:SymbolIcon Symbol="ArrowDownload24" Margin="0,0,8,0" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"/>
+                            <TextBlock Text="{Binding StatusMessage}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Orientation="Horizontal">
+                            <TextBlock Text="Speed: " Opacity="0.7"/>
+                            <TextBlock Text="{Binding DownloadSpeed}" FontWeight="Bold" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" Margin="0,0,12,0"/>
+                            <TextBlock Text="ETA: " Opacity="0.7"/>
+                            <TextBlock Text="{Binding DownloadEta}" FontWeight="SemiBold"/>
+                        </StackPanel>
+                    </Grid>
+
+                    <ProgressBar Value="{Binding DownloadProgress}" Maximum="100" Height="10" Margin="0,4,0,10"/>
+
+                    <ui:Button Content="Cancel Download" Appearance="Danger" HorizontalAlignment="Right"
+                               Command="{Binding CancelDownloadCommand}"/>
+                </StackPanel>
+            </Border>
+
+            <!-- Redesigned Download Activity & Queue List (Liquid Glass & Persistent Actions) -->
+            <Border Grid.Row="5" Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" 
+                    CornerRadius="10" Padding="18"
+                    BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Activity Header with Clear and Open Folder buttons -->
+                    <Grid Grid.Row="0" Margin="0,0,0,14">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <ui:SymbolIcon Symbol="History24" Margin="0,0,8,0" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"/>
+                            <TextBlock Text="Download Activity &amp; History" FontWeight="SemiBold" FontSize="16"/>
+                        </StackPanel>
+
+                        <ui:Button Grid.Column="1" Content="Clear History" Icon="{ui:SymbolIcon Symbol=Delete24}"
+                                   Command="{Binding ClearAllHistoryCommand}" Appearance="Secondary" 
+                                   Margin="0,0,10,0" Height="36"/>
+
+                        <ui:Button Grid.Column="2" Content="Open Downloads Folder" Icon="{ui:SymbolIcon Symbol=FolderOpen24}"
+                                   Command="{Binding OpenDownloadsFolderCommand}" Appearance="Primary" Height="36"/>
+                    </Grid>
+
+                    <!-- Activity List Items -->
+                    <ItemsControl Grid.Row="1" ItemsSource="{Binding DownloadHistory}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Margin="0,0,0,8" Padding="12,10" 
+                                        Background="{DynamicResource SubtleFillColorSecondaryBrush}" 
+                                        BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1"
+                                        CornerRadius="8">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+
+                                        <!-- Media Icon / Thumbnail badge -->
+                                        <Border Grid.Column="0" Background="#200078D4" Width="44" Height="44" 
+                                                CornerRadius="6" Margin="0,0,12,0" VerticalAlignment="Center">
+                                            <ui:SymbolIcon Symbol="Video24" FontSize="20" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"/>
+                                        </Border>
+
+                                        <!-- Item Details -->
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" FontSize="14" 
+                                                       TextTrimming="CharacterEllipsis" Margin="0,0,0,3"/>
+                                            <StackPanel Orientation="Horizontal">
+                                                <Border Background="{DynamicResource SubtleFillColorTertiaryBrush}" 
+                                                        CornerRadius="4" Padding="6,1" Margin="0,0,8,0">
+                                                    <TextBlock Text="{Binding SelectedQuality}" FontSize="11" FontWeight="Medium"/>
+                                                </Border>
+                                                <TextBlock Text="{Binding PublisherName}" FontSize="11" Opacity="0.75" Margin="0,0,8,0"/>
+                                                <TextBlock Text="•" FontSize="11" Opacity="0.4" Margin="0,0,8,0"/>
+                                                <TextBlock Text="{Binding FormattedTime}" FontSize="11" Opacity="0.6"/>
+                                            </StackPanel>
+                                        </StackPanel>
+
+                                        <!-- Actions (Open, Show Folder, Delete) -->
+                                        <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                                            <!-- Completed Status Badge -->
+                                            <Border Background="#20107C41" BorderBrush="#40107C41" BorderThickness="1" 
+                                                    CornerRadius="4" Padding="8,3" Margin="0,0,8,0" VerticalAlignment="Center">
+                                                <TextBlock Text="Completed" Foreground="#107C41" FontWeight="Bold" FontSize="11"/>
+                                            </Border>
+
+                                            <!-- Show in Folder Button -->
+                                            <ui:Button Icon="{ui:SymbolIcon Symbol=FolderOpen24}" 
+                                                       ToolTip="Open in File Explorer"
+                                                       Command="{Binding DataContext.ShowInFolderCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                       CommandParameter="{Binding}"
+                                                       Appearance="Secondary" Height="34" Width="36" Padding="0" Margin="0,0,6,0"/>
+
+                                            <!-- Delete from History Button -->
+                                            <ui:Button Icon="{ui:SymbolIcon Symbol=Delete24}" 
+                                                       ToolTip="Delete from History"
+                                                       Command="{Binding DataContext.DeleteHistoryItemCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                       CommandParameter="{Binding}"
+                                                       Appearance="Danger" Height="34" Width="36" Padding="0"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </Grid>
+            </Border>
+        </Grid>
+    </ScrollViewer>
+</UserControl>

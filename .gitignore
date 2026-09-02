@@ -1,0 +1,34 @@
+## Build and Output Folders
+bin/
+obj/
+publish/
+dist/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+## Visual Studio / IDE Files
+.vs/
+.idea/
+.vscode/
+*.DotSettings.user
+_ReSharper*/
+
+## OS Files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+
+## Runtime data and private credentials
+cookies.txt
+*.cookie.txt
+appsettings.Development.json
+*.log
+logs/
+
+## Test Results
+TestResults/
+[Tt]est[Rr]esult*

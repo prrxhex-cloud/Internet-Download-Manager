@@ -1,0 +1,217 @@
+<ui:FluentWindow x:Class="PRRX.IDM.Views.QuickTourWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+        xmlns:converters="clr-namespace:PRRX.IDM.Converters"
+        mc:Ignorable="d"
+        Title="PRRX IDM - Quick Tour &amp; Full Setup Guide" 
+        Icon="/Assets/app_icon.png"
+        Height="580" Width="760"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize"
+        WindowBackdropType="Mica"
+        ExtendsContentIntoTitleBar="True">
+
+    <ui:FluentWindow.Resources>
+        <converters:BoolToVisibilityConverter x:Key="BoolToVis"/>
+        <converters:InverseBoolToVisibilityConverter x:Key="InvBoolToVis"/>
+        <converters:InverseBoolConverter x:Key="InvBool"/>
+    </ui:FluentWindow.Resources>
+
+    <Grid Margin="24,20,24,20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Header Row -->
+        <Grid Grid.Row="0" Margin="0,10,0,16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <Border Background="#200078D4" CornerRadius="8" Padding="6" Margin="0,0,10,0">
+                    <ui:SymbolIcon Symbol="Sparkle24" FontSize="20" Foreground="{DynamicResource SystemAccentColorPrimaryBrush}"/>
+                </Border>
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="Welcome to PRRX IDM" FontSize="18" FontWeight="Bold"/>
+                    <TextBlock Text="Quick setup guide &amp; feature walkthrough" FontSize="11" Opacity="0.7"/>
+                </StackPanel>
+            </StackPanel>
+
+            <ui:Button Grid.Column="1" Content="Skip Tour" Icon="{ui:SymbolIcon Symbol=Dismiss24}"
+                       Appearance="Secondary" Command="{Binding SkipTourCommand}" Height="34"/>
+        </Grid>
+
+        <!-- Main Step Content (Liquid Glass Cards with Transitions) -->
+        <Border Grid.Row="1" Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" 
+                CornerRadius="12" Padding="24" Margin="0,0,0,16"
+                BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+            <Grid>
+                <!-- STEP 1: Fast Video Downloading -->
+                <Grid Visibility="{Binding IsStep1, Converter={StaticResource BoolToVis}}">
+                    <StackPanel VerticalAlignment="Center">
+                        <Border Background="#200078D4" HorizontalAlignment="Center" CornerRadius="30" Width="60" Height="60" Margin="0,0,0,14">
+                            <ui:SymbolIcon Symbol="Video24" FontSize="30" Foreground="{DynamicResource SystemAccentColorPrimaryBrush}"/>
+                        </Border>
+
+                        <TextBlock Text="1. Instant Video Downloading" FontSize="20" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,0,0,6"/>
+                        <TextBlock Text="Download any online video in pristine 1080p Full HD or custom resolutions." 
+                                   FontSize="13" Opacity="0.75" HorizontalAlignment="Center" Margin="0,0,0,16"/>
+
+                        <!-- Visual Tip Cards -->
+                        <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="14" Margin="10,0,10,8">
+                            <StackPanel>
+                                <TextBlock Text="⚡ 16x Turbo Acceleration" FontWeight="Bold" FontSize="13" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" Margin="0,0,0,4"/>
+                                <TextBlock Text="Paste your link from YouTube, TikTok, Twitter/X, Instagram, or Vimeo and click 'Analyze Link' to view rich publisher &amp; musician details." 
+                                           FontSize="12" Opacity="0.85" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="14" Margin="10,0,10,0">
+                            <StackPanel>
+                                <TextBlock Text="🎯 Quality Selection" FontWeight="Bold" FontSize="13" Margin="0,0,0,4"/>
+                                <TextBlock Text="Choose from 1080p Full HD, 720p HD, 480p, or 360p before hitting Download." 
+                                           FontSize="12" Opacity="0.85" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </Grid>
+
+                <!-- STEP 2: YouTube Setup & 30-Second Cookie Export -->
+                <Grid Visibility="{Binding IsStep2, Converter={StaticResource BoolToVis}}">
+                    <StackPanel VerticalAlignment="Center">
+                        <Border Background="#20D83B01" HorizontalAlignment="Center" CornerRadius="30" Width="60" Height="60" Margin="0,0,0,14">
+                            <ui:SymbolIcon Symbol="Key24" FontSize="28" Foreground="#D83B01"/>
+                        </Border>
+
+                        <TextBlock Text="2. YouTube Authentication Setup" FontSize="20" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,0,0,6"/>
+                        <TextBlock Text="Unlock 100% of YouTube videos, 1080p streams, and age-restricted media in 3 easy steps." 
+                                   FontSize="13" Opacity="0.75" HorizontalAlignment="Center" Margin="0,0,0,14"/>
+
+                        <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="14" Margin="10,0,10,6">
+                            <StackPanel>
+                                <TextBlock Text="Step 1: Install Extension" FontWeight="Bold" FontSize="12" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"/>
+                                <TextBlock Text="Install the free extension 'Get cookies.txt LOCALLY' in Chrome, Edge, or Firefox." FontSize="11" Opacity="0.85"/>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="14" Margin="10,0,10,6">
+                            <StackPanel>
+                                <TextBlock Text="Step 2: Click 'Export All Cookies'" FontWeight="Bold" FontSize="12" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"/>
+                                <TextBlock Text="Open YouTube while signed into your account, open the extension, and click the light-blue 'Export All Cookies' button." FontSize="11" Opacity="0.85"/>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="14" Margin="10,0,10,0">
+                            <StackPanel>
+                                <TextBlock Text="Step 3: Save to Application Folder" FontWeight="Bold" FontSize="12" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"/>
+                                <TextBlock Text="Save the file as 'cookies.txt' inside D:\Internet Download Manager\ (or select it under Settings &amp; Updates)." FontSize="11" Opacity="0.85"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </Grid>
+
+                <!-- STEP 3: Audio Converter & Thumbnail Grabber -->
+                <Grid Visibility="{Binding IsStep3, Converter={StaticResource BoolToVis}}">
+                    <StackPanel VerticalAlignment="Center">
+                        <Border Background="#20107C41" HorizontalAlignment="Center" CornerRadius="30" Width="60" Height="60" Margin="0,0,0,14">
+                            <ui:SymbolIcon Symbol="MusicNote224" FontSize="30" Foreground="#107C41"/>
+                        </Border>
+
+                        <TextBlock Text="3. Audio Converter &amp; Thumbnails" FontSize="20" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,0,0,6"/>
+                        <TextBlock Text="Extract studio-quality audio or save maximum-resolution artwork in 1 click." 
+                                   FontSize="13" Opacity="0.75" HorizontalAlignment="Center" Margin="0,0,0,16"/>
+
+                        <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="14" Margin="10,0,10,8">
+                            <StackPanel>
+                                <TextBlock Text="🎵 320 kbps Studio Audio Converter" FontWeight="Bold" FontSize="13" Foreground="#107C41" Margin="0,0,0,4"/>
+                                <TextBlock Text="Convert online video links or local video files (MP4, MKV) directly into crisp 320 kbps MP3 files with embedded metadata." 
+                                           FontSize="12" Opacity="0.85" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="14" Margin="10,0,10,0">
+                            <StackPanel>
+                                <TextBlock Text="🖼️ Ultra HD Thumbnail Grabber" FontWeight="Bold" FontSize="13" Margin="0,0,0,4"/>
+                                <TextBlock Text="Grab Maximum Resolution (1080p), High-Def (720p), or Standard thumbnails instantly." 
+                                           FontSize="12" Opacity="0.85" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </Grid>
+
+                <!-- STEP 4: Liquid Glass UI & Replay Tour -->
+                <Grid Visibility="{Binding IsStep4, Converter={StaticResource BoolToVis}}">
+                    <StackPanel VerticalAlignment="Center">
+                        <Border Background="#208764B8" HorizontalAlignment="Center" CornerRadius="30" Width="60" Height="60" Margin="0,0,0,14">
+                            <ui:SymbolIcon Symbol="PaintBrush24" FontSize="30" Foreground="#8764B8"/>
+                        </Border>
+
+                        <TextBlock Text="4. Liquid Glass UI &amp; Customization" FontSize="20" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,0,0,6"/>
+                        <TextBlock Text="Personalize appearance, transparency blur, and network stream settings anytime." 
+                                   FontSize="13" Opacity="0.75" HorizontalAlignment="Center" Margin="0,0,0,16"/>
+
+                        <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="14" Margin="10,0,10,8">
+                            <StackPanel>
+                                <TextBlock Text="💎 Windows 11 Liquid Glass Slider" FontWeight="Bold" FontSize="13" Foreground="#8764B8" Margin="0,0,0,4"/>
+                                <TextBlock Text="Adjust real-time frosted glass backdrop transparency under Settings &amp; Updates." 
+                                           FontSize="12" Opacity="0.85" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="14" Margin="10,0,10,0">
+                            <StackPanel>
+                                <TextBlock Text="🔄 Replay Tour Anytime" FontWeight="Bold" FontSize="13" Margin="0,0,0,4"/>
+                                <TextBlock Text="You can open this interactive guide again whenever you need from Tab 4 (Settings &amp; Updates)." 
+                                           FontSize="12" Opacity="0.85" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </Grid>
+            </Grid>
+        </Border>
+
+        <!-- Bottom Controls Row -->
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Previous Button -->
+            <ui:Button Grid.Column="0" Content="Previous" Icon="{ui:SymbolIcon Symbol=ArrowLeft24}"
+                       Command="{Binding PrevStepCommand}"
+                       IsEnabled="{Binding IsFirstStep, Converter={StaticResource InvBool}}"
+                       Height="40" Padding="16,0"/>
+
+            <!-- Step Indicator Dots -->
+            <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                <TextBlock Text="{Binding StepIndicatorText}" FontWeight="SemiBold" FontSize="13" Opacity="0.8"/>
+            </StackPanel>
+
+            <!-- Next / Finish Button -->
+            <ui:Button Grid.Column="2" 
+                       Content="Next Step" 
+                       Icon="{ui:SymbolIcon Symbol=ArrowRight24}"
+                       Appearance="Primary" 
+                       Command="{Binding NextStepCommand}"
+                       Visibility="{Binding IsLastStep, Converter={StaticResource InvBoolToVis}}"
+                       Height="40" Padding="20,0"/>
+
+            <ui:Button Grid.Column="2" 
+                       Content="Finish &amp; Start Downloading" 
+                       Icon="{ui:SymbolIcon Symbol=Checkmark24}"
+                       Appearance="Primary" 
+                       Command="{Binding FinishTourCommand}"
+                       Visibility="{Binding IsLastStep, Converter={StaticResource BoolToVis}}"
+                       Height="40" Padding="20,0"/>
+        </Grid>
+    </Grid>
+</ui:FluentWindow>

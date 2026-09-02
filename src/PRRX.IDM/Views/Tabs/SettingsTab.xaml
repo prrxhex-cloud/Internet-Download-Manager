@@ -1,0 +1,318 @@
+<UserControl x:Class="PRRX.IDM.Views.Tabs.SettingsTab"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+             xmlns:converters="clr-namespace:PRRX.IDM.Converters"
+             mc:Ignorable="d" 
+             d:DesignHeight="1200" d:DesignWidth="850">
+    <UserControl.Resources>
+        <converters:BoolToVisibilityConverter x:Key="BoolToVis"/>
+        <converters:InverseBoolToVisibilityConverter x:Key="InvBoolToVis"/>
+        <converters:InverseBoolConverter x:Key="InvBool"/>
+        <converters:FactorToPercentageConverter x:Key="FactorToPercent"/>
+    </UserControl.Resources>
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="24,16,24,24">
+        <StackPanel MaxWidth="800" HorizontalAlignment="Left">
+            <!-- Header -->
+            <StackPanel Margin="0,0,0,20">
+                <TextBlock Text="Settings &amp; Preferences" FontSize="22" FontWeight="SemiBold"/>
+                <TextBlock Text="Customize appearance, Liquid Glass transparency, YouTube authentication, and Turbo download speeds." 
+                           Opacity="0.7" FontSize="13" Margin="0,4,0,0"/>
+            </StackPanel>
+
+            <!-- YouTube Authentication (cookies.txt) Card -->
+            <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" 
+                    CornerRadius="10" Padding="18" Margin="0,0,0,16"
+                    BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+                <StackPanel>
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="YouTube Authentication (cookies.txt)" FontSize="16" FontWeight="SemiBold"/>
+                            <TextBlock Text="Authenticates your Google session to unlock 100% of YouTube videos, 1080p streams, and age-restricted media." 
+                                       Opacity="0.7" FontSize="12" Margin="0,2,0,0"/>
+                        </StackPanel>
+
+                        <!-- Status Badge -->
+                        <Border Grid.Column="1" Background="#20107C41" BorderBrush="#40107C41" BorderThickness="1" 
+                                CornerRadius="6" Padding="8,4" VerticalAlignment="Center"
+                                Visibility="{Binding IsCookiesLoaded, Converter={StaticResource BoolToVis}}">
+                            <StackPanel Orientation="Horizontal">
+                                <ui:SymbolIcon Symbol="CheckmarkCircle24" Foreground="#107C41" Margin="0,0,4,0"/>
+                                <TextBlock Text="Authentication Active" FontWeight="Bold" FontSize="11" Foreground="#107C41"/>
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+
+                    <!-- File Picker Row -->
+                    <Grid Margin="0,4,0,10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <ui:TextBox Text="{Binding CookiesFilePath, Mode=TwoWay}" 
+                                    PlaceholderText="Select your exported cookies.txt file"
+                                    Height="40" Margin="0,0,10,0"/>
+
+                        <ui:Button Grid.Column="1" Content="Browse File" Icon="{ui:SymbolIcon Symbol=DocumentSearch24}" 
+                                   Command="{Binding BrowseCookiesCommand}" Margin="0,0,10,0" Height="40"/>
+
+                        <ui:Button Grid.Column="2" Content="Clear" Icon="{ui:SymbolIcon Symbol=Delete24}" 
+                                   Appearance="Secondary" Command="{Binding ClearCookiesCommand}" Height="40"/>
+                    </Grid>
+
+                    <!-- Active Cookie Location Status -->
+                    <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="6" Padding="10,8" Margin="0,0,0,12">
+                        <StackPanel Orientation="Horizontal">
+                            <ui:SymbolIcon Symbol="Info24" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                            <TextBlock Text="{Binding CookiesStatusDisplay}" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Quick 3-Step Export Guide -->
+                    <Border Background="{DynamicResource SubtleFillColorTertiaryBrush}" CornerRadius="6" Padding="12,10">
+                        <StackPanel>
+                            <TextBlock Text="How to Export cookies.txt in 30 Seconds:" FontWeight="SemiBold" FontSize="12" Margin="0,0,0,4"/>
+                            <TextBlock Text="1. Install the free extension 'Get cookies.txt LOCALLY' in Chrome/Edge/Firefox." FontSize="11" Opacity="0.85" Margin="0,1"/>
+                            <TextBlock Text="2. Go to YouTube while signed into your account and click 'Export All Cookies'." FontSize="11" Opacity="0.85" Margin="0,1"/>
+                            <TextBlock Text="3. Save as 'cookies.txt' and select it above (or save to D:\Internet Download Manager\cookies.txt)." FontSize="11" Opacity="0.85" Margin="0,1"/>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </Border>
+
+            <!-- Quick Tour & Interactive Walkthrough Card -->
+            <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" 
+                    CornerRadius="10" Padding="18" Margin="0,0,0,16"
+                    BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="Quick Guide &amp; Interactive Walkthrough" FontSize="16" FontWeight="SemiBold"/>
+                        <TextBlock Text="Review the 4-step tutorial covering video downloading, YouTube cookies, 320 kbps MP3 conversion, and Liquid Glass UI." 
+                                   Opacity="0.7" FontSize="12" Margin="0,2,0,0"/>
+                    </StackPanel>
+
+                    <ui:Button Grid.Column="1" Content="Replay Quick Tour" Icon="{ui:SymbolIcon Symbol=PlayCircle24}"
+                               Appearance="Secondary" Command="{Binding ReplayQuickTourCommand}" Height="40"/>
+                </Grid>
+            </Border>
+
+            <!-- Direct GitHub Releases API Online Updater (Option 1) -->
+            <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" 
+                    CornerRadius="10" Padding="18" Margin="0,0,0,16"
+                    BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+                <StackPanel>
+                    <Grid Margin="0,0,0,10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel>
+                            <TextBlock Text="GitHub Releases API Auto-Updater" FontSize="16" FontWeight="SemiBold"/>
+                            <TextBlock Text="Queries official GitHub Releases directly for 1-click updates with zero manual manifest files." 
+                                       Opacity="0.7" FontSize="12" Margin="0,2,0,0"/>
+                        </StackPanel>
+
+                        <Border Grid.Column="1" Background="#200078D4" CornerRadius="6" Padding="8,4" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding AppVersion}" FontWeight="Bold" FontSize="11" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"/>
+                        </Border>
+                    </Grid>
+
+                    <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="6" Padding="12,10" Margin="0,0,0,12">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+
+                            <ui:SymbolIcon Symbol="CloudSync24" Margin="0,0,10,0" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="1" Text="{Binding UpdateStatusMessage}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                            <ui:ProgressRing Grid.Column="2" IsIndeterminate="True" Width="20" Height="20" 
+                                             Visibility="{Binding IsCheckingUpdates, Converter={StaticResource BoolToVis}}"/>
+                        </Grid>
+                    </Border>
+
+                    <StackPanel Orientation="Horizontal">
+                        <ui:Button Content="Check GitHub Releases" Icon="{ui:SymbolIcon Symbol=ArrowSync24}"
+                                   Appearance="Primary" Command="{Binding CheckForUpdatesCommand}" 
+                                   IsEnabled="{Binding IsCheckingUpdates, Converter={StaticResource InvBool}}"
+                                   Height="40" Margin="0,0,10,0" Padding="16,0"/>
+
+                        <ui:Button Content="Open GitHub Release" Icon="{ui:SymbolIcon Symbol=Open24}"
+                                   Appearance="Secondary" Command="{Binding OpenLatestReleaseCommand}" 
+                                   Visibility="{Binding IsUpdateAvailable, Converter={StaticResource BoolToVis}}"
+                                   Height="40" Padding="16,0"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- Self-Updating Extraction Engine (Option 2) -->
+            <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" 
+                    CornerRadius="10" Padding="18" Margin="0,0,0,16"
+                    BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+                <StackPanel>
+                    <Grid Margin="0,0,0,10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel>
+                            <TextBlock Text="Media Extraction Engine Auto-Updater (yt-dlp)" FontSize="16" FontWeight="SemiBold"/>
+                            <TextBlock Text="Directly updates online platform extraction algorithms so YouTube and TikTok downloads never break." 
+                                       Opacity="0.7" FontSize="12" Margin="0,2,0,0"/>
+                        </StackPanel>
+
+                        <Border Grid.Column="1" Background="#20107C41" CornerRadius="6" Padding="8,4" VerticalAlignment="Center">
+                            <TextBlock Text="Engine Core: Active" FontWeight="Bold" FontSize="11" Foreground="#107C41"/>
+                        </Border>
+                    </Grid>
+
+                    <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="6" Padding="12,10" Margin="0,0,0,12">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+
+                            <ui:SymbolIcon Symbol="Flash24" Margin="0,0,10,0" VerticalAlignment="Center" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"/>
+                            <TextBlock Grid.Column="1" Text="{Binding EngineStatusMessage}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                            <ui:ProgressRing Grid.Column="2" IsIndeterminate="True" Width="20" Height="20" 
+                                             Visibility="{Binding IsUpdatingEngine, Converter={StaticResource BoolToVis}}"/>
+                        </Grid>
+                    </Border>
+
+                    <ui:Button Content="Update Extraction Engine Now" Icon="{ui:SymbolIcon Symbol=ArrowDownload24}"
+                               Appearance="Secondary" Command="{Binding UpdateEngineCommand}" 
+                               IsEnabled="{Binding IsUpdatingEngine, Converter={StaticResource InvBool}}"
+                               Height="40" Padding="16,0"/>
+                </StackPanel>
+            </Border>
+
+            <!-- Appearance & Liquid Glass Theme Section -->
+            <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" 
+                    CornerRadius="10" Padding="18" Margin="0,0,0,16"
+                    BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+                <StackPanel>
+                    <TextBlock Text="Appearance &amp; Liquid Glass UI" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,12"/>
+
+                    <TextBlock Text="Application Theme" FontWeight="Medium" Margin="0,0,0,8"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
+                        <ui:Button Content="System Default" Icon="{ui:SymbolIcon Symbol=Laptop24}"
+                                   Command="{Binding SetThemeCommand}" CommandParameter="System" 
+                                   Margin="0,0,10,0" Height="40" Padding="16,0"/>
+                        <ui:Button Content="Light Theme" Icon="{ui:SymbolIcon Symbol=WeatherSunny24}"
+                                   Command="{Binding SetThemeCommand}" CommandParameter="Light" 
+                                   Margin="0,0,10,0" Height="40" Padding="16,0"/>
+                        <ui:Button Content="Dark Theme" Icon="{ui:SymbolIcon Symbol=WeatherMoon24}"
+                                   Command="{Binding SetThemeCommand}" CommandParameter="Dark" 
+                                   Height="40" Padding="16,0"/>
+                    </StackPanel>
+
+                    <!-- Windows 11 Liquid Glass Transparency Slider -->
+                    <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="14">
+                        <StackPanel>
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="Liquid Glass Transparency &amp; Mica Blur" FontWeight="SemiBold"/>
+                                    <TextBlock Text="Controls dynamic backdrop transparency level and frosted glass refraction on Windows 11." 
+                                               Opacity="0.7" FontSize="12" Margin="0,2,0,0"/>
+                                </StackPanel>
+                                <TextBlock Grid.Column="1" Text="{Binding TransparencyFactor, Converter={StaticResource FactorToPercent}}" 
+                                           FontWeight="Bold" VerticalAlignment="Center" FontSize="14" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"/>
+                            </Grid>
+
+                            <Slider Minimum="0.20" Maximum="1.0" Value="{Binding TransparencyFactor, Mode=TwoWay}"
+                                    IsEnabled="{Binding IsWin11}" SmallChange="0.05" LargeChange="0.1" Margin="0,4,0,0"/>
+
+                            <TextBlock Text="* Liquid Glass mode requires Windows 11 (Build 22000+) hardware composition." 
+                                       FontSize="11" Foreground="#FF8C00" Margin="0,6,0,0"
+                                       Visibility="{Binding IsWin11, Converter={StaticResource InvBoolToVis}}"/>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </Border>
+
+            <!-- Turbo Multi-Connection Chunk Acceleration Card -->
+            <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" 
+                    CornerRadius="10" Padding="18" Margin="0,0,0,16"
+                    BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+                <StackPanel>
+                    <TextBlock Text="Turbo Download Acceleration (Multi-Threaded Streams)" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                    <TextBlock Text="Splits downloads into parallel concurrent network streams to saturate your internet bandwidth." 
+                               Opacity="0.7" FontSize="12" Margin="0,0,0,14"/>
+
+                    <CheckBox Content="Enable Multi-Connection Turbo Speed Acceleration" 
+                              IsChecked="{Binding EnableTurboAcceleration, Mode=TwoWay}" 
+                              FontWeight="Medium" Margin="0,0,0,12"/>
+
+                    <Grid Margin="0,0,0,6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <TextBlock Text="Parallel Connection Streams:" VerticalAlignment="Center" FontWeight="Medium" Margin="0,0,12,0"/>
+                        <ComboBox Grid.Column="1" ItemsSource="{Binding AvailableStreamCounts}" 
+                                  SelectedItem="{Binding TurboConnectionCount, Mode=TwoWay}" 
+                                  IsEnabled="{Binding EnableTurboAcceleration}" Height="38"/>
+                    </Grid>
+                    <TextBlock Text="Recommended: 16 streams for optimal balance between network throughput and low CPU usage." 
+                               FontSize="11" Opacity="0.6"/>
+                </StackPanel>
+            </Border>
+
+            <!-- Storage & Downloads Location Card -->
+            <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" 
+                    CornerRadius="10" Padding="18" Margin="0,0,0,16"
+                    BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+                <StackPanel>
+                    <TextBlock Text="Storage &amp; Downloads" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,12"/>
+                    <TextBlock Text="Default Save Location" FontWeight="Medium" Margin="0,0,0,8"/>
+
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <ui:TextBox Text="{Binding DownloadDirectory, Mode=TwoWay}" Height="40" Margin="0,0,10,0"/>
+                        <ui:Button Grid.Column="1" Content="Change Folder" Icon="{ui:SymbolIcon Symbol=FolderSearch24}" 
+                                   Command="{Binding BrowseFolderCommand}" Height="40"/>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- Company Info & Branding -->
+            <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" 
+                    CornerRadius="10" Padding="18"
+                    BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+                <StackPanel>
+                    <TextBlock Text="PRRX Internet Download Manager" FontWeight="Bold" FontSize="15"/>
+                    <TextBlock Text="Developed by PRRX Cooperation. Designed for Windows 10 &amp; 11." Opacity="0.8" FontSize="12" Margin="0,4,0,2"/>
+                    <TextBlock Text="All rights reserved. Secure client-side processing." Opacity="0.6" FontSize="11"/>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

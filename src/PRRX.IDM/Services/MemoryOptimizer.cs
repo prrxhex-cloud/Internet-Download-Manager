@@ -1,0 +1,83 @@
+using System;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Threading;
+
+namespace PRRX.IDM.Services
+{
+    public static class MemoryOptimizer
+    {
+        [DllImport("psapi.dll")]
+        private static extern bool EmptyWorkingSet(IntPtr hProcess);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool SetProcessWorkingSetSize(IntPtr hProcess, IntPtr dwMinimumWorkingSetSize, IntPtr dwMaximumWorkingSetSize);
+
+        private static DispatcherTimer? _idleTrimTimer;
+
+        /// <summary>
+        /// Start automatic periodic background memory trimmer when idle
+        /// </summary>
+        public static void InitializeAutoTrimmer()
+        {
+            if (_idleTrimTimer != null) return;
+
+            _idleTrimTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromSeconds(15)
+            };
+            _idleTrimTimer.Tick += (_, _) =>
+            {
+                TrimMemory();
+            };
+            _idleTrimTimer.Start();
+        }
+
+        public static void HookWindow(Window window)
+        {
+            window.Loaded += (_, _) =>
+            {
+                Task.Delay(800).ContinueWith(_ => TrimMemory());
+            };
+
+            window.StateChanged += (_, _) =>
+            {
+                if (window.WindowState == WindowState.Minimized)
+                {
+                    TrimMemory();
+                }
+            };
+
+            window.Deactivated += (_, _) =>
+            {
+                Task.Delay(1000).ContinueWith(_ => TrimMemory());
+            };
+        }
+
+        /// <summary>
+        /// Aggressively collect garbage, compact LOH, and flush unused working set memory to OS
+        /// </summary>
+        public static void TrimMemory()
+        {
+            Task.Run(() =>
+            {
+                try
+                {
+                    GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+                    GC.WaitForPendingFinalizers();
+                    GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+
+                    var handle = Process.GetCurrentProcess().Handle;
+                    EmptyWorkingSet(handle);
+                    SetProcessWorkingSetSize(handle, new IntPtr(-1), new IntPtr(-1));
+                }
+                catch
+                {
+                    // Silent fallback
+                }
+            });
+        }
+    }
+}
