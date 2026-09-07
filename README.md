@@ -11,7 +11,7 @@
 <p align="center">
   <a href="#"><img src="https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011%20(x64)-0078D4?logo=windows" alt="Windows"/></a>
   <a href="#"><img src="https://img.shields.io/badge/.NET-8.0%20WPF-512BD4?logo=dotnet" alt=".NET 8"/></a>
-  <a href="#"><img src="https://img.shields.io/badge/Version-1.0.0-107C41" alt="Version"/></a>
+  <a href="#"><img src="https://img.shields.io/badge/Version-1.0.1-107C41" alt="Version"/></a>
   <a href="#"><img src="https://img.shields.io/badge/RAM%20Footprint-~20%20MB%20Idle-brightgreen" alt="Memory"/></a>
   <a href="#"><img src="https://img.shields.io/badge/License-MIT-blue" alt="License"/></a>
 </p>
