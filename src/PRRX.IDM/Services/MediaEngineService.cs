@@ -27,6 +27,7 @@ namespace PRRX.IDM.Services
     {
         string EngineExecutablePath { get; }
         string? FfmpegDirectoryPath { get; }
+        string? Aria2cExecutablePath { get; }
         string? ActiveCookiesPath { get; }
         bool IsCookiesConfigured { get; }
         bool IsEngineAvailable { get; }
@@ -60,10 +61,16 @@ namespace PRRX.IDM.Services
             @"\[download\]\s+(\d+(?:\.\d+)?)%\s+of\s+(?:~\s*)?(\S+)\s+at\s+(\S+)\s+ETA\s+(\S+)",
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
+        private static readonly Regex Aria2ProgressRegex = new(
+            @"\[#[a-f0-9]+\s+(\S+)\/(\S+)\((\d+)%\).*?DL:(\S+)(?:.*?ETA:(\S+))?\]",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
         private readonly IConfigurationService? _configService;
+        private string _lastNonZeroSpeed = "Calculating...";
 
         public string EngineExecutablePath { get; private set; }
         public string? FfmpegDirectoryPath { get; private set; }
+        public string? Aria2cExecutablePath { get; private set; }
 
         public string? ActiveCookiesPath => ResolveCookiesPath();
         public bool IsCookiesConfigured => !string.IsNullOrWhiteSpace(ActiveCookiesPath);
@@ -105,6 +112,23 @@ namespace PRRX.IDM.Services
             else
             {
                 FfmpegDirectoryPath = null;
+            }
+
+            // Locate Aria2c
+            var localAria2 = Path.Combine(baseAppDir, "bin", "aria2c.exe");
+            var devAria2 = @"D:\Internet Download Manager\bin\aria2c.exe";
+
+            if (File.Exists(localAria2))
+            {
+                Aria2cExecutablePath = localAria2;
+            }
+            else if (File.Exists(devAria2))
+            {
+                Aria2cExecutablePath = devAria2;
+            }
+            else
+            {
+                Aria2cExecutablePath = null;
             }
         }
 
@@ -167,22 +191,31 @@ namespace PRRX.IDM.Services
                 startInfo.ArgumentList.Add(cookies);
             }
 
-            // High-speed native multi-fragment parallel downloader with network buffer acceleration
-            var connections = Math.Clamp(_configService?.CurrentConfig.TurboConnectionCount ?? 32, 4, 32);
+            // High-speed parallel chunk extraction with anti-stall socket configuration
+            var connections = Math.Clamp(_configService?.CurrentConfig.TurboConnectionCount ?? 16, 4, 32);
             startInfo.ArgumentList.Add("--concurrent-fragments");
             startInfo.ArgumentList.Add(connections.ToString());
 
-            // High throughput network streaming with low-memory footprint
+            // Anti-freeze & Anti-stall streaming optimizations
+            startInfo.ArgumentList.Add("--throttled-rate");
+            startInfo.ArgumentList.Add("100K"); // Auto-drops any CDN connection that stalls below 100 KB/s and restarts it instantly
+
+            startInfo.ArgumentList.Add("--hls-use-mpegts"); // Seamless fragment demuxing without MP4 container lock delays
+            startInfo.ArgumentList.Add("--no-part"); // Direct streaming into destination without locking .part files
+            startInfo.ArgumentList.Add("--file-allocation");
+            startInfo.ArgumentList.Add("none"); // Eliminates Windows file-allocation pauses
+
             startInfo.ArgumentList.Add("--buffer-size");
             startInfo.ArgumentList.Add("2M");
             startInfo.ArgumentList.Add("--http-chunk-size");
-            startInfo.ArgumentList.Add("4M");
-            startInfo.ArgumentList.Add("--retries");
-            startInfo.ArgumentList.Add("5");
-            startInfo.ArgumentList.Add("--fragment-retries");
-            startInfo.ArgumentList.Add("5");
+            startInfo.ArgumentList.Add("5M");
+
             startInfo.ArgumentList.Add("--socket-timeout");
-            startInfo.ArgumentList.Add("20");
+            startInfo.ArgumentList.Add("5"); // Fast 5s timeout fails hung sockets immediately and recovers
+            startInfo.ArgumentList.Add("--retries");
+            startInfo.ArgumentList.Add("10");
+            startInfo.ArgumentList.Add("--fragment-retries");
+            startInfo.ArgumentList.Add("10");
         }
 
         public async Task<(MediaProbeResult? Result, string? ErrorMessage)> ProbeMediaAsync(string url, CancellationToken cancellationToken = default)
@@ -311,6 +344,7 @@ namespace PRRX.IDM.Services
                 result.Formats.Add(new MediaFormat { FormatId = "bestvideo[height<=240]+bestaudio/best[height<=240]/best", Resolution = "240p", Extension = "mp4", EstimatedSizeFormatted = $"~ {(baseDur * 0.25 / 8.0):F1} MB", HasVideo = true, HasAudio = true });
                 result.Formats.Add(new MediaFormat { FormatId = "bestvideo[height<=144]+bestaudio/best[height<=144]/best", Resolution = "144p", Extension = "mp4", EstimatedSizeFormatted = $"~ {(baseDur * 0.12 / 8.0):F1} MB", HasVideo = true, HasAudio = true });
 
+                MemoryOptimizer.TrimMemory();
                 return (result, null);
             }
             catch (Exception ex)
@@ -366,12 +400,14 @@ namespace PRRX.IDM.Services
             startInfo.ArgumentList.Add("--newline");
             startInfo.ArgumentList.Add("--no-playlist");
 
-            // Attach cookies and native multi-fragment parallel acceleration
+            // Attach anti-stall parameters
             AttachCommonArguments(startInfo);
 
             startInfo.ArgumentList.Add("-o");
             startInfo.ArgumentList.Add(outputTemplate);
             startInfo.ArgumentList.Add(safeUrl);
+
+            _lastNonZeroSpeed = "Calculating...";
 
             using var process = new Process { StartInfo = startInfo };
             process.OutputDataReceived += (_, e) =>
@@ -398,6 +434,7 @@ namespace PRRX.IDM.Services
             process.BeginErrorReadLine();
 
             await process.WaitForExitAsync(cancellationToken);
+            MemoryOptimizer.TrimMemory();
             return process.ExitCode == 0;
         }
 
@@ -428,10 +465,10 @@ namespace PRRX.IDM.Services
                 ? Path.Combine(FfmpegDirectoryPath, "ffmpeg.exe") 
                 : "ffmpeg.exe";
 
-            // If it's a local file and ffmpeg exists, use direct ffmpeg for 10x instant speed
+            // If it's a local file and ffmpeg exists, use direct ffmpeg for instant conversion
             if (isLocalFile && File.Exists(ffmpegExe))
             {
-                return await ConvertLocalFileWithFfmpegAsync(
+                var localSuccess = await ConvertLocalFileWithFfmpegAsync(
                     ffmpegExe,
                     sourceUrlOrPath,
                     normalizedFormat,
@@ -440,6 +477,9 @@ namespace PRRX.IDM.Services
                     trimRingtone,
                     progress,
                     cancellationToken);
+
+                MemoryOptimizer.TrimMemory();
+                return localSuccess;
             }
 
             // Otherwise, use yt-dlp to extract online stream or convert
@@ -486,6 +526,8 @@ namespace PRRX.IDM.Services
                 }
                 startInfo.ArgumentList.Add(safeUrl);
             }
+
+            _lastNonZeroSpeed = "Calculating...";
 
             using var process = new Process { StartInfo = startInfo };
             process.OutputDataReceived += (_, e) =>
@@ -537,6 +579,7 @@ namespace PRRX.IDM.Services
                 }
             }
 
+            MemoryOptimizer.TrimMemory();
             return process.ExitCode == 0;
         }
 
@@ -661,6 +704,7 @@ namespace PRRX.IDM.Services
             progress?.Report(new DownloadProgressReport
             {
                 Percentage = 50.0,
+                Speed = "Turbo Encoder",
                 StatusMessage = $"Encoding high-performance {targetFormat.ToUpperInvariant()} audio..."
             });
 
@@ -686,29 +730,74 @@ namespace PRRX.IDM.Services
         {
             if (progress == null) return;
 
+            // 1. Check Standard YTDL Progress
             var match = YtdlProgressRegex.Match(line);
             if (match.Success)
             {
-                if (double.TryParse(match.Groups[1].Value, out var percent))
+                if (double.TryParse(match.Groups[1].Value, NumberStyles.Any, CultureInfo.InvariantCulture, out var percent))
                 {
+                    var rawSpeed = match.Groups[3].Value;
+                    if (!rawSpeed.StartsWith("0", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(rawSpeed))
+                    {
+                        _lastNonZeroSpeed = rawSpeed;
+                    }
+
+                    var speedToDisplay = rawSpeed.StartsWith("0", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(_lastNonZeroSpeed)
+                        ? _lastNonZeroSpeed
+                        : rawSpeed;
+
                     progress.Report(new DownloadProgressReport
                     {
                         Percentage = percent,
                         TotalSize = match.Groups[2].Value,
-                        Speed = match.Groups[3].Value,
+                        Speed = speedToDisplay,
                         Eta = match.Groups[4].Value,
-                        StatusMessage = $"Downloading: {percent:F1}% @ {match.Groups[3].Value}"
+                        StatusMessage = $"Downloading: {percent:F1}% @ {speedToDisplay}"
                     });
                     return;
                 }
             }
 
-            if (line.Contains("[ExtractAudio]", StringComparison.OrdinalIgnoreCase) || line.Contains("[FixupM3u8]", StringComparison.OrdinalIgnoreCase))
+            // 2. Check Aria2c Progress
+            var ariaMatch = Aria2ProgressRegex.Match(line);
+            if (ariaMatch.Success)
+            {
+                if (double.TryParse(ariaMatch.Groups[3].Value, NumberStyles.Any, CultureInfo.InvariantCulture, out var percent))
+                {
+                    var speed = ariaMatch.Groups[4].Value;
+                    if (!string.IsNullOrWhiteSpace(speed)) _lastNonZeroSpeed = speed;
+
+                    progress.Report(new DownloadProgressReport
+                    {
+                        Percentage = percent,
+                        TotalSize = ariaMatch.Groups[2].Value,
+                        Speed = speed,
+                        Eta = ariaMatch.Groups[5].Success ? ariaMatch.Groups[5].Value : "--:--",
+                        StatusMessage = $"Turbo Segmenting: {percent:F1}% @ {speed}"
+                    });
+                    return;
+                }
+            }
+
+            // 3. Status handling during multiplexing / format merging
+            if (line.Contains("[Merger]", StringComparison.OrdinalIgnoreCase) || line.Contains("Merging formats", StringComparison.OrdinalIgnoreCase))
             {
                 progress.Report(new DownloadProgressReport
                 {
-                    Percentage = 95.0,
-                    StatusMessage = "Encoding high-fidelity audio stream..."
+                    Percentage = 98.0,
+                    Speed = _lastNonZeroSpeed,
+                    Eta = "00:01",
+                    StatusMessage = "⚡ Turbo Multiplexing video and audio streams with FFmpeg (Finalizing)..."
+                });
+            }
+            else if (line.Contains("[ExtractAudio]", StringComparison.OrdinalIgnoreCase) || line.Contains("[FixupM3u8]", StringComparison.OrdinalIgnoreCase))
+            {
+                progress.Report(new DownloadProgressReport
+                {
+                    Percentage = 96.0,
+                    Speed = _lastNonZeroSpeed,
+                    Eta = "00:01",
+                    StatusMessage = "⚡ Transcoding pristine high-fidelity audio stream..."
                 });
             }
         }
