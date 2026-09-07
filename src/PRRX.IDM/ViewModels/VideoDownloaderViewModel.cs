@@ -103,6 +103,7 @@ namespace PRRX.IDM.ViewModels
         public ICommand StartDownloadCommand { get; }
         public ICommand CancelDownloadCommand { get; }
         public ICommand OpenDownloadsFolderCommand { get; }
+        public ICommand OpenInspectorCommand { get; }
         public ICommand PlayFileCommand { get; }
         public ICommand ShowInFolderCommand { get; }
         public ICommand DeleteHistoryItemCommand { get; }
@@ -139,6 +140,27 @@ namespace PRRX.IDM.ViewModels
             StartDownloadCommand = new AsyncRelayCommand(StartDownloadAsync, () => !IsDownloading);
             CancelDownloadCommand = new RelayCommand(CancelDownload, () => IsDownloading);
             OpenDownloadsFolderCommand = new RelayCommand(OpenDownloadsFolder);
+
+            OpenInspectorCommand = new RelayCommand(() =>
+            {
+                if (string.IsNullOrWhiteSpace(InputUrl)) return;
+                var targetDir = !string.IsNullOrWhiteSpace(_configService?.CurrentConfig.DownloadDirectory)
+                    ? _configService.CurrentConfig.DownloadDirectory
+                    : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+
+                var vm = new DownloadFileInfoViewModel(InputUrl, targetDir);
+                var dlg = new Views.DownloadFileInfoDialog(vm);
+                dlg.Show();
+                dlg.Closed += (_, _) =>
+                {
+                    if (vm.DialogResult == DownloadDialogResult.StartNow)
+                    {
+                        var activeVm = new ActiveDownloadViewModel(vm.Url, vm.SaveAsFullPath);
+                        var activeWin = new Views.ActiveDownloadWindow(activeVm);
+                        activeWin.Show();
+                    }
+                };
+            });
 
             PlayFileCommand = new RelayCommand(param =>
             {

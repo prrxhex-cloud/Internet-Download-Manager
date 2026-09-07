@@ -178,6 +178,13 @@ namespace PRRX.IDM.ViewModels
             set => SetProperty(ref _engineStatusMessage, value);
         }
 
+        private string _browserStatusMessage = "Ready to install / link Chrome & Edge extension.";
+        public string BrowserStatusMessage
+        {
+            get => _browserStatusMessage;
+            set => SetProperty(ref _browserStatusMessage, value);
+        }
+
         public ICommand BrowseFolderCommand { get; }
         public ICommand BrowseCookiesCommand { get; }
         public ICommand ClearCookiesCommand { get; }
@@ -186,6 +193,8 @@ namespace PRRX.IDM.ViewModels
         public ICommand UpdateEngineCommand { get; }
         public ICommand SetThemeCommand { get; }
         public ICommand ReplayQuickTourCommand { get; }
+        public ICommand InstallBrowserExtensionCommand { get; }
+        public ICommand OpenExtensionFolderCommand { get; }
 
         public SettingsViewModel(
             IConfigurationService configService,
@@ -304,6 +313,33 @@ namespace PRRX.IDM.ViewModels
                 var tourWindow = new QuickTourWindow(tourVm);
                 _themeService.ApplyTheme(_configService.CurrentConfig.ThemeMode, tourWindow);
                 tourWindow.ShowDialog();
+            });
+
+            InstallBrowserExtensionCommand = new RelayCommand(() =>
+            {
+                var browserService = new BrowserIntegrationService(_configService);
+                bool ok = browserService.RegisterBrowserHost();
+                BrowserStatusMessage = ok 
+                    ? "✓ Successfully registered Native Messaging Host for Chrome and Microsoft Edge!" 
+                    : "Warning: Could not write Registry keys. Run PRRX IDM once as Administrator.";
+            });
+
+            OpenExtensionFolderCommand = new RelayCommand(() =>
+            {
+                var baseAppDir = AppDomain.CurrentDomain.BaseDirectory;
+                var extDir = Path.Combine(baseAppDir, "extension");
+                var devExtDir = @"D:\Internet Download Manager\extension";
+
+                var target = Directory.Exists(extDir) ? extDir : devExtDir;
+                if (Directory.Exists(target))
+                {
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = "explorer.exe",
+                        Arguments = $"\"{target}\"",
+                        UseShellExecute = true
+                    });
+                }
             });
         }
 

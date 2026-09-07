@@ -173,4 +173,95 @@ namespace PRRX.IDM.Models
         [JsonPropertyName("isMandatory")]
         public bool IsMandatory { get; set; } = false;
     }
+
+    public enum FileCategory
+    {
+        General,
+        Programs,
+        Compressed,
+        Video,
+        Music,
+        Documents
+    }
+
+    public static class FileCategoryHelper
+    {
+        public static FileCategory DetectCategory(string fileNameOrUrl)
+        {
+            if (string.IsNullOrWhiteSpace(fileNameOrUrl)) return FileCategory.General;
+
+            var clean = fileNameOrUrl.Split('?')[0].Split('#')[0];
+            var ext = System.IO.Path.GetExtension(clean).ToLowerInvariant();
+
+            return ext switch
+            {
+                ".exe" or ".msi" or ".bat" or ".cmd" or ".apk" or ".appx" => FileCategory.Programs,
+                ".zip" or ".rar" or ".7z" or ".tar" or ".gz" or ".iso" or ".bz2" or ".xz" => FileCategory.Compressed,
+                ".mp4" or ".mkv" or ".avi" or ".mov" or ".webm" or ".flv" or ".wmv" or ".m4v" => FileCategory.Video,
+                ".mp3" or ".wav" or ".flac" or ".m4a" or ".m4r" or ".ogg" or ".aac" or ".opus" or ".wma" or ".amr" => FileCategory.Music,
+                ".pdf" or ".doc" or ".docx" or ".xls" or ".xlsx" or ".ppt" or ".pptx" or ".txt" or ".epub" => FileCategory.Documents,
+                _ => FileCategory.General
+            };
+        }
+    }
+
+    public enum CompletionAction
+    {
+        None = 0,
+        ShowDialog = 1,
+        ExitApplication = 2,
+        SleepComputer = 3,
+        ShutdownComputer = 4,
+        RestartComputer = 5
+    }
+
+    public class DownloadConnectionThread
+    {
+        public int ThreadId { get; set; }
+        public long StartByte { get; set; }
+        public long EndByte { get; set; }
+        public long CurrentByte { get; set; }
+        public long DownloadedBytes { get; set; }
+        public string FormattedDownloaded { get; set; } = "0 KB";
+        public string StatusInfo { get; set; } = "Connecting...";
+        public double ProgressPercentage { get; set; } = 0.0;
+        public bool IsActive { get; set; } = true;
+    }
+
+    public class SpeedLimiterSettings
+    {
+        public bool IsEnabled { get; set; } = false;
+        public int MaxSpeedKbps { get; set; } = 1024;
+        public bool RememberSettings { get; set; } = true;
+    }
+
+    public class DownloadFileInfoRequest
+    {
+        public string Url { get; set; } = string.Empty;
+        public string FileName { get; set; } = string.Empty;
+        public FileCategory Category { get; set; } = FileCategory.General;
+        public string SaveDirectory { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public long TotalSizeBytes { get; set; }
+        public string FormattedSize { get; set; } = "Unknown Size";
+        public bool StartImmediately { get; set; } = true;
+    }
+
+    public class BatchLinkItem
+    {
+        public bool IsSelected { get; set; } = true;
+        public string Url { get; set; } = string.Empty;
+        public string FileName { get; set; } = string.Empty;
+        public string Extension { get; set; } = string.Empty;
+        public string FileSizeFormatted { get; set; } = "Pending...";
+        public string LinkText { get; set; } = string.Empty;
+        public FileCategory Category { get; set; } = FileCategory.General;
+    }
+
+    public class BatchDownloadRequest
+    {
+        public string SourcePageUrl { get; set; } = string.Empty;
+        public string PageTitle { get; set; } = "Web Page";
+        public List<BatchLinkItem> Links { get; set; } = new();
+    }
 }

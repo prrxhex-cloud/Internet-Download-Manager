@@ -20,6 +20,7 @@ namespace PRRX.IDM
         private IThumbnailService? _thumbnailService;
         private IUpdateService? _updateService;
         private IHistoryService? _historyService;
+        private IBrowserIntegrationService? _browserService;
 
         static App()
         {
@@ -39,6 +40,14 @@ namespace PRRX.IDM
 
         protected override void OnStartup(StartupEventArgs e)
         {
+            // 1. Check if invoked by Chrome or Edge as Native Messaging Host
+            if (e.Args.Length > 0 && (e.Args[0].StartsWith("chrome-extension://", StringComparison.OrdinalIgnoreCase) || e.Args[0] == "--native-messaging-host"))
+            {
+                RunNativeMessagingMode();
+                Shutdown(0);
+                return;
+            }
+
             // Prevent silent shutdown when dialogs close
             ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
@@ -56,6 +65,11 @@ namespace PRRX.IDM
                 _thumbnailService = new ThumbnailService();
                 _updateService = new UpdateService();
                 _historyService = new HistoryService();
+                _browserService = new BrowserIntegrationService(_configService);
+
+                // Auto-register Chrome and Edge Native Messaging and start IPC listener
+                _browserService.RegisterBrowserHost();
+                _browserService.StartIpcServer();
 
                 // Initial global theme application
                 _themeService.ApplyTheme(_configService.CurrentConfig.ThemeMode);
@@ -145,6 +159,67 @@ namespace PRRX.IDM
                     "PRRX IDM Critical Error",
                     MessageBoxButton.OK,
                     MessageBoxImage.Error);
+            }
+        }
+
+        private static void RunNativeMessagingMode()
+        {
+            try
+            {
+                using var stdin = Console.OpenStandardInput();
+                using var stdout = Console.OpenStandardOutput();
+
+                var lengthBuffer = new byte[4];
+                if (stdin.Read(lengthBuffer, 0, 4) < 4) return;
+
+                int messageLength = BitConverter.ToInt32(lengthBuffer, 0);
+                if (messageLength <= 0 || messageLength > 10 * 1024 * 1024) return;
+
+                var messageBuffer = new byte[messageLength];
+                int totalRead = 0;
+                while (totalRead < messageLength)
+                {
+                    int read = stdin.Read(messageBuffer, totalRead, messageLength - totalRead);
+                    if (read <= 0) break;
+                    totalRead += read;
+                }
+
+                var json = System.Text.Encoding.UTF8.GetString(messageBuffer, 0, totalRead);
+
+                // Forward to local IPC Pipe Server
+                try
+                {
+                    using var pipeClient = new System.IO.Pipes.NamedPipeClientStream(".", BrowserIntegrationService.PipeName, System.IO.Pipes.PipeDirection.Out);
+                    pipeClient.Connect(1500);
+                    using var writer = new StreamWriter(pipeClient, System.Text.Encoding.UTF8);
+                    writer.Write(json);
+                    writer.Flush();
+                }
+                catch
+                {
+                    // Main app not running - launch main process
+                    var appExe = System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
+                    if (!string.IsNullOrWhiteSpace(appExe))
+                    {
+                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                        {
+                            FileName = appExe,
+                            UseShellExecute = true
+                        });
+                    }
+                }
+
+                // Send OK acknowledgement to browser
+                var responseJson = "{\"status\":\"ok\"}";
+                var responseBytes = System.Text.Encoding.UTF8.GetBytes(responseJson);
+                var responseLen = BitConverter.GetBytes(responseBytes.Length);
+                stdout.Write(responseLen, 0, 4);
+                stdout.Write(responseBytes, 0, responseBytes.Length);
+                stdout.Flush();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Native messaging error: {ex.Message}");
             }
         }
     }

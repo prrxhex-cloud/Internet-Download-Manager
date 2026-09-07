@@ -79,9 +79,16 @@
                                   SelectedItem="{Binding SelectedFormat}"
                                   DisplayMemberPath="DisplayLabel" Height="38" Margin="0,0,12,0"/>
 
-                        <ui:Button Grid.Column="2" Content="Download Video (Turbo)" Icon="{ui:SymbolIcon Symbol=ArrowDownload24}"
-                                   Appearance="Primary" Command="{Binding StartDownloadCommand}"
-                                   IsEnabled="{Binding IsDownloading, Converter={StaticResource InvBool}}" Height="38" Padding="20,0"/>
+                        <StackPanel Grid.Column="2" Orientation="Horizontal">
+                            <ui:Button Content="Download (Turbo)" Icon="{ui:SymbolIcon Symbol=ArrowDownload24}"
+                                       Appearance="Primary" Command="{Binding StartDownloadCommand}"
+                                       IsEnabled="{Binding IsDownloading, Converter={StaticResource InvBool}}" Height="38" Padding="16,0" Margin="0,0,8,0"/>
+
+                            <ui:Button Content="⚡ IDM Inspector" Icon="{ui:SymbolIcon Symbol=DeveloperBoard24}"
+                                       Appearance="Secondary" Command="{Binding OpenInspectorCommand}"
+                                       ToolTip="Open Classic IDM Active Window with Dynamic Segment Visualizer &amp; Speed Limiter"
+                                       Height="38" Padding="14,0"/>
+                        </StackPanel>
                     </Grid>
                 </StackPanel>
             </Border>
