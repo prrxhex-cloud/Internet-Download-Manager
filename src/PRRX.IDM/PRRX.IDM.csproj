@@ -12,8 +12,8 @@
     <Product>PRRX Internet Download Manager</Product>
     <Description>High-performance Windows Internet Download Manager</Description>
     <Copyright>Copyright © 2026 PRRX Cooperation</Copyright>
-    <AssemblyVersion>1.0.1.0</AssemblyVersion>
-    <FileVersion>1.0.1.0</FileVersion>
+    <AssemblyVersion>1.1.0.0</AssemblyVersion>
+    <FileVersion>1.1.0.0</FileVersion>
     
     <!-- Application Icon -->
     <ApplicationIcon>Assets\app_icon.ico</ApplicationIcon>

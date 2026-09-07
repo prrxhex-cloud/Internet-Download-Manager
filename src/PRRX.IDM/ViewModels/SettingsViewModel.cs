@@ -214,7 +214,7 @@ namespace PRRX.IDM.ViewModels
             _enableTurboAcceleration = _configService.CurrentConfig.EnableTurboAcceleration;
             _turboConnectionCount = _configService.CurrentConfig.TurboConnectionCount;
             _isWin11 = _themeService.IsWindows11;
-            _appVersion = "v1.0.0 (Official Release)";
+            _appVersion = "v1.1.0 (Official Release)";
 
             UpdateCookiesStatus();
 
