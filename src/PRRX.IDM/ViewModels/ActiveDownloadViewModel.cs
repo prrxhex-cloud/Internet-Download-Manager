@@ -81,7 +81,20 @@ namespace PRRX.IDM.ViewModels
         }
 
         public string PauseButtonText => IsPaused ? "Resume" : "Pause";
-        public bool IsCompleted { get => _isCompleted; set => SetProperty(ref _isCompleted, value); }
+        
+        public bool IsCompleted
+        {
+            get => _isCompleted;
+            set
+            {
+                if (SetProperty(ref _isCompleted, value))
+                {
+                    OnPropertyChanged(nameof(CancelButtonText));
+                }
+            }
+        }
+
+        public string CancelButtonText => IsCompleted ? "Close" : "Cancel";
 
         // Speed Limiter Bindings
         public bool UseSpeedLimiter
@@ -167,7 +180,10 @@ namespace PRRX.IDM.ViewModels
 
             CancelCommand = new RelayCommand(_ =>
             {
-                _downloadEngine.Cancel();
+                if (!IsCompleted)
+                {
+                    _downloadEngine.Cancel();
+                }
                 RequestClose?.Invoke();
             });
 
@@ -200,13 +216,15 @@ namespace PRRX.IDM.ViewModels
 
         public void Start()
         {
-            _downloadEngine.StartDownloadAsync(Url, DestinationFilePath, 16);
+            _downloadEngine.StartDownloadAsync(Url, DestinationFilePath, 0);
         }
 
         private void OnEngineProgressChanged(object? sender, SegmentProgressEventArgs e)
         {
-            App.Current?.Dispatcher.Invoke(() =>
+            DispatchToUi(() =>
             {
+                if (IsCompleted) return;
+
                 OverallPercentage = e.OverallPercentage;
                 TotalBytes = e.TotalBytes > 0 ? e.TotalBytes : 1;
                 FileSizeFormatted = FormatBytes(e.TotalBytes);
@@ -216,23 +234,55 @@ namespace PRRX.IDM.ViewModels
                 StatusText = e.StatusMessage;
                 ResumeCapability = e.IsResumeSupported ? "Yes" : "No";
 
-                ConnectionThreads.Clear();
-                foreach (var t in e.Threads)
+                if (ConnectionThreads.Count != e.Threads.Count)
                 {
-                    ConnectionThreads.Add(t);
+                    ConnectionThreads.Clear();
+                    foreach (var t in e.Threads)
+                    {
+                        ConnectionThreads.Add(t);
+                    }
+                }
+                else
+                {
+                    for (int i = 0; i < e.Threads.Count; i++)
+                    {
+                        var src = e.Threads[i];
+                        var dst = ConnectionThreads[i];
+                        dst.StartByte = src.StartByte;
+                        dst.EndByte = src.EndByte;
+                        dst.CurrentByte = src.CurrentByte;
+                        dst.DownloadedBytes = src.DownloadedBytes;
+                        dst.FormattedDownloaded = src.FormattedDownloaded;
+                        dst.StatusInfo = src.StatusInfo;
+                        dst.ProgressPercentage = src.ProgressPercentage;
+                        dst.IsActive = src.IsActive;
+                    }
                 }
             });
         }
 
         private void OnEngineDownloadCompleted(object? sender, string finalPath)
         {
-            App.Current?.Dispatcher.Invoke(() =>
+            DispatchToUi(() =>
             {
                 IsCompleted = true;
-                StatusText = "Download Complete!";
+                StatusText = "Complete - Downloaded successfully";
                 OverallPercentage = 100.0;
                 TransferRateFormatted = "Finished";
                 TimeLeftFormatted = "00:00";
+                DownloadedFormatted = $"{FileSizeFormatted} ( 100.00 % )";
+
+                foreach (var t in ConnectionThreads)
+                {
+                    t.IsActive = false;
+                    t.ProgressPercentage = 100.0;
+                    t.StatusInfo = "Complete";
+                    if (t.EndByte >= t.StartByte && t.StartByte >= 0)
+                    {
+                        t.DownloadedBytes = Math.Max(t.DownloadedBytes, t.EndByte - t.StartByte + 1);
+                    }
+                    t.FormattedDownloaded = FormatBytes(t.DownloadedBytes);
+                }
 
                 // Post-download automation check
                 if (ShutdownWhenDone)
@@ -248,7 +298,7 @@ namespace PRRX.IDM.ViewModels
 
         private void OnEngineDownloadFailed(object? sender, string error)
         {
-            App.Current?.Dispatcher.Invoke(() =>
+            DispatchToUi(() =>
             {
                 StatusText = $"Error: {error}";
             });

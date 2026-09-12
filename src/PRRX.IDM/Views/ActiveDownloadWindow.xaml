@@ -5,12 +5,13 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:controls="clr-namespace:PRRX.IDM.Controls"
         mc:Ignorable="d"
-        Title="Active Download - PRRX IDM" 
+        Title="PRRX IDM Module" 
         Height="540" Width="680"
         WindowStartupLocation="CenterScreen"
         WindowStyle="None"
         AllowsTransparency="True"
         Background="Transparent"
+        Icon="/Assets/app_icon.png"
         ResizeMode="CanResizeWithGrip">
 
     <Window.Resources>
@@ -67,12 +68,19 @@
             <!-- 1. Window Header Bar -->
             <Grid Grid.Row="0" Margin="0,0,0,12" MouseDown="Header_MouseDown">
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                    <Border Width="24" Height="24" CornerRadius="5" Background="#1A2233" Margin="0,0,8,0">
-                        <TextBlock Text="⚡" FontSize="13" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    <Border Width="28" Height="28" CornerRadius="6" Background="#1A2233" Margin="0,0,10,0" VerticalAlignment="Center" ClipToBounds="True">
+                        <Image Source="pack://application:,,,/Assets/app_icon.png" Width="20" Height="20" HorizontalAlignment="Center" VerticalAlignment="Center" RenderOptions.BitmapScalingMode="HighQuality"/>
                     </Border>
-                    <TextBlock Text="{Binding FileName}" FontSize="14" FontWeight="SemiBold" Foreground="#F0F4F8" 
-                               TextTrimming="CharacterEllipsis" MaxWidth="460" VerticalAlignment="Center"/>
-                    <TextBlock Text=" • Turbo Stream" FontSize="11" Foreground="#00E5FF" VerticalAlignment="Center" Margin="6,0,0,0"/>
+                    <StackPanel VerticalAlignment="Center">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="PRRX IDM Module" FontSize="14" FontWeight="Bold" Foreground="#F0F4F8" VerticalAlignment="Center"/>
+                            <Border Background="#122E3B" CornerRadius="4" Padding="5,1" Margin="8,0,0,0" VerticalAlignment="Center">
+                                <TextBlock Text="Turbo Stream" FontSize="10" FontWeight="SemiBold" Foreground="#00E5FF"/>
+                            </Border>
+                        </StackPanel>
+                        <TextBlock Text="{Binding FileName}" FontSize="11" Foreground="#8A9BB4" Margin="0,2,0,0" 
+                                   TextTrimming="CharacterEllipsis" MaxWidth="460" VerticalAlignment="Center"/>
+                    </StackPanel>
                 </StackPanel>
 
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
@@ -247,7 +255,7 @@
                             Background="#00A2FF" Foreground="#FFFFFF" BorderThickness="0"
                             Padding="14,6" Margin="0,0,8,0" Cursor="Hand" FontWeight="SemiBold"/>
 
-                    <Button Content="Show in Folder" Command="{Binding OpenFolderCommand}"
+                    <Button Content="📁 Show in Folder" Command="{Binding OpenFolderCommand}"
                             Visibility="{Binding IsCompleted, Converter={StaticResource BoolToVis}}"
                             Background="#1E2738" Foreground="#A0AEC0" BorderBrush="#2A354A" BorderThickness="1"
                             Padding="12,6" Margin="0,0,8,0" Cursor="Hand"/>
@@ -255,10 +263,20 @@
                     <!-- Pause / Resume -->
                     <Button Content="{Binding PauseButtonText}" Command="{Binding TogglePauseCommand}"
                             Background="#1F293A" Foreground="#E2E8F0" BorderBrush="#303E58" BorderThickness="1"
-                            Padding="18,6" Margin="0,0,8,0" Cursor="Hand" FontWeight="Medium"/>
+                            Padding="18,6" Margin="0,0,8,0" Cursor="Hand" FontWeight="Medium">
+                        <Button.Style>
+                            <Style TargetType="Button">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsCompleted}" Value="True">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
 
-                    <!-- Cancel -->
-                    <Button Content="Cancel" Command="{Binding CancelCommand}"
+                    <!-- Cancel / Close -->
+                    <Button Content="{Binding CancelButtonText}" Command="{Binding CancelCommand}"
                             Background="#181F2E" Foreground="#8A9BB4" BorderBrush="#263144" BorderThickness="1"
                             Padding="16,6" Cursor="Hand"/>
                 </StackPanel>
@@ -273,7 +291,8 @@
                 <!-- The Signature Dynamic Segment Progress Bar -->
                 <controls:ConnectionSegmentBar Threads="{Binding ConnectionThreads}" 
                                                TotalBytes="{Binding TotalBytes}" 
-                                               Height="16" Margin="0,0,0,8"/>
+                                               IsCompleted="{Binding IsCompleted}"
+                                               Height="18" Margin="0,0,0,8"/>
 
                 <!-- Multi-Connection Threads Table -->
                 <Border Background="#121722" BorderBrush="#222C3E" BorderThickness="1" CornerRadius="6" Height="130">
@@ -305,8 +324,11 @@
                             </Style>
                         </DataGrid.Resources>
                         <DataGrid.Columns>
-                            <DataGridTextColumn Header="N." Binding="{Binding ThreadId}" Width="45"/>
-                            <DataGridTextColumn Header="Downloaded" Binding="{Binding FormattedDownloaded}" Width="130"/>
+                            <DataGridTextColumn Header="N." Binding="{Binding ThreadId}" Width="35"/>
+                            <DataGridTextColumn Header="Start Position" Binding="{Binding FormattedStartPosition}" Width="110"/>
+                            <DataGridTextColumn Header="Range" Binding="{Binding FormattedRange}" Width="160"/>
+                            <DataGridTextColumn Header="Progress" Binding="{Binding FormattedProgress}" Width="75"/>
+                            <DataGridTextColumn Header="Downloaded" Binding="{Binding FormattedDownloaded}" Width="110"/>
                             <DataGridTextColumn Header="Info" Binding="{Binding StatusInfo}" Width="*"/>
                         </DataGrid.Columns>
                     </DataGrid>

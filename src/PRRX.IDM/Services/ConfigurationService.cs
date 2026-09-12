@@ -61,8 +61,7 @@ namespace PRRX.IDM.Services
             {
                 CurrentConfig.DownloadDirectory = Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                    "Downloads",
-                    "PRRX Downloads");
+                    "Downloads");
             }
 
             if (!Directory.Exists(CurrentConfig.DownloadDirectory))

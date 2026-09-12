@@ -1,0 +1,52 @@
+{
+  "manifest_version": 3,
+  "name": "PRRX IDM Integration Module",
+  "version": "1.2.0",
+  "description": "High-performance download interception and floating video grabber panel for PRRX Internet Download Manager.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAveacOpVKoYsZLnuVLgi7CXleQxsUhP82qwmRxfCItAYKp1pdVyOwqQD3Rw+l8TknZeGwebXAty1NYmHNV0bYQA5XF/TO1l5WOQYevoGoAGVQJK+kv/tB3aqwkQ7s5kC4jitjmI7MtlZmev99rwlGP9k/9jcqGq+8o3GHDyfEa/2psyxkDWFe9ev7i22VcJw7DSpri8UmChUEY3ha8cfU0Q+DruRKGrTPrZL1/HIvPQEWCCBUjYJKBBbhqdFnS+juXO+C38i72pxryzqwVA7WtjvJSEU9AagC0VVmJJQISXYI06Bu1drr7OAjrKLpE6IIFw0yOx9Up7oVb4WR0biPOQIDAQAB",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "permissions": [
+    "nativeMessaging",
+    "contextMenus",
+    "downloads",
+    "storage",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "<all_urls>",
+    "http://127.0.0.1/*",
+    "http://localhost/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    },
+    "default_title": "PRRX IDM Integration",
+    "default_popup": "popup.html"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["icons/*"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

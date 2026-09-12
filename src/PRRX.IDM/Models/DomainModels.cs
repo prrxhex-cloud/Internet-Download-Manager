@@ -215,17 +215,45 @@ namespace PRRX.IDM.Models
         RestartComputer = 5
     }
 
-    public class DownloadConnectionThread
+    public class DownloadConnectionThread : System.ComponentModel.INotifyPropertyChanged
     {
-        public int ThreadId { get; set; }
-        public long StartByte { get; set; }
-        public long EndByte { get; set; }
-        public long CurrentByte { get; set; }
-        public long DownloadedBytes { get; set; }
-        public string FormattedDownloaded { get; set; } = "0 KB";
-        public string StatusInfo { get; set; } = "Connecting...";
-        public double ProgressPercentage { get; set; } = 0.0;
-        public bool IsActive { get; set; } = true;
+        private int _threadId;
+        private long _startByte;
+        private long _endByte;
+        private long _currentByte;
+        private long _downloadedBytes;
+        private string _formattedDownloaded = "0 KB";
+        private string _statusInfo = "Connecting...";
+        private double _progressPercentage = 0.0;
+        private bool _isActive = true;
+
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+
+        private void OnPropertyChanged([System.Runtime.CompilerServices.CallerMemberName] string? propName = null) =>
+            PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(propName));
+
+        public int ThreadId { get => _threadId; set { if (_threadId != value) { _threadId = value; OnPropertyChanged(); } } }
+        public long StartByte { get => _startByte; set { if (_startByte != value) { _startByte = value; OnPropertyChanged(); OnPropertyChanged(nameof(FormattedStartPosition)); OnPropertyChanged(nameof(FormattedRange)); } } }
+        public long EndByte { get => _endByte; set { if (_endByte != value) { _endByte = value; OnPropertyChanged(); OnPropertyChanged(nameof(FormattedRange)); OnPropertyChanged(nameof(FormattedProgress)); } } }
+        public long CurrentByte { get => _currentByte; set { if (_currentByte != value) { _currentByte = value; OnPropertyChanged(); } } }
+        public long DownloadedBytes { get => _downloadedBytes; set { if (_downloadedBytes != value) { _downloadedBytes = value; OnPropertyChanged(); OnPropertyChanged(nameof(FormattedProgress)); } } }
+        public string FormattedDownloaded { get => _formattedDownloaded; set { if (_formattedDownloaded != value) { _formattedDownloaded = value; OnPropertyChanged(); } } }
+        public string StatusInfo { get => _statusInfo; set { if (_statusInfo != value) { _statusInfo = value; OnPropertyChanged(); } } }
+        public double ProgressPercentage { get => _progressPercentage; set { if (Math.Abs(_progressPercentage - value) > 0.001) { _progressPercentage = value; OnPropertyChanged(); OnPropertyChanged(nameof(FormattedProgress)); } } }
+        public bool IsActive { get => _isActive; set { if (_isActive != value) { _isActive = value; OnPropertyChanged(); } } }
+
+        public string FormattedStartPosition => StartByte >= 0 ? FormatBytes(StartByte) : "0 B";
+        public string FormattedRange => (StartByte >= 0 && EndByte >= StartByte) ? $"{FormatBytes(StartByte)} - {FormatBytes(EndByte)}" : "--";
+        public string FormattedProgress => (EndByte >= StartByte && EndByte > 0) ? $"{ProgressPercentage:F1} %" : FormatBytes(DownloadedBytes);
+
+        private static string FormatBytes(long bytes)
+        {
+            if (bytes <= 0) return "0 B";
+            if (bytes >= 1024 * 1024 * 1024) return $"{(bytes / (1024.0 * 1024.0 * 1024.0)):F2} GB";
+            if (bytes >= 1024 * 1024) return $"{(bytes / (1024.0 * 1024.0)):F2} MB";
+            if (bytes >= 1024) return $"{(bytes / 1024.0):F1} KB";
+            return $"{bytes} B";
+        }
     }
 
     public class SpeedLimiterSettings

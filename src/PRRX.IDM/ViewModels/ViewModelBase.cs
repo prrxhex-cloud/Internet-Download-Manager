@@ -25,6 +25,18 @@ namespace PRRX.IDM.ViewModels
             OnPropertyChanged(propertyName);
             return true;
         }
+
+        protected void DispatchToUi(Action action)
+        {
+            if (System.Windows.Application.Current?.Dispatcher is { } dispatcher && !dispatcher.CheckAccess())
+            {
+                dispatcher.Invoke(action);
+            }
+            else
+            {
+                action();
+            }
+        }
     }
 
     public class RelayCommand : ICommand

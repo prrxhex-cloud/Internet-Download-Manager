@@ -1,5 +1,5 @@
-; Script generated for PRRX Internet Download Manager
-; Professional Inno Setup Script
+; PRRX Internet Download Manager - Ultra-Lightweight Web Installer (< 3 MB)
+; Uses Inno Setup 6 Native Download Engine & PowerShell Automatic Extraction
 
 #define MyAppName "PRRX Internet Download Manager"
 #define MyAppVersion "1.2.0"
@@ -9,9 +9,9 @@
 #define MyAppExtId "gxmlbxjcnsciidchdsonpfohambheiijcp"
 #define LegacyExtId "jpnkdblibibkbnllncikdeijkbdnmpem"
 #define SecondaryExtId "mjcomdjfgmiphnekplhmgdepbhafbjal"
+#define PackageUrl "https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.2.0/PRRX_Internet_Download_Manager_v1.2.0_Portable.zip"
 
 [Setup]
-; Basic Application Info
 AppId={{D8146F25-8A11-47A1-8E2E-73E9623D7091}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
@@ -21,22 +21,20 @@ AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}
 
-; Installation Paths
-DefaultDirName={autopf}\{#MyAppName}
+; Install to LocalAppData (No Administrator prompt required)
+DefaultDirName={localappdata}\Programs\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 
-; Permissions: Supports both Standard User and Administrator
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 
-; Output Configuration
+; Output Web Setup Executable (< 3 MB)
 OutputDir=D:\Internet Download Manager\dist
-OutputBaseFilename=PRRX_Internet_Download_Manager_v1.2.0_Setup
+OutputBaseFilename=PRRX_IDM_Setup_Online
 SetupIconFile=D:\Internet Download Manager\src\PRRX.IDM\Assets\app_icon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 
-; Modern Wizard Styling & Ultra Compression
 WizardStyle=modern
 Compression=lzma2/ultra64
 SolidCompression=yes
@@ -51,14 +49,8 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-; Main Executable
-Source: "D:\Internet Download Manager\publish\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
-
-; Bundled Media Engines and Tools
-Source: "D:\Internet Download Manager\publish\bin\*"; DestDir: "{app}\bin"; Flags: ignoreversion recursesubdirs createallsubdirs
-
-; Bundled Browser Extension
-Source: "D:\Internet Download Manager\publish\extension\*"; DestDir: "{app}\extension"; Flags: ignoreversion recursesubdirs createallsubdirs
+; Only embeds the custom icon and uninstaller stub - All heavy engines downloaded live from GitHub!
+Source: "D:\Internet Download Manager\src\PRRX.IDM\Assets\app_icon.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\{#MyAppExeName}"
@@ -86,8 +78,61 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"
 Type: filesandordirs; Name: "{localappdata}\PRRX Cooperation\NativeMessaging"
+Type: files; Name: "{tmp}\PRRX_Payload.zip"
 
 [Code]
+var
+  DownloadPage: TDownloadWizardPage;
+
+function OnDownloadProgress(const Url, FileName: String; const Progress, ProgressMax: Int64): Boolean;
+begin
+  if ProgressMax > 0 then
+    WizardForm.StatusLabel.Caption := Format('Downloading PRRX core files from GitHub... %d of %d KB', [Progress div 1024, ProgressMax div 1024]);
+  Result := True;
+end;
+
+procedure InitializeWizard;
+begin
+  DownloadPage := CreateDownloadPage(SetupMessage(msgWizardPreparing), SetupMessage(msgPreparingDesc), @OnDownloadProgress);
+end;
+
+function NextButtonClick(CurPageID: Integer): Boolean;
+var
+  ZipPath: String;
+  PowerShellCmd: String;
+  ResultCode: Integer;
+begin
+  if CurPageID = wpReady then begin
+    DownloadPage.Clear;
+    ZipPath := ExpandConstant('{tmp}\PRRX_Payload.zip');
+    
+    // Live cloud download from GitHub Releases
+    DownloadPage.Add('{#PackageUrl}', 'PRRX_Payload.zip', '');
+    DownloadPage.Show;
+    try
+      try
+        DownloadPage.Download;
+        WizardForm.StatusLabel.Caption := 'Extracting and configuring PRRX engines...';
+        
+        // Extract downloaded zip cleanly to installation folder
+        PowerShellCmd := Format('-NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -Path ''%s'' -DestinationPath ''%s'' -Force"', [ZipPath, ExpandConstant('{app}')]);
+        Exec('powershell.exe', PowerShellCmd, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+        
+        Result := True;
+      except
+        if DownloadPage.AbortedByUser then
+          Log('Download cancelled by user.')
+        else
+          SuppressibleMsgBox('Failed to download release payload from GitHub. Please check your internet connection and try again.', mbCriticalError, MB_OK, IDOK);
+        Result := False;
+      end;
+    finally
+      DownloadPage.Hide;
+    end;
+  end else
+    Result := True;
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   PowerShellCmd: String;
@@ -132,6 +177,7 @@ begin
   end;
 end;
 
+// Clean uninstaller with complete registry, extension, manifest, and data cleanup
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   AppDataPath: String;

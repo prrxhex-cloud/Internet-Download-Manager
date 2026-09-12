@@ -12,8 +12,9 @@
     <Product>PRRX Internet Download Manager</Product>
     <Description>High-performance Windows Internet Download Manager</Description>
     <Copyright>Copyright © 2026 PRRX Cooperation</Copyright>
-    <AssemblyVersion>1.1.0.0</AssemblyVersion>
-    <FileVersion>1.1.0.0</FileVersion>
+    <Version>1.2.0</Version>
+    <AssemblyVersion>1.2.0.0</AssemblyVersion>
+    <FileVersion>1.2.0.0</FileVersion>
     
     <!-- Application Icon -->
     <ApplicationIcon>Assets\app_icon.ico</ApplicationIcon>
@@ -30,6 +31,7 @@
   <ItemGroup>
     <Resource Include="Assets\app_icon.png" />
     <Resource Include="Assets\app_icon.ico" />
+    <Resource Include="Assets\Logo.png" />
   </ItemGroup>
 
   <ItemGroup>
@@ -37,12 +39,8 @@
       <Link>bin\yt-dlp.exe</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Include="..\..\bin\ffmpeg.exe" Condition="Exists('..\..\bin\ffmpeg.exe')">
-      <Link>bin\ffmpeg.exe</Link>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <None Include="..\..\bin\ffprobe.exe" Condition="Exists('..\..\bin\ffprobe.exe')">
-      <Link>bin\ffprobe.exe</Link>
+    <None Include="..\..\bin\aria2c.exe" Condition="Exists('..\..\bin\aria2c.exe')">
+      <Link>bin\aria2c.exe</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>

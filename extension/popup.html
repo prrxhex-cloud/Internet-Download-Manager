@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body {
+      width: 260px;
+      margin: 0;
+      padding: 16px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #10141D;
+      color: #F0F4F8;
+      box-sizing: border-box;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 14px;
+      border-bottom: 1px solid #252F42;
+      padding-bottom: 10px;
+    }
+    .header h2 {
+      font-size: 14px;
+      margin: 0;
+      color: #00E5FF;
+      font-weight: 600;
+    }
+    .status-badge {
+      font-size: 11px;
+      color: #00FF88;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      margin-bottom: 12px;
+    }
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #00FF88;
+      box-shadow: 0 0 8px #00FF88;
+    }
+    .toggle-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+      font-size: 12px;
+      color: #A0AEC0;
+    }
+    input[type="checkbox"] {
+      accent-color: #00E5FF;
+      cursor: pointer;
+    }
+    .footer {
+      font-size: 11px;
+      color: #718096;
+      margin-top: 14px;
+      text-align: center;
+      border-top: 1px solid #1E2738;
+      padding-top: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <img src="icons/icon32.png" width="22" height="22" alt="PRRX Logo" style="border-radius: 4px; vertical-align: middle; object-fit: contain;">
+    <h2>PRRX IDM Module</h2>
+  </div>
+
+  <div class="status-badge">
+    <div class="status-dot"></div>
+    <span>Desktop App Connected</span>
+  </div>
+
+  <div class="toggle-row">
+    <span>Intercept Browser Downloads</span>
+    <input type="checkbox" id="chkInterception" checked>
+  </div>
+
+  <div class="toggle-row">
+    <span>Floating Video Grabber</span>
+    <input type="checkbox" id="chkFloatingPanel" checked>
+  </div>
+
+  <div class="footer">
+    PRRX Cooperation • High-Speed Acceleration
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

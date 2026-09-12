@@ -1,5 +1,10 @@
 using System;
+using System.Diagnostics;
 using System.IO;
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -48,6 +53,13 @@ namespace PRRX.IDM
                 return;
             }
 
+            // 2. Check if invoked with payload or URL and another instance is already running
+            if (CheckAndForwardToRunningInstance(e.Args))
+            {
+                Shutdown(0);
+                return;
+            }
+
             // Prevent silent shutdown when dialogs close
             ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
@@ -77,15 +89,52 @@ namespace PRRX.IDM
                 // Initialize continuous memory trimming & working set compaction
                 MemoryOptimizer.InitializeAutoTrimmer();
 
+                // Detect any startup payload or URL from command line
+                string? pendingPayloadJson = null;
+                for (int i = 0; i < e.Args.Length; i++)
+                {
+                    if (e.Args[i] == "--payload" && i + 1 < e.Args.Length)
+                    {
+                        try
+                        {
+                            var bytes = Convert.FromBase64String(e.Args[i + 1]);
+                            pendingPayloadJson = Encoding.UTF8.GetString(bytes);
+                        }
+                        catch { }
+                    }
+                    else if (e.Args[i] == "--url" && i + 1 < e.Args.Length)
+                    {
+                        pendingPayloadJson = JsonSerializer.Serialize(new BrowserDownloadPayload
+                        {
+                            Action = "download",
+                            Url = e.Args[i + 1]
+                        });
+                    }
+                    else if (e.Args[i].StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                             e.Args[i].StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                    {
+                        pendingPayloadJson = JsonSerializer.Serialize(new BrowserDownloadPayload
+                        {
+                            Action = "download",
+                            Url = e.Args[i]
+                        });
+                    }
+                }
+
+                bool hasStartupPayload = !string.IsNullOrWhiteSpace(pendingPayloadJson);
+
                 // Onboarding Wizard check on first run
                 if (!_configService.CurrentConfig.IsOnboardingCompleted)
                 {
-                    var onboardingVm = new OnboardingViewModel(_configService, _themeService);
-                    var onboardingWindow = new OnboardingWindow(onboardingVm);
+                    if (!hasStartupPayload)
+                    {
+                        var onboardingVm = new OnboardingViewModel(_configService, _themeService);
+                        var onboardingWindow = new OnboardingWindow(onboardingVm);
 
-                    _themeService.ApplyTheme(_configService.CurrentConfig.ThemeMode, onboardingWindow);
+                        _themeService.ApplyTheme(_configService.CurrentConfig.ThemeMode, onboardingWindow);
 
-                    onboardingWindow.ShowDialog();
+                        onboardingWindow.ShowDialog();
+                    }
 
                     _configService.CurrentConfig.IsOnboardingCompleted = true;
                     _configService.SaveConfig();
@@ -94,12 +143,15 @@ namespace PRRX.IDM
                 // First-time Interactive Quick Tour / Setup Guide check
                 if (!_configService.CurrentConfig.HasCompletedQuickTour)
                 {
-                    var tourVm = new QuickTourViewModel(_configService, _themeService);
-                    var tourWindow = new QuickTourWindow(tourVm);
+                    if (!hasStartupPayload)
+                    {
+                        var tourVm = new QuickTourViewModel(_configService, _themeService);
+                        var tourWindow = new QuickTourWindow(tourVm);
 
-                    _themeService.ApplyTheme(_configService.CurrentConfig.ThemeMode, tourWindow);
+                        _themeService.ApplyTheme(_configService.CurrentConfig.ThemeMode, tourWindow);
 
-                    tourWindow.ShowDialog();
+                        tourWindow.ShowDialog();
+                    }
 
                     _configService.CurrentConfig.HasCompletedQuickTour = true;
                     _configService.SaveConfig();
@@ -126,6 +178,23 @@ namespace PRRX.IDM
                 _themeService.ApplyTheme(_configService.CurrentConfig.ThemeMode, mainWindow);
 
                 mainWindow.Show();
+
+                // Process any incoming payload from command line arguments
+                if (!string.IsNullOrWhiteSpace(pendingPayloadJson))
+                {
+                    try
+                    {
+                        var payload = JsonSerializer.Deserialize<BrowserDownloadPayload>(pendingPayloadJson, new JsonSerializerOptions
+                        {
+                            PropertyNameCaseInsensitive = true
+                        });
+                        if (payload != null)
+                        {
+                            Dispatcher.BeginInvoke(new Action(() => _browserService?.HandleIncomingPayload(payload)), DispatcherPriority.Loaded);
+                        }
+                    }
+                    catch { }
+                }
             }
             catch (Exception ex)
             {
@@ -186,24 +255,54 @@ namespace PRRX.IDM
 
                 var json = System.Text.Encoding.UTF8.GetString(messageBuffer, 0, totalRead);
 
-                // Forward to local IPC Pipe Server
+                // Forward to running instance via Named Pipe or HTTP bridge
+                bool forwarded = false;
                 try
                 {
                     using var pipeClient = new System.IO.Pipes.NamedPipeClientStream(".", BrowserIntegrationService.PipeName, System.IO.Pipes.PipeDirection.Out);
-                    pipeClient.Connect(1500);
-                    using var writer = new StreamWriter(pipeClient, System.Text.Encoding.UTF8);
+                    pipeClient.Connect(1000);
+                    using var writer = new StreamWriter(pipeClient, Encoding.UTF8);
                     writer.Write(json);
                     writer.Flush();
+                    forwarded = true;
                 }
                 catch
                 {
-                    // Main app not running - launch main process
-                    var appExe = System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
+                    // Fallback to local HTTP bridge if pipe was unavailable
+                    try
+                    {
+                        using var client = new TcpClient();
+                        var connectTask = client.ConnectAsync(IPAddress.Loopback, BrowserIntegrationService.HttpPort);
+                        if (connectTask.Wait(500))
+                        {
+                            using var stream = client.GetStream();
+                            var bodyBytes = Encoding.UTF8.GetBytes(json);
+                            var request = $"POST /api/download HTTP/1.1\r\n" +
+                                          $"Host: 127.0.0.1:{BrowserIntegrationService.HttpPort}\r\n" +
+                                          $"Content-Type: application/json\r\n" +
+                                          $"Content-Length: {bodyBytes.Length}\r\n" +
+                                          $"Connection: close\r\n\r\n";
+                            var reqBytes = Encoding.UTF8.GetBytes(request);
+                            stream.Write(reqBytes, 0, reqBytes.Length);
+                            stream.Write(bodyBytes, 0, bodyBytes.Length);
+                            stream.Flush();
+                            forwarded = true;
+                        }
+                    }
+                    catch { }
+                }
+
+                if (!forwarded)
+                {
+                    // Main app not running - launch main process with payload
+                    var appExe = Process.GetCurrentProcess().MainModule?.FileName;
                     if (!string.IsNullOrWhiteSpace(appExe))
                     {
-                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                        var b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(json));
+                        Process.Start(new ProcessStartInfo
                         {
                             FileName = appExe,
+                            Arguments = $"--payload {b64}",
                             UseShellExecute = true
                         });
                     }
@@ -211,7 +310,7 @@ namespace PRRX.IDM
 
                 // Send OK acknowledgement to browser
                 var responseJson = "{\"status\":\"ok\"}";
-                var responseBytes = System.Text.Encoding.UTF8.GetBytes(responseJson);
+                var responseBytes = Encoding.UTF8.GetBytes(responseJson);
                 var responseLen = BitConverter.GetBytes(responseBytes.Length);
                 stdout.Write(responseLen, 0, 4);
                 stdout.Write(responseBytes, 0, responseBytes.Length);
@@ -219,8 +318,74 @@ namespace PRRX.IDM
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"Native messaging error: {ex.Message}");
+                Debug.WriteLine($"Native messaging error: {ex.Message}");
             }
+        }
+
+        private static bool CheckAndForwardToRunningInstance(string[] args)
+        {
+            if (args == null || args.Length == 0) return false;
+
+            string? url = null;
+            string? payloadJson = null;
+
+            for (int i = 0; i < args.Length; i++)
+            {
+                if (args[i] == "--payload" && i + 1 < args.Length)
+                {
+                    try
+                    {
+                        var bytes = Convert.FromBase64String(args[i + 1]);
+                        payloadJson = Encoding.UTF8.GetString(bytes);
+                    }
+                    catch { }
+                }
+                else if (args[i].StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                         args[i].StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                {
+                    url = args[i];
+                }
+            }
+
+            if (payloadJson == null && url == null) return false;
+
+            try
+            {
+                var body = payloadJson ?? JsonSerializer.Serialize(new BrowserDownloadPayload
+                {
+                    Action = "download",
+                    Url = url!
+                });
+
+                using var client = new TcpClient();
+                var connectTask = client.ConnectAsync(IPAddress.Loopback, BrowserIntegrationService.HttpPort);
+                if (!connectTask.Wait(400)) return false;
+
+                using var stream = client.GetStream();
+                stream.WriteTimeout = 1000;
+                var bodyBytes = Encoding.UTF8.GetBytes(body);
+                var request = $"POST /api/download HTTP/1.1\r\n" +
+                              $"Host: 127.0.0.1:{BrowserIntegrationService.HttpPort}\r\n" +
+                              $"Content-Type: application/json\r\n" +
+                              $"Content-Length: {bodyBytes.Length}\r\n" +
+                              $"Connection: close\r\n\r\n";
+                var reqBytes = Encoding.UTF8.GetBytes(request);
+                stream.Write(reqBytes, 0, reqBytes.Length);
+                stream.Write(bodyBytes, 0, bodyBytes.Length);
+                stream.Flush();
+
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        protected override void OnExit(ExitEventArgs e)
+        {
+            _browserService?.StopIpcServer();
+            base.OnExit(e);
         }
     }
 }

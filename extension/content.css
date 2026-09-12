@@ -1,0 +1,96 @@
+/* PRRX IDM Floating Video Grabber Panel - Liquid Glass Theme */
+
+.prrx-video-panel-container {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 2147483647;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  user-select: none;
+}
+
+.prrx-video-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(18, 24, 38, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  color: #F0F4F8;
+  border: 1px solid rgba(0, 229, 255, 0.35);
+  border-radius: 8px;
+  padding: 7px 13px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5), 0 0 10px rgba(0, 229, 255, 0.2);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.prrx-video-btn:hover {
+  background: rgba(26, 36, 56, 0.95);
+  border-color: #00E5FF;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.6), 0 0 16px rgba(0, 229, 255, 0.4);
+  transform: translateY(-1px);
+}
+
+.prrx-video-icon {
+  font-size: 13px;
+  color: #00E5FF;
+}
+
+.prrx-video-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 6px;
+  width: 220px;
+  background: rgba(14, 18, 28, 0.96);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(42, 53, 76, 0.8);
+  border-radius: 8px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.7);
+  display: none;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.prrx-video-dropdown.show {
+  display: flex;
+}
+
+.prrx-dropdown-header {
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #8A9BB4;
+  border-bottom: 1px solid rgba(34, 44, 64, 0.8);
+  background: rgba(20, 26, 40, 0.5);
+}
+
+.prrx-dropdown-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 9px 12px;
+  color: #E2E8F0;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.prrx-dropdown-item:hover {
+  background: rgba(0, 162, 255, 0.2);
+  color: #00E5FF;
+}
+
+.prrx-item-badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(0, 229, 255, 0.15);
+  color: #00E5FF;
+  font-weight: 600;
+}

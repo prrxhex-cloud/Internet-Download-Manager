@@ -12,6 +12,7 @@
         MinHeight="640" MinWidth="880"
         WindowStartupLocation="CenterScreen"
         WindowBackdropType="Mica"
+        Icon="/Assets/app_icon.png"
         ExtendsContentIntoTitleBar="True">
 
     <ui:FluentWindow.Resources>
@@ -94,7 +95,7 @@
             </Grid.RowDefinitions>
 
             <!-- Custom Fluent Titlebar -->
-            <ui:TitleBar Grid.Row="0" Title="PRRX Internet Download Manager"/>
+            <ui:TitleBar Grid.Row="0" Title="PRRX Internet Download Manager" Icon="pack://application:,,,/Assets/app_icon.png"/>
 
             <!-- Active Feature Tab View with Smooth Content Transition -->
             <ContentControl Grid.Row="1" Content="{Binding CurrentTabViewModel}">

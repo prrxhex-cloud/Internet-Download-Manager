@@ -48,10 +48,16 @@ namespace PRRX.IDM.Services
     {
         private static readonly HttpClient HttpClient = new(new SocketsHttpHandler
         {
-            PooledConnectionLifetime = TimeSpan.FromMinutes(10),
-            MaxConnectionsPerServer = 32,
-            EnableMultipleHttp2Connections = true
-        }) { Timeout = TimeSpan.FromSeconds(30) };
+            PooledConnectionLifetime = TimeSpan.FromMinutes(15),
+            PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2),
+            MaxConnectionsPerServer = 64,
+            EnableMultipleHttp2Connections = true,
+            InitialHttp2StreamWindowSize = 2 * 1024 * 1024,
+            AutomaticDecompression = System.Net.DecompressionMethods.None,
+            KeepAlivePingPolicy = HttpKeepAlivePingPolicy.Always,
+            KeepAlivePingDelay = TimeSpan.FromSeconds(30),
+            KeepAlivePingTimeout = TimeSpan.FromSeconds(15)
+        }) { Timeout = TimeSpan.FromSeconds(45) };
 
         public event EventHandler<SegmentProgressEventArgs>? ProgressChanged;
         public event EventHandler<string>? DownloadCompleted;
@@ -119,6 +125,7 @@ namespace PRRX.IDM.Services
             int threadCount = 16,
             CancellationToken cancellationToken = default)
         {
+            string? tempDir = null;
             try
             {
                 IsRunning = true;
@@ -130,25 +137,85 @@ namespace PRRX.IDM.Services
                 _speedStopwatch.Restart();
                 _lastBytesMeasured = 0;
 
-                // 1. Probe Head to detect Content-Length and Accept-Ranges
-                using var headReq = new HttpRequestMessage(HttpMethod.Head, url);
-                headReq.Headers.Add("User-Agent", "PRRX-IDM/1.0");
+                _totalBytes = -1;
+                bool acceptRanges = false;
 
-                HttpResponseMessage headResp;
+                // 1. Probe HEAD to detect Content-Length and Accept-Ranges (with fast 2.5s timeout)
                 try
                 {
-                    headResp = await HttpClient.SendAsync(headReq, HttpCompletionOption.ResponseHeadersRead, _cts.Token);
+                    using var headCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+                    headCts.CancelAfter(TimeSpan.FromSeconds(2.5));
+
+                    using var headReq = new HttpRequestMessage(HttpMethod.Head, url);
+                    headReq.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
+                    headReq.Headers.Add("Accept", "*/*");
+
+                    using var headResp = await HttpClient.SendAsync(headReq, HttpCompletionOption.ResponseHeadersRead, headCts.Token);
+                    if (headResp.IsSuccessStatusCode)
+                    {
+                        _totalBytes = headResp.Content.Headers.ContentLength ?? -1;
+                        acceptRanges = headResp.Headers.AcceptRanges.Contains("bytes") || headResp.Content.Headers.ContentRange != null;
+                    }
                 }
                 catch
                 {
-                    // Fallback to GET with small range
-                    using var getReq = new HttpRequestMessage(HttpMethod.Get, url);
-                    getReq.Headers.Add("User-Agent", "PRRX-IDM/1.0");
-                    headResp = await HttpClient.SendAsync(getReq, HttpCompletionOption.ResponseHeadersRead, _cts.Token);
+                    // Fallback to GET with Range immediately
                 }
 
-                _totalBytes = headResp.Content.Headers.ContentLength ?? -1;
-                bool acceptRanges = headResp.Headers.AcceptRanges.Contains("bytes") || headResp.Content.Headers.ContentRange != null;
+                // 2. If HEAD failed, returned non-2xx, or didn't yield size/ranges: probe with GET Range: bytes=0-0 (with fast 3s timeout)
+                if ((_totalBytes <= 0 || !acceptRanges) && !_cts.IsCancellationRequested)
+                {
+                    try
+                    {
+                        using var getCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+                        getCts.CancelAfter(TimeSpan.FromSeconds(3.0));
+
+                        using var getReq = new HttpRequestMessage(HttpMethod.Get, url);
+                        getReq.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
+                        getReq.Headers.Add("Accept", "*/*");
+                        getReq.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(0, 0);
+
+                        using var getResp = await HttpClient.SendAsync(getReq, HttpCompletionOption.ResponseHeadersRead, getCts.Token);
+                        if (getResp.StatusCode == System.Net.HttpStatusCode.PartialContent)
+                        {
+                            acceptRanges = true;
+                            if (getResp.Content.Headers.ContentRange?.Length.HasValue == true)
+                            {
+                                _totalBytes = getResp.Content.Headers.ContentRange.Length.Value;
+                            }
+                            else if (getResp.Content.Headers.TryGetValues("Content-Range", out var crVals))
+                            {
+                                foreach (var val in crVals)
+                                {
+                                    var slashIdx = val.LastIndexOf('/');
+                                    if (slashIdx >= 0 && long.TryParse(val.AsSpan(slashIdx + 1).Trim(), out var total))
+                                    {
+                                        _totalBytes = total;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        else if (getResp.StatusCode == System.Net.HttpStatusCode.OK && getResp.Content.Headers.ContentLength.HasValue)
+                        {
+                            _totalBytes = getResp.Content.Headers.ContentLength.Value;
+                            acceptRanges = false;
+                        }
+                    }
+                    catch
+                    {
+                    }
+                }
+
+                // Maximize download throughput: adaptive 16-32 streams
+                if (threadCount <= 0)
+                {
+                    if (_totalBytes > 50 * 1024 * 1024) threadCount = 32;
+                    else if (_totalBytes > 10 * 1024 * 1024) threadCount = 24;
+                    else if (_totalBytes > 2 * 1024 * 1024) threadCount = 16;
+                    else if (_totalBytes > 0) threadCount = 8;
+                    else threadCount = 1;
+                }
 
                 // If server doesn't support ranges or size unknown, single-stream download
                 if (!acceptRanges || _totalBytes <= 0)
@@ -159,15 +226,15 @@ namespace PRRX.IDM.Services
                 var targetDir = Path.GetDirectoryName(destinationFilePath);
                 if (!string.IsNullOrWhiteSpace(targetDir)) Directory.CreateDirectory(targetDir);
 
-                var tempDir = Path.Combine(targetDir ?? ".", $".prrx_tmp_{Guid.NewGuid():N}");
+                tempDir = Path.Combine(targetDir ?? ".", $".prrx_tmp_{Guid.NewGuid():N}");
                 Directory.CreateDirectory(tempDir);
 
                 // Initialize Threads and Byte Ranges
                 var segmentSize = _totalBytes > 0 ? _totalBytes / threadCount : -1;
                 for (int i = 0; i < threadCount; i++)
                 {
-                    long start = i * segmentSize;
-                    long end = (i == threadCount - 1) ? _totalBytes - 1 : (start + segmentSize - 1);
+                    long start = _totalBytes > 0 ? (i * segmentSize) : 0;
+                    long end = _totalBytes > 0 ? ((i == threadCount - 1) ? _totalBytes - 1 : (start + segmentSize - 1)) : -1;
 
                     _threads.Add(new DownloadConnectionThread
                     {
@@ -205,43 +272,70 @@ namespace PRRX.IDM.Services
 
                 await Task.WhenAll(tasks);
 
-                // All segments completed - Assemble parts into final target file
+                // Dispose live progress timer before assembly to avoid overwriting assembly status
+                _progressTimer?.Dispose();
+                _progressTimer = null;
+
+                // All segments completed - Assemble parts into final target file with pre-allocation
                 ReportProgress("Assembling segments into final file...");
-                using (var outputStream = new FileStream(destinationFilePath, FileMode.Create, FileAccess.Write, FileShare.None, 65536, true))
+                using (var outputStream = new FileStream(destinationFilePath, FileMode.Create, FileAccess.Write, FileShare.None, 262144, true))
                 {
+                    if (_totalBytes > 0)
+                    {
+                        try
+                        {
+                            outputStream.SetLength(_totalBytes); // Pre-allocate contiguous clusters to prevent disk allocation lock contention
+                        }
+                        catch
+                        {
+                            // If disk is full or filesystem doesn't support SetLength, proceed with normal stream writes
+                        }
+                    }
+
+                    var copyBuffer = new byte[262144]; // 256 KB assembly copy buffer
                     for (int i = 0; i < threadCount; i++)
                     {
                         var partPath = Path.Combine(tempDir, $"part_{i}.tmp");
                         if (File.Exists(partPath))
                         {
-                            using var partStream = new FileStream(partPath, FileMode.Open, FileAccess.Read, FileShare.Read, 65536);
-                            await partStream.CopyToAsync(outputStream, _cts.Token);
+                            using (var partStream = new FileStream(partPath, FileMode.Open, FileAccess.Read, FileShare.Read, 262144, true))
+                            {
+                                int read;
+                                while ((read = await partStream.ReadAsync(copyBuffer.AsMemory(0, copyBuffer.Length), _cts.Token)) > 0)
+                                {
+                                    await outputStream.WriteAsync(copyBuffer.AsMemory(0, read), _cts.Token);
+                                }
+                            }
+                            try { File.Delete(partPath); } catch { } // Free disk space immediately
                         }
                     }
                 }
 
-                // Cleanup temp folder
-                try { Directory.Delete(tempDir, true); } catch { }
-
                 IsRunning = false;
-                _progressTimer?.Dispose();
-                ReportProgress("Download Completed!");
+                ReportProgress("Complete - Downloaded successfully");
                 DownloadCompleted?.Invoke(this, destinationFilePath);
                 return true;
             }
             catch (OperationCanceledException)
             {
                 IsRunning = false;
-                _progressTimer?.Dispose();
                 ReportProgress("Download Cancelled");
                 return false;
             }
             catch (Exception ex)
             {
                 IsRunning = false;
-                _progressTimer?.Dispose();
                 DownloadFailed?.Invoke(this, ex.Message);
                 return false;
+            }
+            finally
+            {
+                _progressTimer?.Dispose();
+                _progressTimer = null;
+                if (!string.IsNullOrWhiteSpace(tempDir) && Directory.Exists(tempDir))
+                {
+                    try { Directory.Delete(tempDir, true); } catch { }
+                }
             }
         }
 
@@ -254,7 +348,7 @@ namespace PRRX.IDM.Services
             try
             {
                 using var request = new HttpRequestMessage(HttpMethod.Get, url);
-                request.Headers.Add("User-Agent", "PRRX-IDM/1.0");
+                request.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
 
                 if (thread.StartByte >= 0 && thread.EndByte >= thread.StartByte)
                 {
@@ -265,14 +359,32 @@ namespace PRRX.IDM.Services
                 using var response = await HttpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
                 response.EnsureSuccessStatusCode();
 
+                // If total file size was not resolved during initial probing, capture it now from the actual GET response
+                if (_totalBytes <= 0)
+                {
+                    if (response.Content.Headers.ContentRange?.Length.HasValue == true)
+                    {
+                        _totalBytes = response.Content.Headers.ContentRange.Length.Value;
+                    }
+                    else if (response.Content.Headers.ContentLength.HasValue && response.Content.Headers.ContentLength.Value > 0)
+                    {
+                        _totalBytes = response.Content.Headers.ContentLength.Value;
+                    }
+
+                    if (_totalBytes > 0 && (thread.EndByte < thread.StartByte || thread.EndByte <= 0))
+                    {
+                        thread.EndByte = _totalBytes - 1;
+                    }
+                }
+
                 thread.StatusInfo = "Receiving data...";
                 using var contentStream = await response.Content.ReadAsStreamAsync(token);
-                using var fileStream = new FileStream(tempPartPath, FileMode.Create, FileAccess.Write, FileShare.None, 32768, true);
+                using var fileStream = new FileStream(tempPartPath, FileMode.Create, FileAccess.Write, FileShare.None, 131072, true);
 
-                var buffer = new byte[16384];
+                var buffer = new byte[131072];
                 int bytesRead;
 
-                while ((bytesRead = await contentStream.ReadAsync(buffer, 0, buffer.Length, token)) > 0)
+                while ((bytesRead = await contentStream.ReadAsync(buffer.AsMemory(0, buffer.Length), token)) > 0)
                 {
                     _pauseEvent.Wait(token);
 
@@ -281,8 +393,18 @@ namespace PRRX.IDM.Services
                     thread.CurrentByte += bytesRead;
                     Interlocked.Add(ref _totalDownloadedBytes, bytesRead);
 
-                    long threadTotal = Math.Max(1, thread.EndByte - thread.StartByte + 1);
-                    thread.ProgressPercentage = Math.Min(100.0, (thread.DownloadedBytes / (double)threadTotal) * 100.0);
+                    long threadTotal = (thread.EndByte >= thread.StartByte && thread.StartByte >= 0)
+                        ? (thread.EndByte - thread.StartByte + 1)
+                        : -1;
+
+                    if (threadTotal > 0)
+                    {
+                        thread.ProgressPercentage = Math.Min(100.0, (thread.DownloadedBytes / (double)threadTotal) * 100.0);
+                    }
+                    else
+                    {
+                        thread.ProgressPercentage = 0.0;
+                    }
                     thread.FormattedDownloaded = FormatBytes(thread.DownloadedBytes);
 
                     // Speed limiter throttling (delay injection per block)
@@ -331,6 +453,15 @@ namespace PRRX.IDM.Services
                 eta = ts.TotalHours >= 1 ? $"{(int)ts.TotalHours}:{ts.Minutes:D2}:{ts.Seconds:D2}" : $"{ts.Minutes:D2}:{ts.Seconds:D2}";
             }
 
+            bool isCompletedStatus = !IsRunning && statusMsg.StartsWith("Complete");
+            if (isCompletedStatus)
+            {
+                currentBytes = _totalBytes > 0 ? _totalBytes : currentBytes;
+                percent = 100.0;
+                speedFormatted = "Finished";
+                eta = "00:00";
+            }
+
             ProgressChanged?.Invoke(this, new SegmentProgressEventArgs
             {
                 OverallPercentage = percent,
@@ -345,12 +476,12 @@ namespace PRRX.IDM.Services
                     ThreadId = t.ThreadId,
                     StartByte = t.StartByte,
                     EndByte = t.EndByte,
-                    CurrentByte = t.CurrentByte,
-                    DownloadedBytes = t.DownloadedBytes,
-                    FormattedDownloaded = t.FormattedDownloaded,
-                    StatusInfo = t.StatusInfo,
-                    ProgressPercentage = t.ProgressPercentage,
-                    IsActive = t.IsActive
+                    CurrentByte = isCompletedStatus ? (t.EndByte >= t.StartByte && t.StartByte >= 0 ? t.EndByte + 1 : t.CurrentByte) : t.CurrentByte,
+                    DownloadedBytes = isCompletedStatus ? (t.EndByte >= t.StartByte && t.StartByte >= 0 ? Math.Max(t.DownloadedBytes, t.EndByte - t.StartByte + 1) : t.DownloadedBytes) : t.DownloadedBytes,
+                    FormattedDownloaded = isCompletedStatus ? FormatBytes(t.EndByte >= t.StartByte && t.StartByte >= 0 ? Math.Max(t.DownloadedBytes, t.EndByte - t.StartByte + 1) : t.DownloadedBytes) : t.FormattedDownloaded,
+                    StatusInfo = isCompletedStatus ? "Complete" : t.StatusInfo,
+                    ProgressPercentage = isCompletedStatus ? 100.0 : t.ProgressPercentage,
+                    IsActive = !isCompletedStatus && t.IsActive
                 }).ToList()
             });
         }

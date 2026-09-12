@@ -54,7 +54,9 @@
             <Grid>
                 <!-- STEP 1: Welcome -->
                 <StackPanel VerticalAlignment="Center" Visibility="{Binding CurrentStep, Converter={StaticResource EqToVis}, ConverterParameter=1}">
-                    <ui:SymbolIcon Symbol="ArrowDownload48" FontSize="56" HorizontalAlignment="Center" Margin="0,0,0,16"/>
+                    <Border Width="64" Height="64" CornerRadius="14" Margin="0,0,0,16" HorizontalAlignment="Center" ClipToBounds="True">
+                        <Image Source="pack://application:,,,/Assets/app_icon.png" Width="64" Height="64" HorizontalAlignment="Center" VerticalAlignment="Center" RenderOptions.BitmapScalingMode="HighQuality"/>
+                    </Border>
                     <TextBlock Text="Welcome to PRRX Internet Download Manager" FontSize="20" FontWeight="Bold" HorizontalAlignment="Center" TextAlignment="Center"/>
                     <TextBlock Text="Experience ultra-fast video downloads, pristine MP3 audio extraction, and HD YouTube thumbnail captures — all with native Windows 11 Fluent design." 
                                Opacity="0.8" TextWrapping="Wrap" TextAlignment="Center" Margin="0,12,0,0" LineHeight="20"/>

@@ -4,12 +4,13 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
-        Title="Download File Info - PRRX IDM" 
+        Title="PRRX IDM Module" 
         Height="420" Width="640"
         WindowStartupLocation="CenterScreen"
         WindowStyle="None"
         AllowsTransparency="True"
         Background="Transparent"
+        Icon="/Assets/app_icon.png"
         ResizeMode="NoResize">
 
     <Border Background="#121620" 
@@ -30,11 +31,19 @@
             <!-- 1. Header Bar -->
             <Grid Grid.Row="0" Margin="0,0,0,18" MouseDown="Header_MouseDown">
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                    <Border Width="28" Height="28" CornerRadius="6" Background="#1E2738" Margin="0,0,10,0">
-                        <TextBlock Text="📥" FontSize="14" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    <Border Width="32" Height="32" CornerRadius="8" Background="#1E2738" Margin="0,0,12,0" VerticalAlignment="Center" ClipToBounds="True">
+                        <Image Source="pack://application:,,,/Assets/app_icon.png" Width="24" Height="24" HorizontalAlignment="Center" VerticalAlignment="Center" RenderOptions.BitmapScalingMode="HighQuality"/>
                     </Border>
-                    <TextBlock Text="Download File Info" FontSize="16" FontWeight="SemiBold" Foreground="#F0F4F8" VerticalAlignment="Center"/>
-                    <TextBlock Text=" • PRRX Accelerated" FontSize="12" Foreground="#00E5FF" VerticalAlignment="Center" Margin="6,0,0,0"/>
+                    <StackPanel VerticalAlignment="Center">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="PRRX IDM Module" FontSize="15" FontWeight="Bold" Foreground="#F0F4F8" VerticalAlignment="Center"/>
+                            <Border Background="#152B3C" CornerRadius="4" Padding="6,2" Margin="8,0,0,0" VerticalAlignment="Center">
+                                <TextBlock Text="Accelerated" FontSize="10" FontWeight="SemiBold" Foreground="#00E5FF"/>
+                            </Border>
+                        </StackPanel>
+                        <TextBlock Text="{Binding FileName}" FontSize="12" Foreground="#8A9BB4" Margin="0,2,0,0"
+                                   TextTrimming="CharacterEllipsis" MaxWidth="480"/>
+                    </StackPanel>
                 </StackPanel>
 
                 <Button Content="✕" Width="28" Height="28" HorizontalAlignment="Right"

@@ -10,6 +10,7 @@
         WindowStyle="None"
         AllowsTransparency="True"
         Background="Transparent"
+        Icon="/Assets/app_icon.png"
         ResizeMode="CanResizeWithGrip">
 
     <Border Background="#10141D" 
@@ -31,8 +32,8 @@
             <!-- 1. Header Bar -->
             <Grid Grid.Row="0" Margin="0,0,0,14" MouseDown="Header_MouseDown">
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                    <Border Width="26" Height="26" CornerRadius="5" Background="#1A2233" Margin="0,0,8,0">
-                        <TextBlock Text="🌐" FontSize="13" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    <Border Width="26" Height="26" CornerRadius="5" Background="#1A2233" Margin="0,0,8,0" ClipToBounds="True">
+                        <Image Source="pack://application:,,,/Assets/app_icon.png" Width="18" Height="18" HorizontalAlignment="Center" VerticalAlignment="Center" RenderOptions.BitmapScalingMode="HighQuality"/>
                     </Border>
                     <TextBlock Text="Download All Links with PRRX IDM" FontSize="15" FontWeight="SemiBold" Foreground="#F0F4F8" VerticalAlignment="Center"/>
                     <TextBlock Text="{Binding SourcePageTitle, StringFormat=' ({0})'}" FontSize="12" Foreground="#8A9BB4" 
