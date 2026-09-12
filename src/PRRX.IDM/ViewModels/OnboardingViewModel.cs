@@ -1,3 +1,9 @@
+// ============================================================================
+// Copyright (c) 2026 PRRX Cooperation. All Rights Reserved.
+// PRRX IDM (TM) - Intelligent Download Manager Engine
+// Watermark: PRRX-IDM-CORE-WATERMARK-SECURE-VAULT-2026
+// Confidential and Proprietary - Licensed under PRRX Open Source Initiative
+// ============================================================================
 using System;
 using System.Diagnostics;
 using System.IO;
@@ -195,12 +201,13 @@ namespace PRRX.IDM.ViewModels
                         }
                         catch { }
 
-                        Process.Start(new ProcessStartInfo
+                        var psi = new ProcessStartInfo
                         {
                             FileName = "explorer.exe",
-                            Arguments = $"\"{target}\"",
-                            UseShellExecute = true
-                        });
+                            UseShellExecute = false
+                        };
+                        psi.ArgumentList.Add(Path.GetFullPath(target));
+                        Process.Start(psi);
                     }
                     else
                     {
@@ -263,14 +270,25 @@ namespace PRRX.IDM.ViewModels
 
         private static void OpenBrowserUrl(string browserExe, string targetUrl)
         {
+            if (string.IsNullOrWhiteSpace(targetUrl)) return;
+
+            // Enforce safe target URLs (browser extensions pages or http/https)
+            bool isAllowed = targetUrl.Equals("chrome://extensions", StringComparison.OrdinalIgnoreCase) ||
+                             targetUrl.Equals("edge://extensions", StringComparison.OrdinalIgnoreCase) ||
+                             targetUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                             targetUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
+
+            if (!isAllowed) return;
+
             try
             {
-                Process.Start(new ProcessStartInfo
+                var psi = new ProcessStartInfo
                 {
                     FileName = browserExe,
-                    Arguments = targetUrl,
-                    UseShellExecute = true
-                });
+                    UseShellExecute = false
+                };
+                psi.ArgumentList.Add(targetUrl);
+                Process.Start(psi);
                 return;
             }
             catch { }
@@ -281,12 +299,13 @@ namespace PRRX.IDM.ViewModels
                 var exePath = key?.GetValue("")?.ToString();
                 if (!string.IsNullOrEmpty(exePath) && File.Exists(exePath))
                 {
-                    Process.Start(new ProcessStartInfo
+                    var psi = new ProcessStartInfo
                     {
                         FileName = exePath,
-                        Arguments = targetUrl,
-                        UseShellExecute = true
-                    });
+                        UseShellExecute = false
+                    };
+                    psi.ArgumentList.Add(targetUrl);
+                    Process.Start(psi);
                     return;
                 }
             }
@@ -311,12 +330,13 @@ namespace PRRX.IDM.ViewModels
                 {
                     try
                     {
-                        Process.Start(new ProcessStartInfo
+                        var psi = new ProcessStartInfo
                         {
                             FileName = candidate,
-                            Arguments = targetUrl,
-                            UseShellExecute = true
-                        });
+                            UseShellExecute = false
+                        };
+                        psi.ArgumentList.Add(targetUrl);
+                        Process.Start(psi);
                         return;
                     }
                     catch { }

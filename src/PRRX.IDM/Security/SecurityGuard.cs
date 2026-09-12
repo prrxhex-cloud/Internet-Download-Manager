@@ -1,3 +1,10 @@
+// ============================================================================
+// Copyright (c) 2026 PRRX Cooperation. All Rights Reserved.
+// PRRX IDM (TM) - Intelligent Download Manager Engine
+// Watermark: PRRX-IDM-CORE-WATERMARK-SECURE-VAULT-2026
+// Confidential and Proprietary - Licensed under PRRX Open Source Initiative
+// ============================================================================
+
 using System;
 using System.IO;
 using System.Security.Cryptography;
@@ -87,14 +94,37 @@ namespace PRRX.IDM.Security
             return string.IsNullOrWhiteSpace(sanitized) ? $"PRRX_Download_{DateTime.UtcNow:yyyyMMdd_HHmmss}" : sanitized;
         }
 
+        public static bool IsPathWithinDirectory(string baseDirectory, string targetPath)
+        {
+            if (string.IsNullOrWhiteSpace(baseDirectory) || string.IsNullOrWhiteSpace(targetPath)) return false;
+            var safeDir = Path.GetFullPath(baseDirectory);
+            var normalizedSafeDir = safeDir.EndsWith(Path.DirectorySeparatorChar.ToString(), StringComparison.Ordinal)
+                ? safeDir
+                : safeDir + Path.DirectorySeparatorChar;
+
+            var fullTarget = Path.GetFullPath(targetPath);
+            return fullTarget.StartsWith(normalizedSafeDir, StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(fullTarget, safeDir, StringComparison.OrdinalIgnoreCase);
+        }
+
         public static string EnsureSafePath(string baseDirectory, string fileName)
         {
-            var cleanName = SanitizeFileName(fileName);
+            if (string.IsNullOrWhiteSpace(baseDirectory))
+            {
+                throw new ArgumentException("Base directory cannot be empty.", nameof(baseDirectory));
+            }
+
             var safeDir = Path.GetFullPath(baseDirectory);
+            var normalizedSafeDir = safeDir.EndsWith(Path.DirectorySeparatorChar.ToString(), StringComparison.Ordinal)
+                ? safeDir
+                : safeDir + Path.DirectorySeparatorChar;
+
+            var cleanName = SanitizeFileName(fileName);
             var combined = Path.GetFullPath(Path.Combine(safeDir, cleanName));
 
-            // Verify canonical path does not escape base directory
-            if (!combined.StartsWith(safeDir, StringComparison.OrdinalIgnoreCase))
+            // Verify canonical path does not escape base directory using strict boundary checking
+            if (!combined.StartsWith(normalizedSafeDir, StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(combined, safeDir, StringComparison.OrdinalIgnoreCase))
             {
                 throw new UnauthorizedAccessException("Path traversal detected! Attempted path escapes base directory.");
             }
@@ -104,14 +134,21 @@ namespace PRRX.IDM.Security
 
         public static bool VerifySha256(string filePath, string expectedHexHash)
         {
-            if (!File.Exists(filePath)) return false;
+            if (!File.Exists(filePath) || string.IsNullOrWhiteSpace(expectedHexHash)) return false;
 
-            using var sha256 = SHA256.Create();
-            using var stream = File.OpenRead(filePath);
-            var hashBytes = sha256.ComputeHash(stream);
-            var computedHex = BitConverter.ToString(hashBytes).Replace("-", "").ToLowerInvariant();
+            try
+            {
+                using var sha256 = SHA256.Create();
+                using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                var hashBytes = sha256.ComputeHash(stream);
+                var computedHex = BitConverter.ToString(hashBytes).Replace("-", "").ToLowerInvariant();
 
-            return string.Equals(computedHex, expectedHexHash.Trim().ToLowerInvariant(), StringComparison.OrdinalIgnoreCase);
+                return string.Equals(computedHex, expectedHexHash.Trim().ToLowerInvariant(), StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return false;
+            }
         }
     }
 }

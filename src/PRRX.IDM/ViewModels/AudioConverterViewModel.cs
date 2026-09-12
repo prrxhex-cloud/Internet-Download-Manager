@@ -1,3 +1,9 @@
+// ============================================================================
+// Copyright (c) 2026 PRRX Cooperation. All Rights Reserved.
+// PRRX IDM (TM) - Intelligent Download Manager Engine
+// Watermark: PRRX-IDM-CORE-WATERMARK-SECURE-VAULT-2026
+// Confidential and Proprietary - Licensed under PRRX Open Source Initiative
+// ============================================================================
 using System;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
@@ -199,7 +205,14 @@ namespace PRRX.IDM.ViewModels
                 {
                     try
                     {
-                        Process.Start(new ProcessStartInfo { FileName = "explorer.exe", Arguments = $"/select,\"{item.TargetFilePath}\"", UseShellExecute = true });
+                        var fullPath = Path.GetFullPath(item.TargetFilePath);
+                        var psi = new ProcessStartInfo
+                        {
+                            FileName = "explorer.exe",
+                            UseShellExecute = false
+                        };
+                        psi.ArgumentList.Add($"/select,{fullPath}");
+                        Process.Start(psi);
                     }
                     catch { }
                 }

@@ -1,3 +1,9 @@
+// ============================================================================
+// Copyright (c) 2026 PRRX Cooperation. All Rights Reserved.
+// PRRX IDM (TM) - Intelligent Download Manager Engine
+// Watermark: PRRX-IDM-CORE-WATERMARK-SECURE-VAULT-2026
+// Confidential and Proprietary - Licensed under PRRX Open Source Initiative
+// ============================================================================
 using System;
 using System.Diagnostics;
 using System.IO;
@@ -199,9 +205,10 @@ namespace PRRX.IDM
             }
             catch (Exception ex)
             {
+                Debug.WriteLine($"Startup exception: {ex}");
                 MessageBox.Show(
-                    $"Fatal Error during PRRX IDM startup:\n\n{ex.Message}\n\nStack:\n{ex.StackTrace}",
-                    "PRRX IDM Startup Error",
+                    $"A startup error occurred:\n\n{ex.Message}",
+                    "PRRX IDM Startup Notice",
                     MessageBoxButton.OK,
                     MessageBoxImage.Error);
 
@@ -211,8 +218,9 @@ namespace PRRX.IDM
 
         private void App_DispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
         {
+            Debug.WriteLine($"Dispatcher unhandled exception: {e.Exception}");
             MessageBox.Show(
-                $"Unexpected Application Error:\n\n{e.Exception.Message}\n\n{e.Exception.StackTrace}",
+                $"An operational error occurred:\n\n{e.Exception.Message}",
                 "PRRX IDM Error",
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
@@ -224,9 +232,10 @@ namespace PRRX.IDM
         {
             if (e.ExceptionObject is Exception ex)
             {
+                Debug.WriteLine($"Domain unhandled exception: {ex}");
                 MessageBox.Show(
-                    $"Fatal System Error:\n\n{ex.Message}",
-                    "PRRX IDM Critical Error",
+                    $"A system error occurred:\n\n{ex.Message}",
+                    "PRRX IDM Critical Notice",
                     MessageBoxButton.OK,
                     MessageBoxImage.Error);
             }
@@ -256,6 +265,23 @@ namespace PRRX.IDM
 
                 var json = System.Text.Encoding.UTF8.GetString(messageBuffer, 0, totalRead);
 
+                // Authenticate payload with secure local IPC token
+                var sec = new Security.SecurityService();
+                var ipcToken = sec.GetOrCreateIpcToken();
+                try
+                {
+                    using var doc = JsonDocument.Parse(json);
+                    var root = doc.RootElement;
+                    var dict = new System.Collections.Generic.Dictionary<string, object?>();
+                    foreach (var prop in root.EnumerateObject())
+                    {
+                        dict[prop.Name] = prop.Value.Clone();
+                    }
+                    dict["token"] = ipcToken;
+                    json = JsonSerializer.Serialize(dict);
+                }
+                catch { }
+
                 // Forward to running instance via Named Pipe or HTTP bridge
                 bool forwarded = false;
                 try
@@ -280,6 +306,7 @@ namespace PRRX.IDM
                             var bodyBytes = Encoding.UTF8.GetBytes(json);
                             var request = $"POST /api/download HTTP/1.1\r\n" +
                                           $"Host: 127.0.0.1:{BrowserIntegrationService.HttpPort}\r\n" +
+                                          $"X-PRRX-Token: {ipcToken}\r\n" +
                                           $"Content-Type: application/json\r\n" +
                                           $"Content-Length: {bodyBytes.Length}\r\n" +
                                           $"Connection: close\r\n\r\n";
@@ -295,17 +322,19 @@ namespace PRRX.IDM
 
                 if (!forwarded)
                 {
-                    // Main app not running - launch main process with payload
+                    // Main app not running - launch main process with payload using strict argument lists
                     var appExe = Process.GetCurrentProcess().MainModule?.FileName;
                     if (!string.IsNullOrWhiteSpace(appExe))
                     {
                         var b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(json));
-                        Process.Start(new ProcessStartInfo
+                        var psi = new ProcessStartInfo
                         {
                             FileName = appExe,
-                            Arguments = $"--payload {b64}",
-                            UseShellExecute = true
-                        });
+                            UseShellExecute = false
+                        };
+                        psi.ArgumentList.Add("--payload");
+                        psi.ArgumentList.Add(b64);
+                        Process.Start(psi);
                     }
                 }
 

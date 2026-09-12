@@ -1,3 +1,11 @@
+﻿/**
+ * ============================================================================
+ * Copyright (c) 2026 PRRX Cooperation. All Rights Reserved.
+ * PRRX IDM (TM) - Intelligent Download Manager Extension
+ * Watermark: PRRX-IDM-EXT-WATERMARK-SECURE-VAULT-2026
+ * Confidential and Proprietary - Licensed under PRRX Open Source Initiative
+ * ============================================================================
+ */
 // PRRX IDM Integration Module - High-Reliability Dual-Channel Background Worker
 const HOST_NAME = "com.prrx.idm";
 const HTTP_BRIDGE_URL = "http://127.0.0.1:46543/api/download";

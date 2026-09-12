@@ -1,3 +1,11 @@
+<!--
+============================================================================
+Copyright (c) 2026 PRRX Cooperation. All Rights Reserved.
+PRRX IDM (TM) - Intelligent Download Manager Engine
+Watermark: PRRX-IDM-XAML-WATERMARK-SECURE-VAULT-2026
+Confidential and Proprietary - Licensed under PRRX Open Source Initiative
+============================================================================
+-->
 <UserControl x:Class="PRRX.IDM.Views.Tabs.VideoDownloaderTab"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -84,7 +92,7 @@
                                        Appearance="Primary" Command="{Binding StartDownloadCommand}"
                                        IsEnabled="{Binding IsDownloading, Converter={StaticResource InvBool}}" Height="38" Padding="16,0" Margin="0,0,8,0"/>
 
-                            <ui:Button Content="⚡ IDM Inspector" Icon="{ui:SymbolIcon Symbol=DeveloperBoard24}"
+                            <ui:Button Content="IDM Inspector" Icon="{ui:SymbolIcon Symbol=DeveloperBoard24}"
                                        Appearance="Secondary" Command="{Binding OpenInspectorCommand}"
                                        ToolTip="Open Classic IDM Active Window with Dynamic Segment Visualizer &amp; Speed Limiter"
                                        Height="38" Padding="14,0"/>

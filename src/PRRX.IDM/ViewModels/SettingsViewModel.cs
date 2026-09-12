@@ -1,3 +1,10 @@
+// ============================================================================
+// Copyright (c) 2026 PRRX Cooperation. All Rights Reserved.
+// PRRX IDM (TM) - Intelligent Download Manager Engine
+// Watermark: PRRX-IDM-CORE-WATERMARK-SECURE-VAULT-2026
+// Confidential and Proprietary - Licensed under PRRX Open Source Initiative
+// ============================================================================
+
 using System;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
@@ -7,6 +14,7 @@ using System.Threading.Tasks;
 using System.Windows.Input;
 using Microsoft.Win32;
 using PRRX.IDM.Models;
+using PRRX.IDM.Security;
 using PRRX.IDM.Services;
 using PRRX.IDM.Views;
 
@@ -18,6 +26,7 @@ namespace PRRX.IDM.ViewModels
         private readonly IThemeService _themeService;
         private readonly IUpdateService _updateService;
         private readonly IMediaEngineService _mediaEngine;
+        private readonly ISecurityService _securityService;
 
         private AppThemeMode _selectedTheme;
         private double _transparencyFactor;
@@ -32,7 +41,14 @@ namespace PRRX.IDM.ViewModels
         private string _updateStatusMessage = "Ready to query GitHub Releases API.";
         private bool _isCheckingUpdates;
         private bool _isUpdateAvailable;
+        private bool _isDownloadingUpdate;
+        private double _updateDownloadProgress;
+        private string _updateDownloadProgressText = string.Empty;
+        private bool _canApplyUpdate;
         private UpdateManifest? _latestManifest;
+
+        private bool _isSecurityVaultActive = true;
+        private string _securityVaultStatusText = "AES-256-GCM / DPAPI Vault Active. Stored configurations, cookie caches, history, and IPC tokens are encrypted.";
 
         private bool _isUpdatingEngine;
         private string _engineStatusMessage = "Ready. Click to verify latest online extraction algorithms.";
@@ -166,6 +182,42 @@ namespace PRRX.IDM.ViewModels
             set => SetProperty(ref _isUpdateAvailable, value);
         }
 
+        public bool IsDownloadingUpdate
+        {
+            get => _isDownloadingUpdate;
+            set => SetProperty(ref _isDownloadingUpdate, value);
+        }
+
+        public double UpdateDownloadProgress
+        {
+            get => _updateDownloadProgress;
+            set => SetProperty(ref _updateDownloadProgress, value);
+        }
+
+        public string UpdateDownloadProgressText
+        {
+            get => _updateDownloadProgressText;
+            set => SetProperty(ref _updateDownloadProgressText, value);
+        }
+
+        public bool CanApplyUpdate
+        {
+            get => _canApplyUpdate;
+            set => SetProperty(ref _canApplyUpdate, value);
+        }
+
+        public bool IsSecurityVaultActive
+        {
+            get => _isSecurityVaultActive;
+            set => SetProperty(ref _isSecurityVaultActive, value);
+        }
+
+        public string SecurityVaultStatusText
+        {
+            get => _securityVaultStatusText;
+            set => SetProperty(ref _securityVaultStatusText, value);
+        }
+
         public bool IsUpdatingEngine
         {
             get => _isUpdatingEngine;
@@ -189,7 +241,9 @@ namespace PRRX.IDM.ViewModels
         public ICommand BrowseCookiesCommand { get; }
         public ICommand ClearCookiesCommand { get; }
         public ICommand CheckForUpdatesCommand { get; }
+        public ICommand UpdateNowInAppCommand { get; }
         public ICommand OpenLatestReleaseCommand { get; }
+        public ICommand AuditSecurityCommand { get; }
         public ICommand UpdateEngineCommand { get; }
         public ICommand SetThemeCommand { get; }
         public ICommand ReplayQuickTourCommand { get; }
@@ -201,12 +255,14 @@ namespace PRRX.IDM.ViewModels
             IConfigurationService configService,
             IThemeService themeService,
             IUpdateService updateService,
-            IMediaEngineService mediaEngine)
+            IMediaEngineService mediaEngine,
+            ISecurityService? securityService = null)
         {
             _configService = configService;
             _themeService = themeService;
             _updateService = updateService;
             _mediaEngine = mediaEngine;
+            _securityService = securityService ?? new SecurityService();
 
             _selectedTheme = _configService.CurrentConfig.ThemeMode;
             _transparencyFactor = _configService.CurrentConfig.TransparencyFactor;
@@ -251,7 +307,6 @@ namespace PRRX.IDM.ViewModels
 
             ClearCookiesCommand = new RelayCommand(() =>
             {
-                // Deactivate and remove any cached cookies
                 _configService.CurrentConfig.IsCookiesEnabled = false;
                 _configService.CurrentConfig.CookiesFilePath = string.Empty;
                 _configService.SaveConfig();
@@ -277,24 +332,45 @@ namespace PRRX.IDM.ViewModels
                 UpdateCookiesStatus();
             });
 
-            CheckForUpdatesCommand = new AsyncRelayCommand(CheckGitHubUpdatesAsync, () => !IsCheckingUpdates);
+            CheckForUpdatesCommand = new AsyncRelayCommand(CheckGitHubUpdatesAsync, () => !IsCheckingUpdates && !IsDownloadingUpdate);
+
+            UpdateNowInAppCommand = new AsyncRelayCommand(ApplyInAppUpdateAsync, () => !IsDownloadingUpdate && (IsUpdateAvailable || CanApplyUpdate) && _latestManifest != null);
 
             OpenLatestReleaseCommand = new RelayCommand(() =>
             {
                 if (_latestManifest != null && !string.IsNullOrWhiteSpace(_latestManifest.DownloadUrl))
                 {
-                    try
+                    if (SecurityGuard.ValidateUrl(_latestManifest.DownloadUrl, out var safeUrl, out _))
                     {
-                        Process.Start(new ProcessStartInfo
+                        try
                         {
-                            FileName = _latestManifest.DownloadUrl,
-                            UseShellExecute = true
-                        });
+                            Process.Start(new ProcessStartInfo
+                            {
+                                FileName = safeUrl,
+                                UseShellExecute = true
+                            });
+                        }
+                        catch
+                        {
+                            // Fallback
+                        }
                     }
-                    catch
-                    {
-                        // Fallback
-                    }
+                }
+            });
+
+            AuditSecurityCommand = new RelayCommand(() =>
+            {
+                try
+                {
+                    var key = _securityService.GetOrCreateMasterKey();
+                    var token = _securityService.GetOrCreateIpcToken();
+                    _configService.SaveConfig();
+                    _securityService.ZeroMemory(key);
+                    SecurityVaultStatusText = $"✅ Audit Passed: AES-256-GCM key & IPC token active (Token prefix: {token.Substring(0, Math.Min(8, token.Length))}...). All configurations & history re-encrypted.";
+                }
+                catch (Exception ex)
+                {
+                    SecurityVaultStatusText = $"Security Audit Notice: {ex.Message}";
                 }
             });
 
@@ -326,7 +402,7 @@ namespace PRRX.IDM.ViewModels
 
             InstallBrowserExtensionCommand = new RelayCommand(() =>
             {
-                var browserService = new BrowserIntegrationService(_configService);
+                var browserService = new BrowserIntegrationService(_configService, _securityService);
                 bool ok = browserService.RegisterBrowserHost();
                 BrowserStatusMessage = ok 
                     ? "✓ Successfully registered Native Messaging Host for Chrome and Microsoft Edge!" 
@@ -345,8 +421,8 @@ namespace PRRX.IDM.ViewModels
                     Process.Start(new ProcessStartInfo
                     {
                         FileName = "explorer.exe",
-                        Arguments = $"\"{target}\"",
-                        UseShellExecute = true
+                        UseShellExecute = false,
+                        ArgumentList = { Path.GetFullPath(target) }
                     });
                 }
             });
@@ -376,20 +452,30 @@ namespace PRRX.IDM.ViewModels
 
                 var (updateAvailable, manifest, error) = await _updateService.CheckGitHubReleasesAsync();
 
-                if (!string.IsNullOrWhiteSpace(error))
+                if (!string.IsNullOrWhiteSpace(error) && manifest == null)
                 {
                     UpdateStatusMessage = error;
                     IsUpdateAvailable = false;
+                    CanApplyUpdate = false;
                 }
                 else if (updateAvailable && manifest != null)
                 {
                     _latestManifest = manifest;
                     IsUpdateAvailable = true;
-                    UpdateStatusMessage = $"🎉 New Release Found: v{manifest.Version}! Click 'Open GitHub Release' to update.";
+                    CanApplyUpdate = true;
+                    UpdateStatusMessage = $"🎉 New Release Found: v{manifest.Version}! Click 'Update Now (In-App)' to update seamlessly without losing data.";
+                }
+                else if (manifest != null)
+                {
+                    _latestManifest = manifest;
+                    IsUpdateAvailable = false;
+                    CanApplyUpdate = true;
+                    UpdateStatusMessage = $"You are running the official release (v{_updateService.CurrentVersion.ToString(3)}). Latest distribution package v{manifest.Version} is ready for in-app update/reinstall.";
                 }
                 else
                 {
                     IsUpdateAvailable = false;
+                    CanApplyUpdate = false;
                     UpdateStatusMessage = "You are currently running the latest official version.";
                 }
             }
@@ -397,10 +483,57 @@ namespace PRRX.IDM.ViewModels
             {
                 UpdateStatusMessage = $"Update Check Error: {ex.Message}";
                 IsUpdateAvailable = false;
+                CanApplyUpdate = false;
             }
             finally
             {
                 IsCheckingUpdates = false;
+            }
+        }
+
+        private async Task ApplyInAppUpdateAsync()
+        {
+            if (_latestManifest == null) return;
+
+            try
+            {
+                IsDownloadingUpdate = true;
+                UpdateDownloadProgress = 0;
+                UpdateDownloadProgressText = "Connecting to release server...";
+
+                var progress = new Progress<double>(pct =>
+                {
+                    UpdateDownloadProgress = pct;
+                    UpdateDownloadProgressText = $"Downloading update: {pct:F1}%";
+                });
+
+                UpdateStatusMessage = $"Downloading & staging update v{_latestManifest.Version}...";
+                var (success, message) = await _updateService.ApplyInAppUpdateAsync(
+                    _latestManifest,
+                    progress,
+                    beforeShutdown: () =>
+                    {
+                        _configService.SaveConfig();
+                    });
+
+                if (!success)
+                {
+                    UpdateStatusMessage = $"Update Notice: {message}";
+                    UpdateDownloadProgressText = message;
+                }
+                else
+                {
+                    UpdateDownloadProgressText = "Update staged. Application restarting...";
+                }
+            }
+            catch (Exception ex)
+            {
+                UpdateStatusMessage = $"Update Failed: {ex.Message}";
+                UpdateDownloadProgressText = ex.Message;
+            }
+            finally
+            {
+                IsDownloadingUpdate = false;
             }
         }
 

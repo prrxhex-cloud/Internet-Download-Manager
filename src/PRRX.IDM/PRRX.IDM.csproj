@@ -10,8 +10,9 @@
     <RootNamespace>PRRX.IDM</RootNamespace>
     <Company>PRRX Cooperation</Company>
     <Product>PRRX Internet Download Manager</Product>
-    <Description>High-performance Windows Internet Download Manager</Description>
-    <Copyright>Copyright © 2026 PRRX Cooperation</Copyright>
+    <Description>Enterprise-Grade High-Performance Windows Internet Download Manager</Description>
+    <Copyright>Copyright © 2026 PRRX Cooperation. All Rights Reserved. PRRX IDM™ - Confidential &amp; Proprietary Engine</Copyright>
+    <GenerateAssemblyCopyrightAttribute>false</GenerateAssemblyCopyrightAttribute>
     <Version>1.2.0</Version>
     <AssemblyVersion>1.2.0.0</AssemblyVersion>
     <FileVersion>1.2.0.0</FileVersion>

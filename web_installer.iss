@@ -1,3 +1,9 @@
+﻿; ============================================================================
+; Copyright (c) 2026 PRRX Cooperation. All Rights Reserved.
+; PRRX IDM (TM) - Intelligent Download Manager Installer
+; Watermark: PRRX-IDM-INNO-WATERMARK-SECURE-VAULT-2026
+; Confidential and Proprietary - Licensed under PRRX Open Source Initiative
+; ============================================================================
 ; PRRX Internet Download Manager - Ultra-Lightweight Web Installer (< 3 MB)
 ; Uses Inno Setup 6 Native Download Engine & PowerShell Automatic Extraction
 

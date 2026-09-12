@@ -1,3 +1,10 @@
+// ============================================================================
+// Copyright (c) 2026 PRRX Cooperation. All Rights Reserved.
+// PRRX IDM (TM) - Intelligent Download Manager Engine
+// Watermark: PRRX-IDM-CORE-WATERMARK-SECURE-VAULT-2026
+// Confidential and Proprietary - Licensed under PRRX Open Source Initiative
+// ============================================================================
+
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -5,6 +12,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
 using PRRX.IDM.Models;
+using PRRX.IDM.Security;
 
 namespace PRRX.IDM.Services
 {
@@ -22,13 +30,34 @@ namespace PRRX.IDM.Services
     public class HistoryService : IHistoryService
     {
         private readonly string _historyFilePath;
+        private readonly ISecurityService _securityService;
         public ObservableCollection<DownloadItem> HistoryItems { get; } = new();
 
-        public HistoryService()
+        public HistoryService(ISecurityService? securityService = null)
         {
-            var appDataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "PRRX_IDM");
+            _securityService = securityService ?? new SecurityService();
+
+            var appDataDir = ConfigurationService.AppDataFolder;
             Directory.CreateDirectory(appDataDir);
             _historyFilePath = Path.Combine(appDataDir, "download_history.json");
+
+            // Auto-migrate legacy history location
+            var legacyPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "PRRX_IDM",
+                "download_history.json");
+
+            if (!File.Exists(_historyFilePath) && File.Exists(legacyPath))
+            {
+                try
+                {
+                    File.Copy(legacyPath, _historyFilePath, true);
+                }
+                catch
+                {
+                    // Ignore migration errors
+                }
+            }
 
             LoadHistory();
         }
@@ -39,8 +68,27 @@ namespace PRRX.IDM.Services
             {
                 if (File.Exists(_historyFilePath))
                 {
-                    var json = File.ReadAllText(_historyFilePath);
-                    var items = JsonSerializer.Deserialize<List<DownloadItem>>(json);
+                    var fileContent = File.ReadAllText(_historyFilePath);
+                    string plainJson = fileContent;
+
+                    if (fileContent.Contains("\"isEncrypted\"", StringComparison.OrdinalIgnoreCase))
+                    {
+                        try
+                        {
+                            var vault = JsonSerializer.Deserialize<EncryptedVaultContainer>(fileContent);
+                            if (vault != null && vault.IsEncrypted && !string.IsNullOrWhiteSpace(vault.CipherPayload))
+                            {
+                                var key = _securityService.GetOrCreateMasterKey();
+                                plainJson = _securityService.DecryptAesGcmString(vault.CipherPayload, key);
+                            }
+                        }
+                        catch
+                        {
+                            plainJson = fileContent;
+                        }
+                    }
+
+                    var items = JsonSerializer.Deserialize<List<DownloadItem>>(plainJson);
                     if (items != null)
                     {
                         HistoryItems.Clear();
@@ -53,7 +101,7 @@ namespace PRRX.IDM.Services
             }
             catch
             {
-                // Fallback to empty history
+                // Fallback to empty history on error
             }
         }
 
@@ -62,8 +110,21 @@ namespace PRRX.IDM.Services
             try
             {
                 var options = new JsonSerializerOptions { WriteIndented = true };
-                var json = JsonSerializer.Serialize(new List<DownloadItem>(HistoryItems), options);
-                File.WriteAllText(_historyFilePath, json);
+                var plainJson = JsonSerializer.Serialize(new List<DownloadItem>(HistoryItems), options);
+
+                // Encrypt download history with AES-256-GCM
+                var key = _securityService.GetOrCreateMasterKey();
+                var cipherPayload = _securityService.EncryptAesGcmString(plainJson, key);
+
+                var vault = new EncryptedVaultContainer
+                {
+                    VaultVersion = "2.0",
+                    IsEncrypted = true,
+                    CipherPayload = cipherPayload
+                };
+
+                var vaultJson = JsonSerializer.Serialize(vault, options);
+                File.WriteAllText(_historyFilePath, vaultJson);
             }
             catch
             {
@@ -98,11 +159,13 @@ namespace PRRX.IDM.Services
             {
                 if (!string.IsNullOrWhiteSpace(item.TargetFilePath) && File.Exists(item.TargetFilePath))
                 {
-                    Process.Start(new ProcessStartInfo
+                    var fullPath = Path.GetFullPath(item.TargetFilePath);
+                    var psi = new ProcessStartInfo
                     {
-                        FileName = item.TargetFilePath,
+                        FileName = fullPath,
                         UseShellExecute = true
-                    });
+                    };
+                    Process.Start(psi);
                 }
             }
             catch
@@ -117,23 +180,28 @@ namespace PRRX.IDM.Services
             {
                 if (!string.IsNullOrWhiteSpace(item.TargetFilePath) && File.Exists(item.TargetFilePath))
                 {
-                    Process.Start(new ProcessStartInfo
+                    var fullPath = Path.GetFullPath(item.TargetFilePath);
+                    var psi = new ProcessStartInfo
                     {
                         FileName = "explorer.exe",
-                        Arguments = $"/select,\"{item.TargetFilePath}\"",
-                        UseShellExecute = true
-                    });
+                        UseShellExecute = false
+                    };
+                    psi.ArgumentList.Add($"/select,{fullPath}");
+                    Process.Start(psi);
                 }
                 else
                 {
                     var defaultDir = Path.GetDirectoryName(item.TargetFilePath);
                     if (!string.IsNullOrWhiteSpace(defaultDir) && Directory.Exists(defaultDir))
                     {
-                        Process.Start(new ProcessStartInfo
+                        var fullDir = Path.GetFullPath(defaultDir);
+                        var psi = new ProcessStartInfo
                         {
-                            FileName = defaultDir,
-                            UseShellExecute = true
-                        });
+                            FileName = "explorer.exe",
+                            UseShellExecute = false
+                        };
+                        psi.ArgumentList.Add(fullDir);
+                        Process.Start(psi);
                     }
                 }
             }

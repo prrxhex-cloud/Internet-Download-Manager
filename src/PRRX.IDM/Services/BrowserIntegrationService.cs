@@ -1,3 +1,10 @@
+// ============================================================================
+// Copyright (c) 2026 PRRX Cooperation. All Rights Reserved.
+// PRRX IDM (TM) - Intelligent Download Manager Engine
+// Watermark: PRRX-IDM-CORE-WATERMARK-SECURE-VAULT-2026
+// Confidential and Proprietary - Licensed under PRRX Open Source Initiative
+// ============================================================================
+
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -13,6 +20,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using Microsoft.Win32;
 using PRRX.IDM.Models;
+using PRRX.IDM.Security;
 using PRRX.IDM.ViewModels;
 using PRRX.IDM.Views;
 
@@ -25,6 +33,7 @@ namespace PRRX.IDM.Services
         public string FileName { get; set; } = string.Empty;
         public string PageTitle { get; set; } = string.Empty;
         public string Cookies { get; set; } = string.Empty;
+        public string Token { get; set; } = string.Empty;
         public List<BatchLinkItem>? Links { get; set; }
     }
 
@@ -55,10 +64,12 @@ namespace PRRX.IDM.Services
         private CancellationTokenSource? _cts;
         private TcpListener? _tcpListener;
         private readonly IConfigurationService _configService;
+        private readonly ISecurityService _securityService;
 
-        public BrowserIntegrationService(IConfigurationService configService)
+        public BrowserIntegrationService(IConfigurationService configService, ISecurityService? securityService = null)
         {
             _configService = configService;
+            _securityService = securityService ?? new SecurityService();
         }
 
         public bool RegisterBrowserHost()
@@ -397,7 +408,8 @@ namespace PRRX.IDM.Services
                     var method = requestLine.Length > 0 ? requestLine[0].ToUpperInvariant() : "GET";
                     var path = requestLine.Length > 1 ? requestLine[1] : "/";
 
-                    string origin = "*";
+                    string origin = string.Empty;
+                    string incomingToken = string.Empty;
                     foreach (var line in lines)
                     {
                         if (line.StartsWith("Origin:", StringComparison.OrdinalIgnoreCase))
@@ -408,15 +420,38 @@ namespace PRRX.IDM.Services
                                 origin = parsedOrigin;
                             }
                         }
+                        else if (line.StartsWith("X-PRRX-Token:", StringComparison.OrdinalIgnoreCase))
+                        {
+                            incomingToken = line.Substring(13).Trim();
+                        }
+                        else if (line.StartsWith("Authorization:", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var authVal = line.Substring(14).Trim();
+                            if (authVal.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+                            {
+                                incomingToken = authVal.Substring(7).Trim();
+                            }
+                        }
                     }
+
+                    // Security Gate: Check Origin Header to prevent malicious website CSRF attacks
+                    if (!string.IsNullOrWhiteSpace(origin) && !_securityService.ValidateOrigin(origin))
+                    {
+                        var forbiddenBytes = Encoding.UTF8.GetBytes("HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                        await stream.WriteAsync(forbiddenBytes.AsMemory(0, forbiddenBytes.Length), token);
+                        await stream.FlushAsync(token);
+                        return;
+                    }
+
+                    string allowedOrigin = !string.IsNullOrWhiteSpace(origin) && _securityService.ValidateOrigin(origin) ? origin : "*";
 
                     // Handle CORS Preflight
                     if (method == "OPTIONS")
                     {
                         var optResponse = "HTTP/1.1 200 OK\r\n" +
-                                          $"Access-Control-Allow-Origin: {origin}\r\n" +
+                                          $"Access-Control-Allow-Origin: {allowedOrigin}\r\n" +
                                           "Access-Control-Allow-Methods: POST, GET, OPTIONS\r\n" +
-                                          "Access-Control-Allow-Headers: Content-Type, X-Requested-With, Authorization, Accept, Origin\r\n" +
+                                          "Access-Control-Allow-Headers: Content-Type, X-Requested-With, Authorization, Accept, Origin, X-PRRX-Token\r\n" +
                                           "Access-Control-Allow-Private-Network: true\r\n" +
                                           "Access-Control-Allow-Credentials: true\r\n" +
                                           "Access-Control-Max-Age: 86400\r\n" +
@@ -430,10 +465,10 @@ namespace PRRX.IDM.Services
 
                     if (method == "GET" && path.StartsWith("/api/ping", StringComparison.OrdinalIgnoreCase))
                     {
-                        var body = "{\"status\":\"online\",\"version\":\"1.2.0\",\"app\":\"PRRX IDM\"}";
+                        var body = "{\"status\":\"online\",\"version\":\"1.2.0\",\"app\":\"PRRX IDM\",\"vault\":\"sealed\"}";
                         var bodyBytes = Encoding.UTF8.GetBytes(body);
                         var response = $"HTTP/1.1 200 OK\r\n" +
-                                       $"Access-Control-Allow-Origin: {origin}\r\n" +
+                                       $"Access-Control-Allow-Origin: {allowedOrigin}\r\n" +
                                        "Access-Control-Allow-Private-Network: true\r\n" +
                                        "Access-Control-Allow-Credentials: true\r\n" +
                                        "Content-Type: application/json; charset=utf-8\r\n" +
@@ -460,7 +495,7 @@ namespace PRRX.IDM.Services
 
                         if (contentLength <= 0 || contentLength > 10 * 1024 * 1024)
                         {
-                            var badLen = Encoding.UTF8.GetBytes($"HTTP/1.1 400 Bad Request\r\nAccess-Control-Allow-Origin: {origin}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                            var badLen = Encoding.UTF8.GetBytes($"HTTP/1.1 400 Bad Request\r\nAccess-Control-Allow-Origin: {allowedOrigin}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
                             await stream.WriteAsync(badLen.AsMemory(0, badLen.Length), token);
                             await stream.FlushAsync(token);
                             return;
@@ -492,6 +527,21 @@ namespace PRRX.IDM.Services
 
                             if (payload != null)
                             {
+                                // Strict Authentication Gate:
+                                // Request MUST either originate from an authorized browser extension (valid origin)
+                                // OR supply a cryptographically valid local IPC token.
+                                bool hasValidOrigin = !string.IsNullOrWhiteSpace(origin) && _securityService.ValidateOrigin(origin);
+                                string tokenCandidate = !string.IsNullOrWhiteSpace(payload.Token) ? payload.Token : incomingToken;
+                                bool hasValidToken = !string.IsNullOrWhiteSpace(tokenCandidate) && _securityService.ValidateIpcToken(tokenCandidate);
+
+                                if (!hasValidOrigin && !hasValidToken)
+                                {
+                                    var badAuth = Encoding.UTF8.GetBytes($"HTTP/1.1 401 Unauthorized\r\nAccess-Control-Allow-Origin: {allowedOrigin}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                                    await stream.WriteAsync(badAuth.AsMemory(0, badAuth.Length), token);
+                                    await stream.FlushAsync(token);
+                                    return;
+                                }
+
                                 if (Application.Current != null)
                                 {
                                     Application.Current.Dispatcher.Invoke(() =>
@@ -503,7 +553,7 @@ namespace PRRX.IDM.Services
                                 var body = "{\"status\":\"ok\",\"message\":\"Download initiated in PRRX IDM\"}";
                                 var bodyBytes = Encoding.UTF8.GetBytes(body);
                                 var response = "HTTP/1.1 200 OK\r\n" +
-                                               $"Access-Control-Allow-Origin: {origin}\r\n" +
+                                               $"Access-Control-Allow-Origin: {allowedOrigin}\r\n" +
                                                "Access-Control-Allow-Private-Network: true\r\n" +
                                                "Access-Control-Allow-Credentials: true\r\n" +
                                                "Content-Type: application/json; charset=utf-8\r\n" +
@@ -519,7 +569,7 @@ namespace PRRX.IDM.Services
                     }
 
                     // Default Bad Request
-                    var badResp = Encoding.UTF8.GetBytes($"HTTP/1.1 400 Bad Request\r\nAccess-Control-Allow-Origin: {origin}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                    var badResp = Encoding.UTF8.GetBytes($"HTTP/1.1 400 Bad Request\r\nAccess-Control-Allow-Origin: {allowedOrigin}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
                     await stream.WriteAsync(badResp.AsMemory(0, badResp.Length), token);
                     await stream.FlushAsync(token);
                 }
@@ -548,6 +598,13 @@ namespace PRRX.IDM.Services
 
                         if (payload != null)
                         {
+                            // Named Pipe Security Gate: Require cryptographically valid IPC token
+                            if (!_securityService.ValidateIpcToken(payload.Token))
+                            {
+                                Debug.WriteLine("Named pipe IPC request rejected: Invalid or missing token.");
+                                continue;
+                            }
+
                             if (Application.Current != null)
                             {
                                 Application.Current.Dispatcher.Invoke(() =>

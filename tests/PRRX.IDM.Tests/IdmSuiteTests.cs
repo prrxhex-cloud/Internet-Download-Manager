@@ -1,3 +1,9 @@
+// ============================================================================
+// Copyright (c) 2026 PRRX Cooperation. All Rights Reserved.
+// PRRX IDM (TM) - Intelligent Download Manager Engine
+// Watermark: PRRX-IDM-CORE-WATERMARK-SECURE-VAULT-2026
+// Confidential and Proprietary - Licensed under PRRX Open Source Initiative
+// ============================================================================
 using System;
 using System.Collections.Generic;
 using PRRX.IDM.Models;
@@ -94,16 +100,29 @@ namespace PRRX.IDM.Tests
                 var optResp = await http.SendAsync(optReq);
                 Assert.Equal(System.Net.HttpStatusCode.OK, optResp.StatusCode);
 
-                // 3. Test POST /api/download
+                // 3. Test POST /api/download with authorized extension Origin
                 var jsonContent = new System.Net.Http.StringContent(
                     "{\"action\":\"download\",\"url\":\"https://example.com/testfile.exe\",\"pageTitle\":\"Download Test\"}",
                     System.Text.Encoding.UTF8,
                     "application/json");
 
-                var postResp = await http.PostAsync($"http://127.0.0.1:{testPort}/api/download", jsonContent);
+                var postReq = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Post, $"http://127.0.0.1:{testPort}/api/download")
+                {
+                    Content = jsonContent
+                };
+                postReq.Headers.Add("Origin", "chrome-extension://jpnkdblibibkbnllncikdeijkbdnmpem");
+                var postResp = await http.SendAsync(postReq);
                 Assert.Equal(System.Net.HttpStatusCode.OK, postResp.StatusCode);
                 var postBody = await postResp.Content.ReadAsStringAsync();
                 Assert.Contains("ok", postBody);
+
+                // 4. Test POST without valid origin or token is rejected (401)
+                var unauthPost = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Post, $"http://127.0.0.1:{testPort}/api/download")
+                {
+                    Content = new System.Net.Http.StringContent("{\"action\":\"download\",\"url\":\"https://evil.com/payload.exe\"}", System.Text.Encoding.UTF8, "application/json")
+                };
+                var unauthResp = await http.SendAsync(unauthPost);
+                Assert.Equal(System.Net.HttpStatusCode.Unauthorized, unauthResp.StatusCode);
             }
             finally
             {

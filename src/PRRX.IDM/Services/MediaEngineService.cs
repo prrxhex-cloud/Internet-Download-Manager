@@ -1,3 +1,9 @@
+// ============================================================================
+// Copyright (c) 2026 PRRX Cooperation. All Rights Reserved.
+// PRRX IDM (TM) - Intelligent Download Manager Engine
+// Watermark: PRRX-IDM-CORE-WATERMARK-SECURE-VAULT-2026
+// Confidential and Proprietary - Licensed under PRRX Open Source Initiative
+// ============================================================================
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -787,7 +793,7 @@ namespace PRRX.IDM.Services
                     Percentage = 98.0,
                     Speed = _lastNonZeroSpeed,
                     Eta = "00:01",
-                    StatusMessage = "⚡ Turbo Multiplexing video and audio streams with FFmpeg (Finalizing)..."
+                    StatusMessage = "Turbo Multiplexing video and audio streams with FFmpeg (Finalizing)..."
                 });
             }
             else if (line.Contains("[ExtractAudio]", StringComparison.OrdinalIgnoreCase) || line.Contains("[FixupM3u8]", StringComparison.OrdinalIgnoreCase))
@@ -797,7 +803,7 @@ namespace PRRX.IDM.Services
                     Percentage = 96.0,
                     Speed = _lastNonZeroSpeed,
                     Eta = "00:01",
-                    StatusMessage = "⚡ Transcoding pristine high-fidelity audio stream..."
+                    StatusMessage = "Transcoding pristine high-fidelity audio stream..."
                 });
             }
         }

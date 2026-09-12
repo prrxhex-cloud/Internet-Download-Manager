@@ -1,3 +1,10 @@
+// ============================================================================
+// Copyright (c) 2026 PRRX Cooperation. All Rights Reserved.
+// PRRX IDM (TM) - Intelligent Download Manager Engine
+// Watermark: PRRX-IDM-CORE-WATERMARK-SECURE-VAULT-2026
+// Confidential and Proprietary - Licensed under PRRX Open Source Initiative
+// ============================================================================
+
 using System;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -41,14 +48,21 @@ namespace PRRX.IDM.Services
                 case CompletionAction.ShutdownComputer:
                     try
                     {
-                        var args = forceProcesses ? "/s /f /t 10" : "/s /t 10";
-                        Process.Start(new ProcessStartInfo
+                        var psi = new ProcessStartInfo
                         {
                             FileName = "shutdown.exe",
-                            Arguments = args,
                             CreateNoWindow = true,
                             UseShellExecute = false
-                        });
+                        };
+                        psi.ArgumentList.Add("/s");
+                        if (forceProcesses)
+                        {
+                            psi.ArgumentList.Add("/f");
+                        }
+                        psi.ArgumentList.Add("/t");
+                        psi.ArgumentList.Add("10");
+
+                        Process.Start(psi);
                     }
                     catch (Exception ex)
                     {
@@ -59,14 +73,21 @@ namespace PRRX.IDM.Services
                 case CompletionAction.RestartComputer:
                     try
                     {
-                        var args = forceProcesses ? "/r /f /t 10" : "/r /t 10";
-                        Process.Start(new ProcessStartInfo
+                        var psi = new ProcessStartInfo
                         {
                             FileName = "shutdown.exe",
-                            Arguments = args,
                             CreateNoWindow = true,
                             UseShellExecute = false
-                        });
+                        };
+                        psi.ArgumentList.Add("/r");
+                        if (forceProcesses)
+                        {
+                            psi.ArgumentList.Add("/f");
+                        }
+                        psi.ArgumentList.Add("/t");
+                        psi.ArgumentList.Add("10");
+
+                        Process.Start(psi);
                     }
                     catch (Exception ex)
                     {
