@@ -128,7 +128,7 @@ namespace PRRX.IDM
                 {
                     if (!hasStartupPayload)
                     {
-                        var onboardingVm = new OnboardingViewModel(_configService, _themeService);
+                        var onboardingVm = new OnboardingViewModel(_configService, _themeService, _browserService);
                         var onboardingWindow = new OnboardingWindow(onboardingVm);
 
                         _themeService.ApplyTheme(_configService.CurrentConfig.ThemeMode, onboardingWindow);
@@ -137,6 +137,7 @@ namespace PRRX.IDM
                     }
 
                     _configService.CurrentConfig.IsOnboardingCompleted = true;
+                    _configService.CurrentConfig.HasCompletedQuickTour = true;
                     _configService.SaveConfig();
                 }
 

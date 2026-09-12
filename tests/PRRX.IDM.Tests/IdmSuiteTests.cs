@@ -347,5 +347,76 @@ namespace PRRX.IDM.Tests
             public void TriggerComplete(string path) => DownloadCompleted?.Invoke(this, path);
             public void TriggerFailed(string err) => DownloadFailed?.Invoke(this, err);
         }
+
+        [Fact]
+        public void OnboardingViewModel_InitializesAndNavigates5StepsCorrectly()
+        {
+            var config = new PRRX.IDM.Services.ConfigurationService();
+            var theme = new PRRX.IDM.Services.ThemeService(config);
+            var browser = new PRRX.IDM.Services.BrowserIntegrationService(config);
+
+            var vm = new PRRX.IDM.ViewModels.OnboardingViewModel(config, theme, browser);
+
+            Assert.Equal(1, vm.CurrentStep);
+            Assert.Equal(5, vm.TotalSteps);
+            Assert.Equal(1, vm.ExtensionSubStep);
+            Assert.False(string.IsNullOrWhiteSpace(vm.ExtensionRegistrationStatus));
+            Assert.False(string.IsNullOrWhiteSpace(vm.ExtensionDirectory));
+
+            // Navigate through steps 1 -> 5
+            for (int i = 1; i < 5; i++)
+            {
+                vm.NextStepCommand.Execute(null);
+                Assert.Equal(i + 1, vm.CurrentStep);
+            }
+
+            // Verify cannot exceed step 5
+            vm.NextStepCommand.Execute(null);
+            Assert.Equal(5, vm.CurrentStep);
+
+            // Test sub-steps navigation
+            vm.SetExtensionSubStepCommand.Execute(2);
+            Assert.Equal(2, vm.ExtensionSubStep);
+            vm.SetExtensionSubStepCommand.Execute("3");
+            Assert.Equal(3, vm.ExtensionSubStep);
+
+            // Test Next and Previous extension sub-step commands
+            vm.PreviousExtensionSubStepCommand.Execute(null);
+            Assert.Equal(2, vm.ExtensionSubStep);
+            vm.PreviousExtensionSubStepCommand.Execute(null);
+            Assert.Equal(1, vm.ExtensionSubStep);
+            vm.PreviousExtensionSubStepCommand.Execute(null); // Boundary test
+            Assert.Equal(1, vm.ExtensionSubStep);
+
+            vm.NextExtensionSubStepCommand.Execute(null);
+            Assert.Equal(2, vm.ExtensionSubStep);
+            vm.NextExtensionSubStepCommand.Execute(null);
+            Assert.Equal(3, vm.ExtensionSubStep);
+            vm.NextExtensionSubStepCommand.Execute(null); // Boundary test
+            Assert.Equal(3, vm.ExtensionSubStep);
+
+            // Navigate backward 5 -> 1
+            for (int i = 5; i > 1; i--)
+            {
+                vm.PreviousStepCommand.Execute(null);
+                Assert.Equal(i - 1, vm.CurrentStep);
+            }
+
+            // Cannot go below step 1
+            vm.PreviousStepCommand.Execute(null);
+            Assert.Equal(1, vm.CurrentStep);
+
+            // Test extension registration command
+            vm.RegisterExtensionCommand.Execute(null);
+            Assert.Contains("✓", vm.ExtensionRegistrationStatus);
+
+            // Test completion callback
+            bool completed = false;
+            vm.OnboardingCompleted += () => completed = true;
+            vm.FinishCommand.Execute(null);
+            Assert.True(completed);
+            Assert.True(config.CurrentConfig.IsOnboardingCompleted);
+            Assert.True(config.CurrentConfig.HasCompletedQuickTour);
+        }
     }
 }

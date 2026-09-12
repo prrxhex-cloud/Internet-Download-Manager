@@ -193,6 +193,7 @@ namespace PRRX.IDM.ViewModels
         public ICommand UpdateEngineCommand { get; }
         public ICommand SetThemeCommand { get; }
         public ICommand ReplayQuickTourCommand { get; }
+        public ICommand ReplayOnboardingCommand { get; }
         public ICommand InstallBrowserExtensionCommand { get; }
         public ICommand OpenExtensionFolderCommand { get; }
 
@@ -214,7 +215,7 @@ namespace PRRX.IDM.ViewModels
             _enableTurboAcceleration = _configService.CurrentConfig.EnableTurboAcceleration;
             _turboConnectionCount = _configService.CurrentConfig.TurboConnectionCount;
             _isWin11 = _themeService.IsWindows11;
-            _appVersion = "v1.1.0 (Official Release)";
+            _appVersion = "v1.2.0 (Official Release)";
 
             UpdateCookiesStatus();
 
@@ -313,6 +314,14 @@ namespace PRRX.IDM.ViewModels
                 var tourWindow = new QuickTourWindow(tourVm);
                 _themeService.ApplyTheme(_configService.CurrentConfig.ThemeMode, tourWindow);
                 tourWindow.ShowDialog();
+            });
+
+            ReplayOnboardingCommand = new RelayCommand(() =>
+            {
+                var onboardingVm = new OnboardingViewModel(_configService, _themeService);
+                var onboardingWindow = new OnboardingWindow(onboardingVm);
+                _themeService.ApplyTheme(_configService.CurrentConfig.ThemeMode, onboardingWindow);
+                onboardingWindow.ShowDialog();
             });
 
             InstallBrowserExtensionCommand = new RelayCommand(() =>

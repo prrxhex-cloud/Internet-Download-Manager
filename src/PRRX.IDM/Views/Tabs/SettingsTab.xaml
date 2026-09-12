@@ -141,13 +141,17 @@
                     </Grid.ColumnDefinitions>
 
                     <StackPanel VerticalAlignment="Center">
-                        <TextBlock Text="Quick Guide &amp; Interactive Walkthrough" FontSize="16" FontWeight="SemiBold"/>
-                        <TextBlock Text="Review the 4-step tutorial covering video downloading, YouTube cookies, 320 kbps MP3 conversion, and Liquid Glass UI." 
+                        <TextBlock Text="Interactive Guides &amp; Tutorials" FontSize="16" FontWeight="SemiBold"/>
+                        <TextBlock Text="Launch the 5-step browser integration guide or replay the feature walkthrough anytime." 
                                    Opacity="0.7" FontSize="12" Margin="0,2,0,0"/>
                     </StackPanel>
 
-                    <ui:Button Grid.Column="1" Content="Replay Quick Tour" Icon="{ui:SymbolIcon Symbol=PlayCircle24}"
-                               Appearance="Secondary" Command="{Binding ReplayQuickTourCommand}" Height="40"/>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                        <ui:Button Content="Setup &amp; Browser Tutorial" Icon="{ui:SymbolIcon Symbol=BookQuestionMark24}"
+                                   Appearance="Secondary" Command="{Binding ReplayOnboardingCommand}" Height="40" Margin="0,0,10,0"/>
+                        <ui:Button Content="Replay Feature Tour" Icon="{ui:SymbolIcon Symbol=PlayCircle24}"
+                                   Appearance="Secondary" Command="{Binding ReplayQuickTourCommand}" Height="40"/>
+                    </StackPanel>
                 </Grid>
             </Border>
 
