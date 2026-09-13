@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // Copyright (c) 2026 PRRX Cooperation. All Rights Reserved.
 // PRRX IDM (TM) - Intelligent Download Manager Engine
 // Watermark: PRRX-IDM-CORE-WATERMARK-SECURE-VAULT-2026
@@ -6,6 +6,7 @@
 // ============================================================================
 using System.Windows;
 using System.Windows.Input;
+using PRRX.IDM.Services;
 using PRRX.IDM.ViewModels;
 
 namespace PRRX.IDM.Views
@@ -17,6 +18,8 @@ namespace PRRX.IDM.Views
             InitializeComponent();
             DataContext = viewModel;
             viewModel.RequestClose += () => Close();
+            MemoryOptimizer.HookWindow(this);
+            Closed += (_, _) => MemoryOptimizer.TrimMemory();
         }
 
         private void Header_MouseDown(object sender, MouseButtonEventArgs e)

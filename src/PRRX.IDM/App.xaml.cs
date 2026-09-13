@@ -85,8 +85,11 @@ namespace PRRX.IDM
                 _historyService = new HistoryService();
                 _browserService = new BrowserIntegrationService(_configService);
 
-                // Auto-register Chrome and Edge Native Messaging and start IPC listener
-                _browserService.RegisterBrowserHost();
+                // Auto-register Chrome and Edge Native Messaging in background to prevent startup I/O lag
+                _ = System.Threading.Tasks.Task.Run(() =>
+                {
+                    try { _browserService.RegisterBrowserHost(); } catch { }
+                });
                 _browserService.StartIpcServer();
 
                 // Auto-clean post-update cache, temp build archives, and stale binary swap files in background
@@ -192,12 +195,21 @@ namespace PRRX.IDM
                 // Hook low-memory working set trimmer to window lifecycle
                 MemoryOptimizer.HookWindow(mainWindow);
 
-                // Bind main window close to application shutdown
-                ShutdownMode = ShutdownMode.OnMainWindowClose;
+                // Ensure app lifecycle survives dialog closings while MainWindow is hidden
+                ShutdownMode = ShutdownMode.OnExplicitShutdown;
+                mainWindow.Closed += (_, _) => Shutdown(0);
 
                 _themeService.ApplyTheme(_configService.CurrentConfig.ThemeMode, mainWindow);
 
-                mainWindow.Show();
+                if (!hasStartupPayload)
+                {
+                    mainWindow.Show();
+                }
+                else
+                {
+                    mainWindow.WindowState = WindowState.Minimized;
+                    mainWindow.Visibility = Visibility.Hidden;
+                }
 
                 // Process any incoming payload from command line arguments
                 if (!string.IsNullOrWhiteSpace(pendingPayloadJson))
@@ -210,7 +222,7 @@ namespace PRRX.IDM
                         });
                         if (payload != null)
                         {
-                            Dispatcher.BeginInvoke(new Action(() => _browserService?.HandleIncomingPayload(payload)), DispatcherPriority.Loaded);
+                            Dispatcher.BeginInvoke(new Action(() => _browserService?.HandleIncomingPayload(payload)), DispatcherPriority.Send);
                         }
                     }
                     catch { }
@@ -300,7 +312,7 @@ namespace PRRX.IDM
                 try
                 {
                     using var pipeClient = new System.IO.Pipes.NamedPipeClientStream(".", BrowserIntegrationService.PipeName, System.IO.Pipes.PipeDirection.Out);
-                    pipeClient.Connect(1000);
+                    pipeClient.Connect(200);
                     using var writer = new StreamWriter(pipeClient, Encoding.UTF8);
                     writer.Write(json);
                     writer.Flush();
@@ -313,7 +325,7 @@ namespace PRRX.IDM
                     {
                         using var client = new TcpClient();
                         var connectTask = client.ConnectAsync(IPAddress.Loopback, BrowserIntegrationService.HttpPort);
-                        if (connectTask.Wait(500))
+                        if (connectTask.Wait(200))
                         {
                             using var stream = client.GetStream();
                             var bodyBytes = Encoding.UTF8.GetBytes(json);
@@ -367,38 +379,60 @@ namespace PRRX.IDM
 
         private static bool CheckAndForwardToRunningInstance(string[] args)
         {
-            if (args == null || args.Length == 0) return false;
+            // 1. Quick loopback check to see if an instance of PRRX IDM is already running
+            bool isRunning = false;
+            try
+            {
+                using var pingClient = new TcpClient();
+                var pingTask = pingClient.ConnectAsync(IPAddress.Loopback, BrowserIntegrationService.HttpPort);
+                if (pingTask.Wait(150))
+                {
+                    isRunning = true;
+                }
+            }
+            catch { }
 
+            if (!isRunning) return false;
+
+            // 2. An instance is already running! Parse command line or default to 'show'
             string? url = null;
             string? payloadJson = null;
 
-            for (int i = 0; i < args.Length; i++)
+            if (args != null && args.Length > 0)
             {
-                if (args[i] == "--payload" && i + 1 < args.Length)
+                for (int i = 0; i < args.Length; i++)
                 {
-                    try
+                    if (args[i] == "--payload" && i + 1 < args.Length)
                     {
-                        var bytes = Convert.FromBase64String(args[i + 1]);
-                        payloadJson = Encoding.UTF8.GetString(bytes);
+                        try
+                        {
+                            var bytes = Convert.FromBase64String(args[i + 1]);
+                            payloadJson = Encoding.UTF8.GetString(bytes);
+                        }
+                        catch { }
                     }
-                    catch { }
-                }
-                else if (args[i].StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
-                         args[i].StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-                {
-                    url = args[i];
+                    else if (args[i] == "--url" && i + 1 < args.Length)
+                    {
+                        url = args[i + 1];
+                    }
+                    else if (args[i].StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                             args[i].StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                    {
+                        url = args[i];
+                    }
                 }
             }
 
-            if (payloadJson == null && url == null) return false;
-
             try
             {
-                var body = payloadJson ?? JsonSerializer.Serialize(new BrowserDownloadPayload
+                var body = payloadJson ?? (url != null ? JsonSerializer.Serialize(new BrowserDownloadPayload
                 {
                     Action = "download",
-                    Url = url!
-                });
+                    Url = url
+                }) : JsonSerializer.Serialize(new BrowserDownloadPayload
+                {
+                    Action = "show"
+                }));
 
                 using var client = new TcpClient();
                 var connectTask = client.ConnectAsync(IPAddress.Loopback, BrowserIntegrationService.HttpPort);

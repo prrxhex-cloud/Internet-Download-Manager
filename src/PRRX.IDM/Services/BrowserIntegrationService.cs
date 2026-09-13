@@ -34,6 +34,7 @@ namespace PRRX.IDM.Services
         public string PageTitle { get; set; } = string.Empty;
         public string Cookies { get; set; } = string.Empty;
         public string Token { get; set; } = string.Empty;
+        public long TotalBytes { get; set; } = 0;
         public List<BatchLinkItem>? Links { get; set; }
     }
 
@@ -544,10 +545,10 @@ namespace PRRX.IDM.Services
 
                                 if (Application.Current != null)
                                 {
-                                    Application.Current.Dispatcher.Invoke(() =>
+                                    _ = Application.Current.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Send, new Action(() =>
                                     {
                                         HandleIncomingPayload(payload);
-                                    });
+                                    }));
                                 }
 
                                 var body = "{\"status\":\"ok\",\"message\":\"Download initiated in PRRX IDM\"}";
@@ -607,10 +608,10 @@ namespace PRRX.IDM.Services
 
                             if (Application.Current != null)
                             {
-                                Application.Current.Dispatcher.Invoke(() =>
+                                _ = Application.Current.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Send, new Action(() =>
                                 {
                                     HandleIncomingPayload(payload);
-                                });
+                                }));
                             }
                         }
                     }
@@ -637,7 +638,21 @@ namespace PRRX.IDM.Services
         {
             if (Application.Current != null && !Application.Current.Dispatcher.CheckAccess())
             {
-                Application.Current.Dispatcher.Invoke(() => HandleIncomingPayload(payload));
+                Application.Current.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Send, new Action(() => HandleIncomingPayload(payload)));
+                return;
+            }
+
+            if (payload.Action == "show" || payload.Action == "activate")
+            {
+                if (Application.Current?.MainWindow != null)
+                {
+                    Application.Current.MainWindow.ShowInTaskbar = true;
+                    Application.Current.MainWindow.Visibility = Visibility.Visible;
+                    Application.Current.MainWindow.WindowState = WindowState.Normal;
+                    Application.Current.MainWindow.Show();
+                    Application.Current.MainWindow.Activate();
+                    Application.Current.MainWindow.Focus();
+                }
                 return;
             }
 
@@ -658,10 +673,8 @@ namespace PRRX.IDM.Services
 
                 var vm = new BatchDownloadViewModel(req, defaultDir);
                 var dlg = new BatchDownloadDialog(vm);
-                if (Application.Current?.MainWindow != null && Application.Current.MainWindow.IsVisible)
-                {
-                    dlg.Owner = Application.Current.MainWindow;
-                }
+
+                // Do NOT set dlg.Owner = MainWindow to prevent unminimizing or popping up MainWindow
                 dlg.Topmost = true;
                 dlg.Show();
                 dlg.Topmost = false;
@@ -675,17 +688,20 @@ namespace PRRX.IDM.Services
                     BringWindowToTop(helper.Handle);
                 }
                 catch { }
+
+                dlg.Closed += (_, _) =>
+                {
+                    MemoryOptimizer.TrimMemory();
+                };
             }
             else if (!string.IsNullOrWhiteSpace(payload.Url))
             {
-                var vm = new DownloadFileInfoViewModel(payload.Url, defaultDir, payload.PageTitle);
+                var vm = new DownloadFileInfoViewModel(payload.Url, defaultDir, payload.PageTitle, payload.TotalBytes);
                 if (!string.IsNullOrWhiteSpace(payload.FileName)) vm.FileName = payload.FileName;
 
                 var dlg = new DownloadFileInfoDialog(vm);
-                if (Application.Current?.MainWindow != null && Application.Current.MainWindow.IsVisible)
-                {
-                    dlg.Owner = Application.Current.MainWindow;
-                }
+
+                // Do NOT set dlg.Owner = MainWindow to prevent unminimizing or popping up MainWindow
                 dlg.Topmost = true;
                 dlg.Show();
                 dlg.Topmost = false;
@@ -706,8 +722,13 @@ namespace PRRX.IDM.Services
                     {
                         var activeVm = new ActiveDownloadViewModel(vm.Url, vm.SaveAsFullPath);
                         var activeWin = new ActiveDownloadWindow(activeVm);
+                        activeWin.Closed += (_, _) => MemoryOptimizer.TrimMemory();
                         activeWin.Show();
                         activeWin.Activate();
+                    }
+                    else
+                    {
+                        MemoryOptimizer.TrimMemory();
                     }
                 };
             }

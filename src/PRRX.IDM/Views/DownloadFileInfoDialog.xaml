@@ -85,7 +85,26 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
                 <ComboBox Grid.Row="1" Grid.Column="1" ItemsSource="{Binding AvailableCategories}" SelectedItem="{Binding SelectedCategory}"
                           Background="#161922" Foreground="#FFFFFF" BorderBrush="#2A3245"
                           Padding="8,6" Margin="0,0,10,12" FontSize="12"/>
-                <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding FileSizeFormatted}" Foreground="#0078D4" VerticalAlignment="Center" Margin="0,0,0,12" FontWeight="Bold" FontSize="12"/>
+                <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding FileSizeFormatted}" Foreground="#0078D4" VerticalAlignment="Center" Margin="0,0,0,12" FontWeight="Bold" FontSize="12">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsProbing}" Value="True">
+                                    <DataTrigger.EnterActions>
+                                        <BeginStoryboard x:Name="ProbingPulseStoryboard">
+                                            <Storyboard RepeatBehavior="Forever" AutoReverse="True">
+                                                <DoubleAnimation Storyboard.TargetProperty="Opacity" From="1.0" To="0.35" Duration="0:0:0.6"/>
+                                            </Storyboard>
+                                        </BeginStoryboard>
+                                    </DataTrigger.EnterActions>
+                                    <DataTrigger.ExitActions>
+                                        <StopStoryboard BeginStoryboardName="ProbingPulseStoryboard"/>
+                                    </DataTrigger.ExitActions>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
 
                 <!-- Save As -->
                 <TextBlock Grid.Row="2" Grid.Column="0" Text="Save To:" Foreground="#8FA0B8" VerticalAlignment="Center" Margin="0,0,0,12" FontWeight="Medium" FontSize="12"/>

@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // Copyright (c) 2026 PRRX Cooperation. All Rights Reserved.
 // PRRX IDM (TM) - Intelligent Download Manager Engine
 // Watermark: PRRX-IDM-CORE-WATERMARK-SECURE-VAULT-2026
@@ -45,7 +45,7 @@ namespace PRRX.IDM.Services
         {
             window.Loaded += (_, _) =>
             {
-                Task.Delay(800).ContinueWith(_ => TrimMemory());
+                Task.Delay(400).ContinueWith(_ => TrimMemory());
             };
 
             window.StateChanged += (_, _) =>
@@ -58,7 +58,12 @@ namespace PRRX.IDM.Services
 
             window.Deactivated += (_, _) =>
             {
-                Task.Delay(1000).ContinueWith(_ => TrimMemory());
+                Task.Delay(500).ContinueWith(_ => TrimMemory());
+            };
+
+            window.Closed += (_, _) =>
+            {
+                TrimMemory();
             };
         }
 
@@ -71,6 +76,7 @@ namespace PRRX.IDM.Services
             {
                 try
                 {
+                    System.Runtime.GCSettings.LargeObjectHeapCompactionMode = System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce;
                     GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
                     GC.WaitForPendingFinalizers();
                     GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);

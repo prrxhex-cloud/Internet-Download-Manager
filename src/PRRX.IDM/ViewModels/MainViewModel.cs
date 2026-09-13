@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // Copyright (c) 2026 PRRX Cooperation. All Rights Reserved.
 // PRRX IDM (TM) - Intelligent Download Manager Engine
 // Watermark: PRRX-IDM-CORE-WATERMARK-SECURE-VAULT-2026
@@ -76,6 +76,9 @@ namespace PRRX.IDM.ViewModels
                         "Settings" => SettingsViewModel,
                         _ => VideoViewModel
                     };
+
+                    // Free unused tab resources and compact working set
+                    MemoryOptimizer.TrimMemory();
                 }
             });
         }

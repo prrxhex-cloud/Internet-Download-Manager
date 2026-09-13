@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // Copyright (c) 2026 PRRX Cooperation. All Rights Reserved.
 // PRRX IDM (TM) - Intelligent Download Manager Engine
 // Watermark: PRRX-IDM-CORE-WATERMARK-SECURE-VAULT-2026
@@ -29,20 +29,29 @@ namespace PRRX.IDM.ViewModels
     {
         private static readonly HttpClient ProbeClient = new(new SocketsHttpHandler
         {
+            UseProxy = false, // Critical: bypass Windows WPAD auto-proxy delay
             PooledConnectionLifetime = TimeSpan.FromMinutes(5),
             AllowAutoRedirect = true,
-            AutomaticDecompression = System.Net.DecompressionMethods.None
-        }) { Timeout = TimeSpan.FromSeconds(10) };
+            AutomaticDecompression = System.Net.DecompressionMethods.None,
+            ConnectTimeout = TimeSpan.FromSeconds(2)
+        }) { Timeout = TimeSpan.FromSeconds(5) };
 
         private string _url = string.Empty;
         private string _fileName = string.Empty;
         private FileCategory _selectedCategory = FileCategory.General;
         private string _saveDirectory = string.Empty;
         private string _description = string.Empty;
-        private string _fileSizeFormatted = "Estimating size...";
+        private string _fileSizeFormatted = "Probing size...";
+        private bool _isProbing = false;
         private CancellationTokenSource? _probeCts;
 
         public DownloadDialogResult DialogResult { get; private set; } = DownloadDialogResult.Cancel;
+
+        public bool IsProbing
+        {
+            get => _isProbing;
+            set => SetProperty(ref _isProbing, value);
+        }
 
         public string Url
         {
@@ -141,7 +150,7 @@ namespace PRRX.IDM.ViewModels
 
         public event Action? RequestClose;
 
-        public DownloadFileInfoViewModel(string initialUrl, string defaultDownloadDir, string? pageTitle = null)
+        public DownloadFileInfoViewModel(string initialUrl, string defaultDownloadDir, string? pageTitle = null, long? precalculatedSize = null)
         {
             _url = initialUrl;
             _fileName = ExtractFileNameFromUrl(initialUrl);
@@ -149,7 +158,7 @@ namespace PRRX.IDM.ViewModels
             _cachedPageTitle = pageTitle;
 
             var baseDownloads = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
-            _saveDirectory = !string.IsNullOrWhiteSpace(defaultDownloadDir) && Directory.Exists(defaultDownloadDir)
+            _saveDirectory = !string.IsNullOrWhiteSpace(defaultDownloadDir)
                 ? defaultDownloadDir
                 : baseDownloads;
 
@@ -187,6 +196,18 @@ namespace PRRX.IDM.ViewModels
                 RequestClose?.Invoke();
             });
 
+            if (precalculatedSize.HasValue && precalculatedSize.Value > 0)
+            {
+                _fileSizeFormatted = FormatBytes(precalculatedSize.Value);
+                _isProbing = false;
+            }
+            else
+            {
+                _fileSizeFormatted = "Probing size...";
+                _isProbing = true;
+            }
+
+            // Launch size & filename probing strictly in background (<100ms instant dialog launch)
             _ = ProbeFileSizeAsync(initialUrl);
         }
 
@@ -229,19 +250,51 @@ namespace PRRX.IDM.ViewModels
             OnPropertyChanged(nameof(Description));
         }
 
-        public async Task ProbeFileSizeAsync(string url)
+        private Task? _activeProbeTask;
+        private string? _activeProbeUrl;
+        private readonly object _probeLock = new();
+
+        public Task ProbeFileSizeAsync(string url)
         {
             if (string.IsNullOrWhiteSpace(url))
             {
-                FileSizeFormatted = "Unknown size";
-                return;
+                DispatchToUi(() =>
+                {
+                    FileSizeFormatted = "Unknown size";
+                    IsProbing = false;
+                });
+                return Task.CompletedTask;
             }
 
-            _probeCts?.Cancel();
-            var cts = new CancellationTokenSource();
-            _probeCts = cts;
+            lock (_probeLock)
+            {
+                if (_activeProbeTask != null && !_activeProbeTask.IsCompleted && _activeProbeUrl == url)
+                {
+                    return _activeProbeTask;
+                }
 
-            FileSizeFormatted = "Estimating size...";
+                _probeCts?.Cancel();
+                var cts = new CancellationTokenSource();
+                _probeCts = cts;
+                _activeProbeUrl = url;
+
+                _activeProbeTask = DoProbeFileSizeAsync(url, cts);
+                return _activeProbeTask;
+            }
+        }
+
+        private async Task DoProbeFileSizeAsync(string url, CancellationTokenSource cts)
+        {
+            await Task.Yield();
+
+            DispatchToUi(() =>
+            {
+                if (FileSizeFormatted == "Unknown size" || string.IsNullOrWhiteSpace(FileSizeFormatted) || FileSizeFormatted == "Probing size...")
+                {
+                    FileSizeFormatted = "Probing size...";
+                    IsProbing = true;
+                }
+            });
 
             long? detectedBytes = null;
             string? detectedName = null;
@@ -345,6 +398,8 @@ namespace PRRX.IDM.ViewModels
             // Apply results to UI safely using DispatchToUi
             DispatchToUi(() =>
             {
+                IsProbing = false;
+
                 if (!string.IsNullOrWhiteSpace(detectedName) &&
                     (FileName.StartsWith("download_") || FileName == "download.bin"))
                 {
