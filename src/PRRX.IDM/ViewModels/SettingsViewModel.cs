@@ -164,6 +164,8 @@ namespace PRRX.IDM.ViewModels
             set => SetProperty(ref _appVersion, value);
         }
 
+        public string CurrentVersionClean => _updateService?.CurrentVersionClean ?? "1.3.0";
+
         public string UpdateStatusMessage
         {
             get => _updateStatusMessage;
@@ -288,7 +290,7 @@ namespace PRRX.IDM.ViewModels
             _enableTurboAcceleration = _configService.CurrentConfig.EnableTurboAcceleration;
             _turboConnectionCount = _configService.CurrentConfig.TurboConnectionCount;
             _isWin11 = _themeService.IsWindows11;
-            _appVersion = "v1.3.0 (Official Release)";
+            _appVersion = $"v{CurrentVersionClean} (Official Release)";
 
             UpdateCookiesStatus();
             InitializeChangelog();
@@ -352,7 +354,7 @@ namespace PRRX.IDM.ViewModels
 
             CheckForUpdatesCommand = new AsyncRelayCommand(CheckGitHubUpdatesAsync, () => !IsCheckingUpdates && !IsDownloadingUpdate);
 
-            UpdateNowInAppCommand = new AsyncRelayCommand(ApplyInAppUpdateAsync, () => !IsDownloadingUpdate && (IsUpdateAvailable || CanApplyUpdate) && _latestManifest != null);
+            UpdateNowInAppCommand = new AsyncRelayCommand(ApplyInAppUpdateAsync, () => !IsDownloadingUpdate && IsUpdateAvailable && _latestManifest != null);
 
             OpenLatestReleaseCommand = new RelayCommand(() =>
             {
@@ -575,7 +577,7 @@ namespace PRRX.IDM.ViewModels
             }
         }
 
-        private async Task CheckGitHubUpdatesAsync()
+        public async Task CheckGitHubUpdatesAsync()
         {
             try
             {
@@ -589,6 +591,7 @@ namespace PRRX.IDM.ViewModels
                     UpdateStatusMessage = error;
                     IsUpdateAvailable = false;
                     CanApplyUpdate = false;
+                    _latestManifest = null;
                 }
                 else if (updateAvailable && manifest != null)
                 {
@@ -597,18 +600,12 @@ namespace PRRX.IDM.ViewModels
                     CanApplyUpdate = true;
                     UpdateStatusMessage = $"🎉 New Release Found: v{manifest.Version}! Click 'Update Now (In-App)' to update seamlessly without losing data.";
                 }
-                else if (manifest != null)
-                {
-                    _latestManifest = manifest;
-                    IsUpdateAvailable = false;
-                    CanApplyUpdate = true;
-                    UpdateStatusMessage = $"You are running the official release (v{_updateService.CurrentVersion.ToString(3)}). Latest distribution package v{manifest.Version} is ready for in-app update/reinstall.";
-                }
                 else
                 {
+                    _latestManifest = null;
                     IsUpdateAvailable = false;
                     CanApplyUpdate = false;
-                    UpdateStatusMessage = "You are currently running the latest official version.";
+                    UpdateStatusMessage = $"You're up to date! PRRX IDM v{CurrentVersionClean} is the latest version.";
                 }
             }
             catch (Exception ex)
@@ -616,6 +613,7 @@ namespace PRRX.IDM.ViewModels
                 UpdateStatusMessage = $"Update Check Error: {ex.Message}";
                 IsUpdateAvailable = false;
                 CanApplyUpdate = false;
+                _latestManifest = null;
             }
             finally
             {
@@ -625,7 +623,7 @@ namespace PRRX.IDM.ViewModels
 
         private async Task ApplyInAppUpdateAsync()
         {
-            if (_latestManifest == null) return;
+            if (_latestManifest == null || !IsUpdateAvailable) return;
 
             try
             {

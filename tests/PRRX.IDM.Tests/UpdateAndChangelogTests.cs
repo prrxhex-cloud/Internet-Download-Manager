@@ -148,7 +148,127 @@ namespace PRRX.IDM.Tests
         {
             var service = new UpdateService();
             Assert.NotNull(service.CurrentVersion);
-            Assert.True(service.CurrentVersion >= new Version(1, 2, 0));
+            Assert.Equal("1.3.0", service.CurrentVersionClean);
+        }
+
+        [Theory]
+        [InlineData("1.3.0", "1.3.0", false)]
+        [InlineData("v1.3.0", "1.3.0", false)]
+        [InlineData("1.3.0", "v1.3.0", false)]
+        [InlineData("1.3.0.0", "1.3.0", false)]
+        [InlineData("1.3.0", "1.3.0.0", false)]
+        [InlineData("1.2.0", "1.3.0", false)]
+        [InlineData("1.2.9.9", "1.3.0", false)]
+        [InlineData("1.4.0", "1.3.0", true)]
+        [InlineData("v1.4.0", "1.3.0", true)]
+        [InlineData("1.3.1", "1.3.0", true)]
+        [InlineData("1.3.0.1", "1.3.0", true)]
+        [InlineData("2.0.0", "1.3.0", true)]
+        [InlineData("", "1.3.0", false)]
+        [InlineData(null, "1.3.0", false)]
+        public void UpdateService_IsVersionNewer_StrictComparison(string? remoteVersion, string? localVersion, bool expectedIsNewer)
+        {
+            bool isNewer = UpdateService.IsVersionNewer(remoteVersion, localVersion);
+            Assert.Equal(expectedIsNewer, isNewer);
+        }
+
+        [Fact]
+        public async System.Threading.Tasks.Task SettingsViewModel_WhenRemoteVersionEqualsCurrent_IsUpdateAvailableIsFalseAndButtonHidden()
+        {
+            var config = new ConfigurationService();
+            var theme = new ThemeService(config);
+            var media = new MediaEngineService(config);
+
+            var fakeUpdate = new FakeUpdateService
+            {
+                CurrentVersion = new Version(1, 3, 0),
+                ReleasesResult = (UpdateService.IsVersionNewer("1.3.0", "1.3.0"), new UpdateManifest { Version = "1.3.0" }, null)
+            };
+
+            var vm = new SettingsViewModel(config, theme, fakeUpdate, media);
+            await vm.CheckGitHubUpdatesAsync();
+
+            Assert.False(vm.IsUpdateAvailable);
+            Assert.False(vm.CanApplyUpdate);
+            Assert.False(vm.UpdateNowInAppCommand.CanExecute(null));
+            Assert.Equal("You're up to date! PRRX IDM v1.3.0 is the latest version.", vm.UpdateStatusMessage);
+        }
+
+        [Fact]
+        public async System.Threading.Tasks.Task SettingsViewModel_WhenRemoteVersionIsOlder_IsUpdateAvailableIsFalseAndButtonHidden()
+        {
+            var config = new ConfigurationService();
+            var theme = new ThemeService(config);
+            var media = new MediaEngineService(config);
+
+            var fakeUpdate = new FakeUpdateService
+            {
+                CurrentVersion = new Version(1, 3, 0),
+                ReleasesResult = (UpdateService.IsVersionNewer("1.2.0", "1.3.0"), new UpdateManifest { Version = "1.2.0" }, null)
+            };
+
+            var vm = new SettingsViewModel(config, theme, fakeUpdate, media);
+            await vm.CheckGitHubUpdatesAsync();
+
+            Assert.False(vm.IsUpdateAvailable);
+            Assert.False(vm.CanApplyUpdate);
+            Assert.False(vm.UpdateNowInAppCommand.CanExecute(null));
+            Assert.Equal("You're up to date! PRRX IDM v1.3.0 is the latest version.", vm.UpdateStatusMessage);
+        }
+
+        [Fact]
+        public async System.Threading.Tasks.Task SettingsViewModel_WhenRemoteVersionIsNewer_IsUpdateAvailableIsTrueAndButtonVisible()
+        {
+            var config = new ConfigurationService();
+            var theme = new ThemeService(config);
+            var media = new MediaEngineService(config);
+
+            var fakeUpdate = new FakeUpdateService
+            {
+                CurrentVersion = new Version(1, 3, 0),
+                ReleasesResult = (UpdateService.IsVersionNewer("1.4.0", "1.3.0"), new UpdateManifest { Version = "1.4.0" }, null)
+            };
+
+            var vm = new SettingsViewModel(config, theme, fakeUpdate, media);
+            await vm.CheckGitHubUpdatesAsync();
+
+            Assert.True(vm.IsUpdateAvailable);
+            Assert.True(vm.CanApplyUpdate);
+            Assert.True(vm.UpdateNowInAppCommand.CanExecute(null));
+            Assert.Contains("New Release Found: v1.4.0", vm.UpdateStatusMessage);
+        }
+
+        [Fact]
+        public void SettingsViewModel_AppVersion_DynamicallyReflectsCurrentVersion()
+        {
+            var config = new ConfigurationService();
+            var theme = new ThemeService(config);
+            var media = new MediaEngineService(config);
+
+            var fakeUpdate = new FakeUpdateService
+            {
+                CurrentVersion = new Version(2, 5, 0)
+            };
+
+            var vm = new SettingsViewModel(config, theme, fakeUpdate, media);
+            Assert.Equal("v2.5.0 (Official Release)", vm.AppVersion);
+        }
+
+        private class FakeUpdateService : IUpdateService
+        {
+            public Version CurrentVersion { get; set; } = new Version(1, 3, 0);
+            public string CurrentVersionClean => $"{CurrentVersion.Major}.{CurrentVersion.Minor}.{Math.Max(0, CurrentVersion.Build)}";
+            public (bool UpdateAvailable, UpdateManifest? Manifest, string? ErrorMessage) ReleasesResult { get; set; }
+
+            public System.Threading.Tasks.Task<(bool UpdateAvailable, UpdateManifest? Manifest, string? ErrorMessage)> CheckGitHubReleasesAsync(string? repoOwnerAndName = null)
+            {
+                return System.Threading.Tasks.Task.FromResult(ReleasesResult);
+            }
+
+            public System.Threading.Tasks.Task<bool> DownloadAndVerifyUpdateAsync(UpdateManifest manifest, string destinationPath, IProgress<double>? progress = null) => System.Threading.Tasks.Task.FromResult(true);
+            public System.Threading.Tasks.Task<(bool Success, string Message)> ApplyInAppUpdateAsync(UpdateManifest manifest, IProgress<double>? progress = null, Action? beforeShutdown = null, System.Threading.CancellationToken cancellationToken = default) => System.Threading.Tasks.Task.FromResult((true, "OK"));
+            public System.Threading.Tasks.Task<CleanupReport> CleanupPostUpdateArtifactsAsync(string? customAppDir = null) => System.Threading.Tasks.Task.FromResult(new CleanupReport());
+            public CleanupReport CleanupPostUpdateArtifacts(string? customAppDir = null) => new CleanupReport();
         }
     }
 }

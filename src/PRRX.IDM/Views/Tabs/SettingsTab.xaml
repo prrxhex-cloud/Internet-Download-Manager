@@ -101,7 +101,7 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
                         <!-- 1-Click In-App Update Button -->
                         <ui:Button Content="Update Now (In-App)" Icon="{ui:SymbolIcon Symbol=ArrowDownload24}"
                                    Appearance="Primary" Command="{Binding UpdateNowInAppCommand}" 
-                                   Visibility="{Binding CanApplyUpdate, Converter={StaticResource BoolToVis}}"
+                                   Visibility="{Binding IsUpdateAvailable, Converter={StaticResource BoolToVis}}"
                                    IsEnabled="{Binding IsDownloadingUpdate, Converter={StaticResource InvBool}}"
                                    Height="40" Margin="0,0,12,0" Padding="18,0"/>
 

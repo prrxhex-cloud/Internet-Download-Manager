@@ -24,6 +24,7 @@ namespace PRRX.IDM.Services
     public interface IUpdateService
     {
         Version CurrentVersion { get; }
+        string CurrentVersionClean { get; }
         Task<(bool UpdateAvailable, UpdateManifest? Manifest, string? ErrorMessage)> CheckGitHubReleasesAsync(string? repoOwnerAndName = null);
         Task<bool> DownloadAndVerifyUpdateAsync(UpdateManifest manifest, string destinationPath, IProgress<double>? progress = null);
         Task<(bool Success, string Message)> ApplyInAppUpdateAsync(
@@ -43,7 +44,10 @@ namespace PRRX.IDM.Services
         private static HttpClient CreateHttpClient()
         {
             var client = new HttpClient { Timeout = TimeSpan.FromSeconds(35) };
-            client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("PRRX-IDM", "1.3.0"));
+            var asm = typeof(App).Assembly;
+            var ver = asm.GetName().Version;
+            var verStr = ver != null ? $"{ver.Major}.{ver.Minor}.{Math.Max(0, ver.Build)}" : "1.3.0";
+            client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("PRRX-IDM", verStr));
             client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github.v3+json"));
             return client;
         }
@@ -52,9 +56,66 @@ namespace PRRX.IDM.Services
         {
             get
             {
-                var ver = Assembly.GetExecutingAssembly().GetName().Version;
-                return ver ?? new Version(1, 3, 0, 0);
+                var ver = typeof(App).Assembly.GetName().Version;
+                if (ver != null)
+                {
+                    return new Version(ver.Major, ver.Minor, Math.Max(0, ver.Build));
+                }
+                return new Version(1, 3, 0);
             }
+        }
+
+        public string CurrentVersionClean => $"{CurrentVersion.Major}.{CurrentVersion.Minor}.{Math.Max(0, CurrentVersion.Build)}";
+
+        public static Version ParseNormalizedVersion(string? raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return new Version(0, 0, 0, 0);
+
+            var clean = raw.Trim().TrimStart('v', 'V').Trim();
+            int plusIdx = clean.IndexOf('+');
+            if (plusIdx >= 0) clean = clean.Substring(0, plusIdx);
+            int dashIdx = clean.IndexOf('-');
+            if (dashIdx >= 0) clean = clean.Substring(0, dashIdx);
+
+            var parts = clean.Split('.', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length == 0) return new Version(0, 0, 0, 0);
+
+            int major = parts.Length > 0 && int.TryParse(parts[0], out var maj) ? maj : 0;
+            int minor = parts.Length > 1 && int.TryParse(parts[1], out var min) ? min : 0;
+            int build = parts.Length > 2 && int.TryParse(parts[2], out var bld) ? bld : 0;
+            int rev = parts.Length > 3 && int.TryParse(parts[3], out var r) ? r : 0;
+
+            return new Version(major, minor, build, rev);
+        }
+
+        public static bool IsVersionNewer(string? remoteVersionStr, string? localVersionStr)
+        {
+            if (string.IsNullOrWhiteSpace(remoteVersionStr) || string.IsNullOrWhiteSpace(localVersionStr))
+                return false;
+
+            var remoteVersionClean = remoteVersionStr.Trim().TrimStart('v', 'V').Trim();
+            var currentVersionClean = localVersionStr.Trim().TrimStart('v', 'V').Trim();
+
+            int plusR = remoteVersionClean.IndexOf('+');
+            if (plusR >= 0) remoteVersionClean = remoteVersionClean.Substring(0, plusR);
+            int dashR = remoteVersionClean.IndexOf('-');
+            if (dashR >= 0) remoteVersionClean = remoteVersionClean.Substring(0, dashR);
+
+            int plusL = currentVersionClean.IndexOf('+');
+            if (plusL >= 0) currentVersionClean = currentVersionClean.Substring(0, plusL);
+            int dashL = currentVersionClean.IndexOf('-');
+            if (dashL >= 0) currentVersionClean = currentVersionClean.Substring(0, dashL);
+
+            var remoteNorm = ParseNormalizedVersion(remoteVersionClean);
+            var localNorm = ParseNormalizedVersion(currentVersionClean);
+
+            if (Version.TryParse(remoteNorm.ToString(), out var remoteVer) &&
+                Version.TryParse(localNorm.ToString(), out var localVer))
+            {
+                return remoteVer > localVer;
+            }
+
+            return false;
         }
 
         public async Task<(bool UpdateAvailable, UpdateManifest? Manifest, string? ErrorMessage)> CheckGitHubReleasesAsync(string? repoOwnerAndName = null)
@@ -79,7 +140,7 @@ namespace PRRX.IDM.Services
                 using var doc = JsonDocument.Parse(json);
                 var root = doc.RootElement;
 
-                var rawTag = root.TryGetProperty("tag_name", out var tagProp) ? tagProp.GetString() ?? "1.2.0" : "1.2.0";
+                var rawTag = root.TryGetProperty("tag_name", out var tagProp) ? tagProp.GetString() ?? "1.3.0" : "1.3.0";
                 var cleanVersion = rawTag.TrimStart('v', 'V').Trim();
 
                 var releaseName = root.TryGetProperty("name", out var nameProp) ? nameProp.GetString() : rawTag;
@@ -135,13 +196,8 @@ namespace PRRX.IDM.Services
                     Sha256Hash = sha256 ?? string.Empty
                 };
 
-                if (Version.TryParse(cleanVersion, out var remoteVer))
-                {
-                    bool isNewer = remoteVer > CurrentVersion;
-                    return (isNewer, manifest, null);
-                }
-
-                return (false, manifest, null);
+                bool isNewer = IsVersionNewer(cleanVersion, CurrentVersionClean);
+                return (isNewer, manifest, null);
             }
             catch (Exception ex)
             {
@@ -167,9 +223,9 @@ namespace PRRX.IDM.Services
                     {
                         var json = await File.ReadAllTextAsync(path);
                         var manifest = JsonSerializer.Deserialize<UpdateManifest>(json);
-                        if (manifest != null && Version.TryParse(manifest.Version, out var localManifestVer))
+                        if (manifest != null && !string.IsNullOrWhiteSpace(manifest.Version))
                         {
-                            bool isNewer = localManifestVer > CurrentVersion;
+                            bool isNewer = IsVersionNewer(manifest.Version, CurrentVersionClean);
                             return (isNewer, manifest, null);
                         }
                     }
