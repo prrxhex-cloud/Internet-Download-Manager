@@ -466,7 +466,7 @@ namespace PRRX.IDM.Services
 
                     if (method == "GET" && path.StartsWith("/api/ping", StringComparison.OrdinalIgnoreCase))
                     {
-                        var body = "{\"status\":\"online\",\"version\":\"1.2.0\",\"app\":\"PRRX IDM\",\"vault\":\"sealed\"}";
+                        var body = "{\"status\":\"online\",\"version\":\"1.3.0\",\"app\":\"PRRX IDM\",\"vault\":\"sealed\"}";
                         var bodyBytes = Encoding.UTF8.GetBytes(body);
                         var response = $"HTTP/1.1 200 OK\r\n" +
                                        $"Access-Control-Allow-Origin: {allowedOrigin}\r\n" +

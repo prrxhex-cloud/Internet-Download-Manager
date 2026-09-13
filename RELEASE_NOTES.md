@@ -38,7 +38,7 @@
 
 ### 🛡️ 4. Enterprise Hardening & Quality Assurance
 - **IP Watermarking**: Embedded PRRX Cooperation intellectual property watermarks across all source headers, installers, and manifests.
-- **Comprehensive Test Suite**: 65 unit tests covering update mechanics, changelog models, user data protection, and download acceleration engines (100% pass rate).
+- **Comprehensive Test Suite**: 101 unit tests covering update mechanics, changelog models, user data protection, and download acceleration engines (100% pass rate).
 
 ---
 
@@ -46,9 +46,9 @@
 
 | Package | Filename | Size (MB) | Exact Size (Bytes) | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| **Online Web Setup** *(Recommended)* | [`PRRX_IDM_Setup_Online.exe`](https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.3.0/PRRX_IDM_Setup_Online.exe) | **1.99 MB** | 2,081,817 bytes | Ultra-compact web installer that streams and installs the latest components with zero administrator elevation required. |
-| **Full Offline Setup** | [`PRRX_Internet_Download_Manager_v1.3.0_Setup.exe`](https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.3.0/PRRX_Internet_Download_Manager_v1.3.0_Setup.exe) | **88.09 MB** | 92,364,373 bytes | Complete self-contained setup package with embedded 32-stream media engine and browser integration for air-gapped systems. |
-| **Portable Package** | [`PRRX_Internet_Download_Manager_v1.3.0_Portable.zip`](https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.3.0/PRRX_Internet_Download_Manager_v1.3.0_Portable.zip) | **91.74 MB** | 96,192,935 bytes | Zero-install standalone archive. Extract anywhere and launch `PRRX.InternetDownloadManager.exe`. |
+| **Online Web Setup** *(Recommended)* | [`PRRX_IDM_Setup_Online.exe`](https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.3.0/PRRX_IDM_Setup_Online.exe) | **1.99 MB** | 2,081,785 bytes | Ultra-compact web installer that streams and installs the latest components with zero administrator elevation required. |
+| **Full Offline Setup** | [`PRRX_Internet_Download_Manager_v1.3.0_Setup.exe`](https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.3.0/PRRX_Internet_Download_Manager_v1.3.0_Setup.exe) | **88.09 MB** | 92,368,444 bytes | Complete self-contained setup package with embedded 32-stream media engine and browser integration for air-gapped systems. |
+| **Portable Package** | [`PRRX_Internet_Download_Manager_v1.3.0_Portable.zip`](https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.3.0/PRRX_Internet_Download_Manager_v1.3.0_Portable.zip) | **91.74 MB** | 96,192,948 bytes | Zero-install standalone archive. Extract anywhere and launch `PRRX.InternetDownloadManager.exe`. |
 | **Update Manifest** | [`manifest.json`](https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.3.0/manifest.json) | **0.001 MB** | 866 bytes | Update metadata and checksum verification for in-app automatic updating. |
 
 ---
@@ -56,16 +56,16 @@
 ## 🔒 SHA-256 Checksums
 
 ```text
-0FAC1876686EAA7E01BA219C2118E70406F5B98209E9B7311FDC3562B87523A9  PRRX_IDM_Setup_Online.exe
-47E6DDA04F409274D2EC66BE680B05F6DCF8BB07AC0A6986809A187B7FFD6064  PRRX_Internet_Download_Manager_v1.3.0_Setup.exe
-0EB59221DA4DD25A0C2FA025FCA5A09710613D2AA48BD83AC6331E1B05830D79  PRRX_Internet_Download_Manager_v1.3.0_Portable.zip
-0E5E5FF6F08AE6B097714B6210A4F9389D7B71675854D138E7B35C71B265C1C6  manifest.json
+636C2CD9DBF849864DF82DF351C582625A221E04551B8C6B2D2B83F98F337590  PRRX_IDM_Setup_Online.exe
+0F66A54DA13E0FAADF64E7A639CE63FAFFC3A6CC2F3C384B74133B20FB53BD95  PRRX_Internet_Download_Manager_v1.3.0_Setup.exe
+7ACA8CD89F1289731D083C85FD1175CB36AB8A93A666AF6F29503521CDE5392F  PRRX_Internet_Download_Manager_v1.3.0_Portable.zip
+3CD192D4E8EBFBCE4CAA4BBC7F5B08A986E08797177377C1CC3FCBA0B94A066F  manifest.json
 ```
 
 ---
 
 ## 🧪 Verification & Test Results
-- **Unit Test Suite**: 91 of 91 tests passed (`PRRX.IDM.Tests.dll`)
+- **Unit Test Suite**: 101 of 101 tests passed (`PRRX.IDM.Tests.dll`)
 - **Build Status**: Clean Release win-x64 single-file build with zero errors
 - **Zero Data Loss Protection**: Verified by unit test suite — config, SQLite databases, and download files protected
 - **Inno Setup Compilers**: Offline and Online installers generated cleanly without lock contention

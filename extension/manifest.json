@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "PRRX IDM Integration Module",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "High-performance download interception and floating video grabber panel for PRRX Internet Download Manager.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAveacOpVKoYsZLnuVLgi7CXleQxsUhP82qwmRxfCItAYKp1pdVyOwqQD3Rw+l8TknZeGwebXAty1NYmHNV0bYQA5XF/TO1l5WOQYevoGoAGVQJK+kv/tB3aqwkQ7s5kC4jitjmI7MtlZmev99rwlGP9k/9jcqGq+8o3GHDyfEa/2psyxkDWFe9ev7i22VcJw7DSpri8UmChUEY3ha8cfU0Q+DruRKGrTPrZL1/HIvPQEWCCBUjYJKBBbhqdFnS+juXO+C38i72pxryzqwVA7WtjvJSEU9AagC0VVmJJQISXYI06Bu1drr7OAjrKLpE6IIFw0yOx9Up7oVb4WR0biPOQIDAQAB",
   "icons": {

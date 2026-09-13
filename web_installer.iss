@@ -12,7 +12,7 @@
 #define MyAppPublisher "PRRX Cooperation"
 #define MyAppURL "https://github.com/prrxhex-cloud/Internet-Download-Manager"
 #define MyAppExeName "PRRX.InternetDownloadManager.exe"
-#define MyAppExtId "gxmlbxjcnsciidchdsonpfohambheiijcp"
+#define MyAppExtId "mjcomdjfgmiphnekplhmgdepbhafbjal"
 #define LegacyExtId "jpnkdblibibkbnllncikdeijkbdnmpem"
 #define SecondaryExtId "mjcomdjfgmiphnekplhmgdepbhafbjal"
 #define PackageUrl "https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.3.0/PRRX_Internet_Download_Manager_v1.3.0_Portable.zip"
