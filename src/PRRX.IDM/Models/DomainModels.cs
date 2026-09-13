@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // Copyright (c) 2026 PRRX Cooperation. All Rights Reserved.
 // PRRX IDM (TM) - Intelligent Download Manager Engine
 // Watermark: PRRX-IDM-CORE-WATERMARK-SECURE-VAULT-2026
@@ -297,5 +297,43 @@ namespace PRRX.IDM.Models
         public string SourcePageUrl { get; set; } = string.Empty;
         public string PageTitle { get; set; } = "Web Page";
         public List<BatchLinkItem> Links { get; set; } = new();
+    }
+
+    public class ChangelogItem
+    {
+        public string Category { get; set; } = "Features";
+        public string Description { get; set; } = string.Empty;
+        public string CategoryBadgeColor { get; set; } = "#0078D4";
+        public string CategoryBgColor { get; set; } = "#200078D4";
+    }
+
+    public class ChangelogRelease
+    {
+        public string Version { get; set; } = string.Empty;
+        public string ReleaseDate { get; set; } = string.Empty;
+        public bool IsCurrentRelease { get; set; } = false;
+        public string StatusBadge { get; set; } = "Current Release";
+        public string Summary { get; set; } = string.Empty;
+        public List<ChangelogItem> Items { get; set; } = new();
+        public bool IsExpanded { get; set; } = false;
+    }
+
+    public class CleanupReport
+    {
+        public int FilesDeletedCount { get; set; } = 0;
+        public int DirectoriesCleanedCount { get; set; } = 0;
+        public long BytesFreed { get; set; } = 0;
+        public bool Success { get; set; } = true;
+        public string FormattedBytesFreed => FormatBytes(BytesFreed);
+        public List<string> CleanedItems { get; set; } = new();
+
+        private static string FormatBytes(long bytes)
+        {
+            if (bytes <= 0) return "0 B";
+            if (bytes >= 1024 * 1024 * 1024) return $"{(bytes / (1024.0 * 1024.0 * 1024.0)):F2} GB";
+            if (bytes >= 1024 * 1024) return $"{(bytes / (1024.0 * 1024.0)):F2} MB";
+            if (bytes >= 1024) return $"{(bytes / 1024.0):F1} KB";
+            return $"{bytes} B";
+        }
     }
 }

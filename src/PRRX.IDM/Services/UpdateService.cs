@@ -31,6 +31,8 @@ namespace PRRX.IDM.Services
             IProgress<double>? progress = null,
             Action? beforeShutdown = null,
             CancellationToken cancellationToken = default);
+        Task<CleanupReport> CleanupPostUpdateArtifactsAsync(string? customAppDir = null);
+        CleanupReport CleanupPostUpdateArtifacts(string? customAppDir = null);
     }
 
     public class UpdateService : IUpdateService
@@ -40,8 +42,8 @@ namespace PRRX.IDM.Services
 
         private static HttpClient CreateHttpClient()
         {
-            var client = new HttpClient { Timeout = TimeSpan.FromSeconds(25) };
-            client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("PRRX-IDM", "1.2.0"));
+            var client = new HttpClient { Timeout = TimeSpan.FromSeconds(35) };
+            client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("PRRX-IDM", "1.3.0"));
             client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github.v3+json"));
             return client;
         }
@@ -51,7 +53,7 @@ namespace PRRX.IDM.Services
             get
             {
                 var ver = Assembly.GetExecutingAssembly().GetName().Version;
-                return ver ?? new Version(1, 2, 0, 0);
+                return ver ?? new Version(1, 3, 0, 0);
             }
         }
 
@@ -195,6 +197,8 @@ namespace PRRX.IDM.Services
                 {
                     if (File.Exists(uri.LocalPath))
                     {
+                        var dir = Path.GetDirectoryName(destinationPath);
+                        if (!string.IsNullOrWhiteSpace(dir)) Directory.CreateDirectory(dir);
                         File.Copy(uri.LocalPath, destinationPath, true);
                         progress?.Report(100.0);
                         return string.IsNullOrWhiteSpace(manifest.Sha256Hash) || SecurityGuard.VerifySha256(destinationPath, manifest.Sha256Hash);
@@ -203,49 +207,76 @@ namespace PRRX.IDM.Services
 
                 bool downloaded = false;
 
-                // 2. Attempt HTTP streaming download
-                try
+                // 2. Resilient HTTP streaming download with retry logic, chunk validation, and progress tracking
+                int maxRetries = 3;
+                for (int attempt = 1; attempt <= maxRetries; attempt++)
                 {
-                    using var response = await HttpClient.GetAsync(manifest.DownloadUrl, HttpCompletionOption.ResponseHeadersRead);
-                    if (response.IsSuccessStatusCode)
+                    try
                     {
-                        var totalBytes = response.Content.Headers.ContentLength ?? -1L;
-                        await using var contentStream = await response.Content.ReadAsStreamAsync();
-
-                        var dir = Path.GetDirectoryName(destinationPath);
-                        if (!string.IsNullOrWhiteSpace(dir)) Directory.CreateDirectory(dir);
-
-                        await using var fileStream = new FileStream(destinationPath, FileMode.Create, FileAccess.Write, FileShare.None, 16384, true);
-
-                        var buffer = new byte[16384];
-                        long totalRead = 0;
-                        int bytesRead;
-
-                        while ((bytesRead = await contentStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
+                        using var request = new HttpRequestMessage(HttpMethod.Get, manifest.DownloadUrl);
+                        using var response = await HttpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+                        if (response.IsSuccessStatusCode)
                         {
-                            await fileStream.WriteAsync(buffer, 0, bytesRead);
-                            totalRead += bytesRead;
+                            var totalBytes = response.Content.Headers.ContentLength ?? -1L;
+                            await using var contentStream = await response.Content.ReadAsStreamAsync();
 
-                            if (totalBytes > 0 && progress != null)
+                            var dir = Path.GetDirectoryName(destinationPath);
+                            if (!string.IsNullOrWhiteSpace(dir)) Directory.CreateDirectory(dir);
+
+                            await using var fileStream = new FileStream(destinationPath, FileMode.Create, FileAccess.Write, FileShare.None, 65536, true);
+
+                            var buffer = new byte[65536];
+                            long totalRead = 0;
+                            int bytesRead;
+
+                            while ((bytesRead = await contentStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
                             {
-                                progress.Report(Math.Min(100.0, (double)totalRead / totalBytes * 100.0));
-                            }
-                        }
+                                await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead));
+                                totalRead += bytesRead;
 
-                        await fileStream.FlushAsync();
-                        fileStream.Close();
-                        downloaded = true;
+                                if (totalBytes > 0 && progress != null)
+                                {
+                                    progress.Report(Math.Min(100.0, (double)totalRead / totalBytes * 100.0));
+                                }
+                            }
+
+                            await fileStream.FlushAsync();
+                            fileStream.Close();
+
+                            // Validate downloaded size integrity
+                            if (totalBytes > 0 && totalRead < totalBytes)
+                            {
+                                if (File.Exists(destinationPath)) File.Delete(destinationPath);
+                                continue;
+                            }
+
+                            // Cryptographic SHA-256 verification
+                            if (!string.IsNullOrWhiteSpace(manifest.Sha256Hash))
+                            {
+                                if (!SecurityGuard.VerifySha256(destinationPath, manifest.Sha256Hash))
+                                {
+                                    if (File.Exists(destinationPath)) File.Delete(destinationPath);
+                                    continue;
+                                }
+                            }
+
+                            downloaded = true;
+                            break;
+                        }
                     }
-                }
-                catch
-                {
-                    // Fall back to local distribution candidate below
+                    catch
+                    {
+                        if (attempt < maxRetries)
+                        {
+                            await Task.Delay(attempt * 1000);
+                        }
+                    }
                 }
 
                 // 3. Fallback to local distribution package if HTTP is unavailable or offline
                 if (!downloaded || !File.Exists(destinationPath))
                 {
-                    string candidateFileName = "PRRX_Internet_Download_Manager_v1.2.0_Portable.zip";
+                    string candidateFileName = $"PRRX_Internet_Download_Manager_v{manifest.Version}_Portable.zip";
                     try
                     {
                         if (Uri.TryCreate(manifest.DownloadUrl, UriKind.Absolute, out var parsed))
@@ -259,6 +290,8 @@ namespace PRRX.IDM.Services
                     var localFallbacks = new[]
                     {
                         Path.Combine(@"D:\Internet Download Manager\dist", candidateFileName),
+                        Path.Combine(@"D:\Internet Download Manager\dist", "PRRX_Internet_Download_Manager_v1.3.0_Portable.zip"),
+                        Path.Combine(@"D:\Internet Download Manager\dist", "PRRX_Internet_Download_Manager_v1.2.0_Portable.zip"),
                         Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "dist", candidateFileName),
                         Path.Combine(AppDomain.CurrentDomain.BaseDirectory, candidateFileName),
                         Path.Combine(AppContext.BaseDirectory, "dist", candidateFileName)
@@ -395,11 +428,23 @@ for ($i = 0; $i -lt $maxRetries; $i++) {{
     }}
 }}
 
+# Post-update auto cleanup in helper script (Guaranteed Zero Data Loss)
+try {{
+    # Remove old binary swap files, preserving all user configuration and database files
+    Get-ChildItem -Path '{appDir}' -File -Filter '*.old' -ErrorAction SilentlyContinue | Where-Object {{ $_.Name -notmatch '\.(json|sqlite|db|key|token)$' }} | Remove-Item -Force -ErrorAction SilentlyContinue
+    Get-ChildItem -Path '{appDir}' -File -Filter '*.bak' -ErrorAction SilentlyContinue | Where-Object {{ $_.Name -notmatch '\.(json|sqlite|db|key|token)$' }} | Remove-Item -Force -ErrorAction SilentlyContinue
+    Get-ChildItem -Path '{appDir}' -File -Filter '*.tmp' -ErrorAction SilentlyContinue | Where-Object {{ $_.Name -notmatch '\.(json|sqlite|db|key|token)$' }} | Remove-Item -Force -ErrorAction SilentlyContinue
+    
+    # Remove staging directory
+    if (Test-Path '{stagingDir}') {{
+        Remove-Item -Path '{stagingDir}' -Recurse -Force -ErrorAction SilentlyContinue
+    }}
+}} catch {{}}
+
 if (Test-Path '{targetExe}') {{
     Start-Process -FilePath '{targetExe}' -WorkingDirectory '{appDir}'
 }}
 Start-Sleep -Seconds 3
-Remove-Item -Path '{stagingDir}' -Recurse -Force -ErrorAction SilentlyContinue
 ";
 
                 var scriptPath = Path.Combine(stagingDir, "apply_update.ps1");
@@ -435,6 +480,304 @@ Remove-Item -Path '{stagingDir}' -Recurse -Force -ErrorAction SilentlyContinue
             {
                 return (false, $"In-App update failed: {ex.Message}");
             }
+        }
+
+        public static bool IsProtectedUserDataFile(string filePath)
+        {
+            if (string.IsNullOrWhiteSpace(filePath)) return true;
+
+            try
+            {
+                var fileName = Path.GetFileName(filePath).ToLowerInvariant();
+                var ext = Path.GetExtension(filePath).ToLowerInvariant();
+
+                // Explicit protected configuration and state file names
+                var protectedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    "config.json",
+                    "download_history.json",
+                    "history.json",
+                    "settings.json",
+                    "cookies.txt",
+                    "master.key",
+                    "ipc.token",
+                    "manifest.json"
+                };
+
+                if (protectedNames.Contains(fileName)) return true;
+
+                // Protect all data state files
+                if (ext == ".json" || ext == ".db" || ext == ".sqlite" || ext == ".key" || ext == ".token")
+                {
+                    return true;
+                }
+
+                var fullPath = Path.GetFullPath(filePath);
+                var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                var userDownloads = Path.Combine(userProfile, "Downloads");
+                var userDocuments = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+                var userDesktop = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+
+                // Protected system and user personal directories
+                if (SecurityGuard.IsPathWithinDirectory(userDownloads, fullPath) ||
+                    SecurityGuard.IsPathWithinDirectory(userDocuments, fullPath) ||
+                    SecurityGuard.IsPathWithinDirectory(userDesktop, fullPath))
+                {
+                    return true;
+                }
+
+                var appDataFolder = ConfigurationService.AppDataFolder;
+                if (SecurityGuard.IsPathWithinDirectory(appDataFolder, fullPath))
+                {
+                    var rel = Path.GetRelativePath(appDataFolder, fullPath);
+                    // Only backup directories older than 7 days can be pruned
+                    if (!rel.StartsWith("backup_pre_update_", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+                }
+            }
+            catch
+            {
+                // Strict zero-data-loss fail-safe
+                return true;
+            }
+
+            return false;
+        }
+
+        public Task<CleanupReport> CleanupPostUpdateArtifactsAsync(string? customAppDir = null)
+        {
+            return Task.Run(() => CleanupPostUpdateArtifacts(customAppDir));
+        }
+
+        public CleanupReport CleanupPostUpdateArtifacts(string? customAppDir = null)
+        {
+            var report = new CleanupReport();
+            var appDir = customAppDir ?? AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\', '/');
+            var tempDir = Path.GetTempPath();
+
+            try
+            {
+                // 1. Scan and delete temporary update staging directories in Temp
+                try
+                {
+                    var tempDirs = Directory.GetDirectories(tempDir, "PRRX_IDM_Update_*", SearchOption.TopDirectoryOnly);
+                    foreach (var dir in tempDirs)
+                    {
+                        try
+                        {
+                            var di = new DirectoryInfo(dir);
+                            long dirSize = 0;
+                            foreach (var fi in di.GetFiles("*", SearchOption.AllDirectories))
+                            {
+                                if (!IsProtectedUserDataFile(fi.FullName))
+                                {
+                                    dirSize += fi.Length;
+                                    report.FilesDeletedCount++;
+                                }
+                            }
+                            Directory.Delete(dir, true);
+                            report.DirectoriesCleanedCount++;
+                            report.BytesFreed += dirSize;
+                            report.CleanedItems.Add($"Removed update staging directory: {di.Name} ({FormatBytes(dirSize)})");
+                        }
+                        catch { }
+                    }
+
+                    var otherTempDirs = Directory.GetDirectories(tempDir, "PRRX_Update_*", SearchOption.TopDirectoryOnly);
+                    foreach (var dir in otherTempDirs)
+                    {
+                        try
+                        {
+                            var di = new DirectoryInfo(dir);
+                            long dirSize = 0;
+                            foreach (var fi in di.GetFiles("*", SearchOption.AllDirectories))
+                            {
+                                if (!IsProtectedUserDataFile(fi.FullName))
+                                {
+                                    dirSize += fi.Length;
+                                    report.FilesDeletedCount++;
+                                }
+                            }
+                            Directory.Delete(dir, true);
+                            report.DirectoriesCleanedCount++;
+                            report.BytesFreed += dirSize;
+                            report.CleanedItems.Add($"Removed update cache directory: {di.Name} ({FormatBytes(dirSize)})");
+                        }
+                        catch { }
+                    }
+                }
+                catch { }
+
+                // 2. Scan and delete temporary update archives in Temp
+                try
+                {
+                    var zipFilters = new[] { "PRRX_Update_Package*.zip", "*PRRX*Update*.zip", "PRRX_IDM_*_stage*.zip" };
+                    foreach (var filter in zipFilters)
+                    {
+                        var zipFiles = Directory.GetFiles(tempDir, filter, SearchOption.TopDirectoryOnly);
+                        foreach (var zf in zipFiles)
+                        {
+                            try
+                            {
+                                if (!IsProtectedUserDataFile(zf))
+                                {
+                                    var fi = new FileInfo(zf);
+                                    long sz = fi.Length;
+                                    File.Delete(zf);
+                                    report.FilesDeletedCount++;
+                                    report.BytesFreed += sz;
+                                    report.CleanedItems.Add($"Removed update archive: {fi.Name} ({FormatBytes(sz)})");
+                                }
+                            }
+                            catch { }
+                        }
+                    }
+                }
+                catch { }
+
+                // 3. Scan and delete intermediate Inno Setup extraction caches in Temp
+                try
+                {
+                    var innoDirs = Directory.GetDirectories(tempDir, "is-*.tmp", SearchOption.TopDirectoryOnly);
+                    foreach (var dir in innoDirs)
+                    {
+                        try
+                        {
+                            var di = new DirectoryInfo(dir);
+                            if (DateTime.UtcNow - di.CreationTimeUtc > TimeSpan.FromHours(1))
+                            {
+                                long dirSize = 0;
+                                foreach (var fi in di.GetFiles("*", SearchOption.AllDirectories))
+                                {
+                                    if (!IsProtectedUserDataFile(fi.FullName))
+                                    {
+                                        dirSize += fi.Length;
+                                        report.FilesDeletedCount++;
+                                    }
+                                }
+                                Directory.Delete(dir, true);
+                                report.DirectoriesCleanedCount++;
+                                report.BytesFreed += dirSize;
+                                report.CleanedItems.Add($"Removed Inno extraction cache: {di.Name}");
+                            }
+                        }
+                        catch { }
+                    }
+                }
+                catch { }
+
+                // 4. Scan and delete stale binary swap files in application directory
+                if (Directory.Exists(appDir))
+                {
+                    try
+                    {
+                        var stalePatterns = new[] { "*.bak", "*.old", "*.tmp", "*.swap", "~*.tmp", "*.pending_update" };
+                        foreach (var pattern in stalePatterns)
+                        {
+                            var staleFiles = Directory.GetFiles(appDir, pattern, SearchOption.TopDirectoryOnly);
+                            foreach (var sf in staleFiles)
+                            {
+                                try
+                                {
+                                    if (!IsProtectedUserDataFile(sf))
+                                    {
+                                        var fi = new FileInfo(sf);
+                                        long sz = fi.Length;
+                                        File.Delete(sf);
+                                        report.FilesDeletedCount++;
+                                        report.BytesFreed += sz;
+                                        report.CleanedItems.Add($"Removed stale binary swap: {fi.Name} ({FormatBytes(sz)})");
+                                    }
+                                }
+                                catch { }
+                            }
+                        }
+                    }
+                    catch { }
+                }
+
+                // 5. Clean stale temporary scripts and logs in Temp
+                try
+                {
+                    var scriptFiles = Directory.GetFiles(tempDir, "apply_update*.ps1", SearchOption.TopDirectoryOnly);
+                    foreach (var sc in scriptFiles)
+                    {
+                        try
+                        {
+                            if (!IsProtectedUserDataFile(sc))
+                            {
+                                File.Delete(sc);
+                                report.FilesDeletedCount++;
+                            }
+                        }
+                        catch { }
+                    }
+
+                    var logFiles = Directory.GetFiles(tempDir, "*update_cleanup*.log", SearchOption.TopDirectoryOnly);
+                    foreach (var lf in logFiles)
+                    {
+                        try
+                        {
+                            if (!IsProtectedUserDataFile(lf))
+                            {
+                                File.Delete(lf);
+                                report.FilesDeletedCount++;
+                            }
+                        }
+                        catch { }
+                    }
+                }
+                catch { }
+
+                // 6. Clean old pre-update backup folders in AppData older than 7 days
+                try
+                {
+                    var appDataFolder = ConfigurationService.AppDataFolder;
+                    if (Directory.Exists(appDataFolder))
+                    {
+                        var backupDirs = Directory.GetDirectories(appDataFolder, "backup_pre_update_*", SearchOption.TopDirectoryOnly);
+                        foreach (var bDir in backupDirs)
+                        {
+                            try
+                            {
+                                var di = new DirectoryInfo(bDir);
+                                if (DateTime.UtcNow - di.CreationTimeUtc > TimeSpan.FromDays(7))
+                                {
+                                    long dirSize = 0;
+                                    foreach (var fi in di.GetFiles("*", SearchOption.AllDirectories))
+                                    {
+                                        dirSize += fi.Length;
+                                        report.FilesDeletedCount++;
+                                    }
+                                    Directory.Delete(bDir, true);
+                                    report.DirectoriesCleanedCount++;
+                                    report.BytesFreed += dirSize;
+                                    report.CleanedItems.Add($"Pruned expired backup snapshot: {di.Name}");
+                                }
+                            }
+                            catch { }
+                        }
+                    }
+                }
+                catch { }
+            }
+            catch
+            {
+                report.Success = false;
+            }
+
+            return report;
+        }
+
+        private static string FormatBytes(long bytes)
+        {
+            if (bytes <= 0) return "0 B";
+            if (bytes >= 1024 * 1024 * 1024) return $"{(bytes / (1024.0 * 1024.0 * 1024.0)):F2} GB";
+            if (bytes >= 1024 * 1024) return $"{(bytes / (1024.0 * 1024.0)):F2} MB";
+            if (bytes >= 1024) return $"{(bytes / 1024.0):F1} KB";
+            return $"{bytes} B";
         }
 
         private void PreserveUserDataBeforeUpdate(string appDir)

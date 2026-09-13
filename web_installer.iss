@@ -1,4 +1,4 @@
-﻿; ============================================================================
+; ============================================================================
 ; Copyright (c) 2026 PRRX Cooperation. All Rights Reserved.
 ; PRRX IDM (TM) - Intelligent Download Manager Installer
 ; Watermark: PRRX-IDM-INNO-WATERMARK-SECURE-VAULT-2026
@@ -8,14 +8,14 @@
 ; Uses Inno Setup 6 Native Download Engine & PowerShell Automatic Extraction
 
 #define MyAppName "PRRX Internet Download Manager"
-#define MyAppVersion "1.2.0"
+#define MyAppVersion "1.3.0"
 #define MyAppPublisher "PRRX Cooperation"
 #define MyAppURL "https://github.com/prrxhex-cloud/Internet-Download-Manager"
 #define MyAppExeName "PRRX.InternetDownloadManager.exe"
 #define MyAppExtId "gxmlbxjcnsciidchdsonpfohambheiijcp"
 #define LegacyExtId "jpnkdblibibkbnllncikdeijkbdnmpem"
 #define SecondaryExtId "mjcomdjfgmiphnekplhmgdepbhafbjal"
-#define PackageUrl "https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.2.0/PRRX_Internet_Download_Manager_v1.2.0_Portable.zip"
+#define PackageUrl "https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.3.0/PRRX_Internet_Download_Manager_v1.3.0_Portable.zip"
 
 [Setup]
 AppId={{D8146F25-8A11-47A1-8E2E-73E9623D7091}

@@ -89,6 +89,19 @@ namespace PRRX.IDM
                 _browserService.RegisterBrowserHost();
                 _browserService.StartIpcServer();
 
+                // Auto-clean post-update cache, temp build archives, and stale binary swap files in background
+                _ = System.Threading.Tasks.Task.Run(async () =>
+                {
+                    try
+                    {
+                        await _updateService.CleanupPostUpdateArtifactsAsync();
+                    }
+                    catch
+                    {
+                        // Non-critical background cleanup
+                    }
+                });
+
                 // Initial global theme application
                 _themeService.ApplyTheme(_configService.CurrentConfig.ThemeMode);
 

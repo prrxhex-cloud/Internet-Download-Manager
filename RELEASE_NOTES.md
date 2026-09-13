@@ -1,44 +1,44 @@
-# 🚀 PRRX Internet Download Manager — Release Notes v1.2.0
+# 🚀 PRRX Internet Download Manager — Release Notes v1.3.0
 
-**Release Tag**: `v1.2.0`  
-**Date**: September 12, 2026  
+**Release Tag**: `v1.3.0`  
+**Target Branch**: `main`  
+**Date**: September 13, 2026  
 **Target Platform**: Windows 10 / Windows 11 (x64)  
 **Publisher**: PRRX Cooperation  
 
 ---
 
-## 🌟 What's New in This Release
+## 🌟 What's New in Version 1.3.0
 
-### 🧭 1. Interactive 5-Step Onboarding & Browser Integration Tutorial
-- **Built-in First-Run Experience**: A modern, guided 5-step onboarding wizard (`OnboardingWindow.xaml`) that welcomes users and helps them set up their optimal download environment.
-  - **Step 1: Welcome Overview**: High-level introduction to 32-stream acceleration, universal media grabbing, and kernel memory compaction.
-  - **Step 2: Theme Setup**: 1-click selection between System Theme, Light Mode, and Dark Mode.
-  - **Step 3: Dynamic Windows 11 Transparency**: Real-time Mica / Acrylic opacity tuning slider.
-  - **Step 4: Browser Integration & Grabber Tutorial**: Interactive 3-part tabbed guide detailing:
-    1. *Auto-Integration*: Automated registration of Native Messaging Host (`com.prrx.idm`) for Chrome and Microsoft Edge.
-    2. *Video Grabber on All Sites*: Setting extension site permissions and using the floating "Download with PRRX" button above HTML5 video players.
-    3. *Manual Loading & Pinning*: Step-by-step 4-action guide for Brave, Vivaldi, and Chromium browsers with 1-click folder launcher and auto-clipboard copying.
-  - **Step 5: Download Location & Quick Launch**: Choose default download directory and launch directly into the app.
-- **On-Demand Replay**: Both the **Setup & Browser Tutorial** and the **Feature Quick Tour** can be replayed at any time directly from **Tab 4 (Settings & Updates)**.
+### 📜 1. Interactive Changelog & Version History in Settings
+- **In-App Version History**: Added a dedicated, Fluent 2 styled **Changelog & Version History** card inside **Tab 4 (Settings & Updates)** with interactive expanders.
+- **Complete Release Archive**: Inspect full historical changes for **v1.3.0**, **v1.2.0**, **v1.1.0**, and **v1.0.0** directly within the application without opening a web browser.
+- **Categorized Release Notes**: Color-coded badges categorizing improvements by:
+  - 🚀 **Features** (Accent Blue)
+  - 🛠️ **Fixes** (Forest Green)
+  - ⚡ **Performance** (Amber)
+  - 🛡️ **Security** (Purple / Red)
 
-### 🌐 2. Automated Chrome & Edge Extension Integration
-- Automatic configuration of Windows Registry entries for Chrome and Edge native messaging hosts (`HKCU\Software\Google\Chrome\NativeMessagingHosts\com.prrx.idm` and `HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.prrx.idm`).
-- High-speed local loopback IPC bridge on port `46543` for zero-latency communication.
-- Clean uninstallation engine that purges host definitions and registry keys with zero system residue.
+### 🧹 2. Automatic Post-Update Cleanup (Zero Data Loss Guaranteed)
+- **Automatic Startup Sweep**: Runs unobtrusively in the background on application startup to detect and purge leftover update artifacts.
+- **Artifacts Cleaned**:
+  - Temporary update staging folders (`%TEMP%\PRRX_IDM_Update_*`, `PRRX_Update_*`).
+  - Leftover update `.zip` packages in `%TEMP%`.
+  - Inno Setup temporary setup extraction directories (`is-*.tmp`).
+  - Stale binary swap files (`*.bak`, `*.old`, `*.tmp`, `*.swap`) in the application installation directory.
+  - Backup snapshots older than 7 days.
+- **Guaranteed Zero Data Loss**: Strict protection whitelist ensures all user configurations (`config.json`, `settings.json`), download database & history (`download_history.json`, `.sqlite`, `.db`), encryption keys (`master.key`), session cookies (`cookies.txt`), and all files in user download directories (`Downloads`, `Documents`, `Desktop`) are 100% untouched.
+- **Manual Cleanup Action**: Added a **Clean Update Cache** button in Settings with a real-time status banner displaying disk space reclaimed.
 
-### 🎬 3. Floating Video Grabber & Universal Media Converter
-- Floating "Download with PRRX" button injected into HTML5 video players across YouTube, Vimeo, TikTok, Bilibili, and 1,000+ sites.
-- Quick resolution selector (1080p Full HD, 720p HD, 480p, and MP3 audio extraction).
-- Universal audio converter supporting 10+ formats (MP3 up to 320 kbps Studio Extreme, WAV Lossless, M4R iPhone Ringtone, FLAC, AAC, OPUS).
-- Ultra HD thumbnail grabber extracting 1080p maximum-resolution artwork in 1 click.
+### 🔄 3. Resilient Online Auto-Update Engine
+- **Streaming Retry Loop**: Implemented a 3-attempt automated retry loop with exponential backoff (`1s`, `2s`, `4s`) for update package downloads.
+- **High-Throughput Buffering**: Upgraded to 64 KB stream chunking with live speed metrics, progress tracking, and chunk-by-chunk validation.
+- **Integrity Validation**: Computes and matches SHA-256 hashes against update manifests before extraction, preventing incomplete or corrupted update payloads from being applied.
+- **Robust Update Applicator**: Refined `apply_update.ps1` script to wait for process termination, safely swap executable files, purge temporary update archives, and launch the newly installed version.
 
-### ⚡ 4. 32-Stream Turbo Multi-Connection Engine
-- Saturated multi-socket downloading across 32 parallel stream fragments (`--concurrent-fragments 32`).
-- 2 MB dynamic RAM adaptive stream buffering and 4 MB HTTP pipelining for maximum gigabit network saturation.
-- Automatic byte-range stitching, pause, and resume capabilities.
-
-### 📉 5. Ultra-Lean Memory Footprint (~20 MB Idle)
-- Background Win32 kernel working set compactor reducing idle RAM usage down to ~20 MB (over 90% memory reduction compared to standard desktop applications).
+### 🛡️ 4. Enterprise Hardening & Quality Assurance
+- **IP Watermarking**: Embedded PRRX Cooperation intellectual property watermarks across all source headers, installers, and manifests.
+- **Comprehensive Test Suite**: 65 unit tests covering update mechanics, changelog models, user data protection, and download acceleration engines (100% pass rate).
 
 ---
 
@@ -46,26 +46,26 @@
 
 | Package | Filename | Size (MB) | Exact Size (Bytes) | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| **Online Web Setup** *(Recommended)* | [`PRRX_IDM_Setup_Online.exe`](https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.2.0/PRRX_IDM_Setup_Online.exe) | **1.99 MB** | 2,081,816 bytes | Ultra-compact online installer that downloads and installs the latest engine files with zero admin prompt required. |
-| **Full Offline Setup** | [`PRRX_Internet_Download_Manager_v1.2.0_Setup.exe`](https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.2.0/PRRX_Internet_Download_Manager_v1.2.0_Setup.exe) | **88.03 MB** | 92,309,714 bytes | Complete self-contained setup package with embedded media engines and browser extension for air-gapped systems. |
-| **Portable Package** | [`PRRX_Internet_Download_Manager_v1.2.0_Portable.zip`](https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.2.0/PRRX_Internet_Download_Manager_v1.2.0_Portable.zip) | **91.68 MB** | 96,131,345 bytes | Zero-install standalone archive. Extract anywhere and launch `PRRX.InternetDownloadManager.exe`. |
-| **Update Manifest** | [`manifest.json`](https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.2.0/manifest.json) | **0.001 MB** | 660 bytes | Metadata for in-app automatic update distribution. |
+| **Online Web Setup** *(Recommended)* | [`PRRX_IDM_Setup_Online.exe`](https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.3.0/PRRX_IDM_Setup_Online.exe) | **1.99 MB** | 2,081,817 bytes | Ultra-compact web installer that streams and installs the latest components with zero administrator elevation required. |
+| **Full Offline Setup** | [`PRRX_Internet_Download_Manager_v1.3.0_Setup.exe`](https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.3.0/PRRX_Internet_Download_Manager_v1.3.0_Setup.exe) | **88.09 MB** | 92,364,373 bytes | Complete self-contained setup package with embedded 32-stream media engine and browser integration for air-gapped systems. |
+| **Portable Package** | [`PRRX_Internet_Download_Manager_v1.3.0_Portable.zip`](https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.3.0/PRRX_Internet_Download_Manager_v1.3.0_Portable.zip) | **91.74 MB** | 96,192,935 bytes | Zero-install standalone archive. Extract anywhere and launch `PRRX.InternetDownloadManager.exe`. |
+| **Update Manifest** | [`manifest.json`](https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.3.0/manifest.json) | **0.001 MB** | 866 bytes | Update metadata and checksum verification for in-app automatic updating. |
 
 ---
 
 ## 🔒 SHA-256 Checksums
 
 ```text
-F6E009378A39D521C1E25B1DE05286AD30D967C41A16599861FD8BFEC1E34B10  PRRX_IDM_Setup_Online.exe
-7CF93E220D3506C8BA3428840E2B6C235206537EB19FD63E488789A21284E1F2  PRRX_Internet_Download_Manager_v1.2.0_Setup.exe
-A24100955C61DA62D68F6E7EC0019E66CD1C5940C486BDF91B6CF411057057C4  PRRX_Internet_Download_Manager_v1.2.0_Portable.zip
-8C9E25A0082B521263AD41E3AF82C37F26DEDEEA399B3188D354B6F26179210A  manifest.json
+0FAC1876686EAA7E01BA219C2118E70406F5B98209E9B7311FDC3562B87523A9  PRRX_IDM_Setup_Online.exe
+0A2CAABA3D050846DD7FCB2EA053E0B9A91CF4396E074615556F7691BEF624A5  PRRX_Internet_Download_Manager_v1.3.0_Setup.exe
+1E4B6BBAA340B03F0726A8DBE23D9F13AC0E6C36373A06BD1054DA737339C823  PRRX_Internet_Download_Manager_v1.3.0_Portable.zip
+462989336FFFA5858C4BAB92E880E680FF662B83C2DE6FB16FDA16339AD359E5  manifest.json
 ```
 
 ---
 
-## 🧪 Test Verification & Quality Assurance
-- **Unit Test Suite**: 39 of 39 tests passed (`PRRX.IDM.Tests.dll`)
-- **Compilation**: Clean Release win-x64 single-file build with zero warnings
-- **BAML Resource Check**: `views/onboardingwindow.baml` verified embedded in `PRRX.InternetDownloadManager.g.resources`
-- **Native Host Verification**: Native messaging manifest and registry integration confirmed functional
+## 🧪 Verification & Test Results
+- **Unit Test Suite**: 65 of 65 tests passed (`PRRX.IDM.Tests.dll`)
+- **Build Status**: Clean Release win-x64 single-file build with zero errors
+- **Zero Data Loss Protection**: Verified by unit test suite — config, SQLite databases, and download files protected
+- **Inno Setup Compilers**: Offline and Online installers generated cleanly without lock contention

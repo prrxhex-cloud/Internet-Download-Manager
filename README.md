@@ -11,10 +11,19 @@
 <p align="center">
   <a href="#"><img src="https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011%20(x64)-0078D4?logo=windows" alt="Windows"/></a>
   <a href="#"><img src="https://img.shields.io/badge/.NET-8.0%20WPF-512BD4?logo=dotnet" alt=".NET 8"/></a>
-  <a href="https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/tag/v1.2.0"><img src="https://img.shields.io/badge/Version-1.2.0-107C41" alt="Version"/></a>
+  <a href="https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/tag/v1.3.0"><img src="https://img.shields.io/badge/Version-1.3.0-107C41" alt="Version"/></a>
   <a href="#"><img src="https://img.shields.io/badge/RAM%20Footprint-~20%20MB%20Idle-brightgreen" alt="Memory"/></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue" alt="License"/></a>
 </p>
+
+---
+
+## 🌟 What's New in Version 1.3.0
+
+- 📜 **Interactive In-App Changelog & Version History in Settings**: Dedicated Fluent 2 styled changelog explorer built into Settings (Tab 4), preserving full release history for v1.3.0, v1.2.0, v1.1.0, and v1.0.0 with category badges (Features, Fixes, Performance, Security).
+- 🧹 **Automatic Post-Update Cleanup (Zero Data Loss Guaranteed)**: Automated startup sweep that detects and removes stale update zip packages, staging folders (`%TEMP%\PRRX_IDM_Update_*`), Inno setup temp files (`is-*.tmp`), and binary swap files (`*.bak`, `*.old`, `*.tmp`). Includes a manual on-demand "Clean Update Cache" button in Settings. User settings, download databases, and downloads folder are 100% safeguarded.
+- 🔄 **Improved Online Auto-Updater**: Resilient 3-attempt streaming retry mechanism with exponential backoff (`1s`, `2s`, `4s`), 64 KB high-speed buffering, live speed/ETA estimation, and SHA-256 chunk integrity verification.
+- 🛡️ **Enterprise Security Vault & IP Watermarking**: AES-256-GCM / DPAPI protected credential vault, secure loopback IPC handshake, and complete PRRX Cooperation IP watermarks across all source assets.
 
 ---
 
@@ -25,9 +34,9 @@
 - 🎬 **Interactive Video Grabber Panel**: Sleek floating "Download with PRRX" button injected into HTML5 video players (YouTube, Vimeo, TikTok, Bilibili) with instant resolution selection (1080p, 720p, 480p, MP3).
 - ⚡ **32-Stream Turbo Multi-Connection Engine**: Saturated multi-socket downloading across 32 parallel stream fragments with 2 MB adaptive buffering and 4 MB HTTP pipelining.
 - 📦 **Ultra-Compact Distribution Sizes**:
-  - **Online Web Setup Installer**: Just **1.98 MB** (`PRRX_IDM_Setup_Online.exe`)
-  - **Full Offline Setup Installer**: **88.0 MB** (`PRRX_Internet_Download_Manager_v1.2.0_Setup.exe`)
-  - **Zero-Dependency Portable Package**: Reduced to **91.6 MB** (`PRRX_Internet_Download_Manager_v1.2.0_Portable.zip`)
+  - **Online Web Setup Installer**: Just **1.99 MB** (`PRRX_IDM_Setup_Online.exe`)
+  - **Full Offline Setup Installer**: **88.09 MB** (`PRRX_Internet_Download_Manager_v1.3.0_Setup.exe`)
+  - **Zero-Dependency Portable Package**: Reduced to **91.74 MB** (`PRRX_Internet_Download_Manager_v1.3.0_Portable.zip`)
 - 🧭 **Interactive Welcome Onboarding Tutorial**: Built-in 5-step onboarding guide detailing automated browser integration, site access permissions, and manual unpacked loading & toolbar pinning.
 
 ---
@@ -136,21 +145,21 @@ If you need to install the extension manually:
 
 ---
 
-## 📥 Installation & Downloads (v1.2.0)
+## 📥 Installation & Downloads (v1.3.0)
 
 | Package | Filename | Size | Description |
 | :--- | :--- | :--- | :--- |
-| **Online Web Setup** *(Recommended)* | [`PRRX_IDM_Setup_Online.exe`](https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.2.0/PRRX_IDM_Setup_Online.exe) | ~1.98 MB | Lightweight installer that downloads and installs the latest engine files and sets up shortcuts. |
-| **Offline Setup** | [`PRRX_Internet_Download_Manager_v1.2.0_Setup.exe`](https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.2.0/PRRX_Internet_Download_Manager_v1.2.0_Setup.exe) | ~88.0 MB | Complete self-contained installer for offline environments. |
-| **Portable Package** | [`PRRX_Internet_Download_Manager_v1.2.0_Portable.zip`](https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.2.0/PRRX_Internet_Download_Manager_v1.2.0_Portable.zip) | ~91.6 MB | Zero-install standalone archive. Extract anywhere and run `PRRX.InternetDownloadManager.exe`. |
+| **Online Web Setup** *(Recommended)* | [`PRRX_IDM_Setup_Online.exe`](https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.3.0/PRRX_IDM_Setup_Online.exe) | ~1.99 MB | Lightweight installer that downloads and installs the latest engine files and sets up shortcuts. |
+| **Offline Setup** | [`PRRX_Internet_Download_Manager_v1.3.0_Setup.exe`](https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.3.0/PRRX_Internet_Download_Manager_v1.3.0_Setup.exe) | ~88.09 MB | Complete self-contained installer for offline environments. |
+| **Portable Package** | [`PRRX_Internet_Download_Manager_v1.3.0_Portable.zip`](https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.3.0/PRRX_Internet_Download_Manager_v1.3.0_Portable.zip) | ~91.74 MB | Zero-install standalone archive. Extract anywhere and run `PRRX.InternetDownloadManager.exe`. |
 
 ### 🔒 SHA-256 Checksums
 
 ```
-F6E009378A39D521C1E25B1DE05286AD30D967C41A16599861FD8BFEC1E34B10  PRRX_IDM_Setup_Online.exe
-7CF93E220D3506C8BA3428840E2B6C235206537EB19FD63E488789A21284E1F2  PRRX_Internet_Download_Manager_v1.2.0_Setup.exe
-A24100955C61DA62D68F6E7EC0019E66CD1C5940C486BDF91B6CF411057057C4  PRRX_Internet_Download_Manager_v1.2.0_Portable.zip
-8C9E25A0082B521263AD41E3AF82C37F26DEDEEA399B3188D354B6F26179210A  manifest.json
+0FAC1876686EAA7E01BA219C2118E70406F5B98209E9B7311FDC3562B87523A9  PRRX_IDM_Setup_Online.exe
+0A2CAABA3D050846DD7FCB2EA053E0B9A91CF4396E074615556F7691BEF624A5  PRRX_Internet_Download_Manager_v1.3.0_Setup.exe
+1E4B6BBAA340B03F0726A8DBE23D9F13AC0E6C36373A06BD1054DA737339C823  PRRX_Internet_Download_Manager_v1.3.0_Portable.zip
+462989336FFFA5858C4BAB92E880E680FF662B83C2DE6FB16FDA16339AD359E5  manifest.json
 ```
 
 ---

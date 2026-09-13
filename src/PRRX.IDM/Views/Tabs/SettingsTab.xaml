@@ -110,6 +110,113 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
                                    Visibility="{Binding IsUpdateAvailable, Converter={StaticResource BoolToVis}}"
                                    Height="40" Padding="16,0"/>
                     </StackPanel>
+
+                    <!-- Post-Update Auto-Cleanup Status & Action -->
+                    <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="14,10" Margin="0,14,0,0">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <ui:SymbolIcon Symbol="Broom24" Margin="0,0,10,0" VerticalAlignment="Center" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"/>
+                            <TextBlock Grid.Column="1" Text="{Binding CleanupStatusMessage}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" FontSize="12"/>
+                            <ui:Button Grid.Column="2" Content="Clean Cache Now" Appearance="Secondary" Command="{Binding CleanupCacheCommand}" 
+                                       IsEnabled="{Binding IsCleaningCache, Converter={StaticResource InvBool}}" Padding="12,4" Height="32"/>
+                        </Grid>
+                    </Border>
+                </StackPanel>
+            </Border>
+
+            <!-- Dedicated Changelog & Version History Section (Fluent 2 Design) -->
+            <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" 
+                    CornerRadius="12" Padding="20" Margin="0,0,0,18"
+                    BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+                <StackPanel>
+                    <Grid Margin="0,0,0,14">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <ui:SymbolIcon Symbol="History24" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" Margin="0,0,8,0"/>
+                                <TextBlock Text="Changelog &amp; Version History" FontSize="16" FontWeight="SemiBold"/>
+                            </StackPanel>
+                            <TextBlock Text="Detailed release records, performance improvements, security hardening, and new features." 
+                                       Opacity="0.7" FontSize="12" Margin="0,3,0,0"/>
+                        </StackPanel>
+
+                        <Border Grid.Column="1" Background="#200078D4" BorderBrush="#400078D4" BorderThickness="1"
+                                CornerRadius="8" Padding="10,4" VerticalAlignment="Center">
+                            <TextBlock Text="All Releases" FontWeight="Bold" FontSize="11" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"/>
+                        </Border>
+                    </Grid>
+
+                    <!-- Changelog Releases ItemsControl -->
+                    <ItemsControl ItemsSource="{Binding ChangelogHistory}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" 
+                                        CornerRadius="8" Margin="0,0,0,12" Padding="14"
+                                        BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+                                    <Expander IsExpanded="{Binding IsExpanded, Mode=TwoWay}" Background="Transparent" BorderThickness="0" Padding="0">
+                                        <Expander.Header>
+                                            <Grid Margin="0,2,0,2">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                </Grid.ColumnDefinitions>
+
+                                                <!-- Version Tag Badge -->
+                                                <Border CornerRadius="6" Background="#200078D4" Padding="8,3" Margin="0,0,10,0">
+                                                    <TextBlock Text="{Binding Version}" FontWeight="Bold" FontSize="12" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"/>
+                                                </Border>
+
+                                                <!-- Status Badge -->
+                                                <Border Grid.Column="1" CornerRadius="6" Background="#15107C41" Padding="8,3" Margin="0,0,12,0"
+                                                        Visibility="{Binding IsCurrentRelease, Converter={StaticResource BoolToVis}}">
+                                                    <TextBlock Text="{Binding StatusBadge}" FontWeight="SemiBold" FontSize="11" Foreground="#107C41"/>
+                                                </Border>
+
+                                                <!-- Release Date -->
+                                                <TextBlock Grid.Column="2" Text="{Binding ReleaseDate}" Opacity="0.7" FontSize="12" VerticalAlignment="Center"/>
+                                            </Grid>
+                                        </Expander.Header>
+
+                                        <StackPanel Margin="0,12,0,4">
+                                            <!-- Release Summary -->
+                                            <TextBlock Text="{Binding Summary}" TextWrapping="Wrap" FontSize="12" Opacity="0.85" Margin="0,0,0,12"/>
+
+                                            <!-- Categorized Changes List -->
+                                            <ItemsControl ItemsSource="{Binding Items}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Grid Margin="0,4,0,4">
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="Auto"/>
+                                                                <ColumnDefinition Width="*"/>
+                                                            </Grid.ColumnDefinitions>
+
+                                                            <!-- Category Badge -->
+                                                            <Border Background="{Binding CategoryBgColor}" CornerRadius="4" Padding="6,2" Margin="0,0,10,0" VerticalAlignment="Top">
+                                                                <TextBlock Text="{Binding Category}" FontWeight="Bold" FontSize="10" Foreground="{Binding CategoryBadgeColor}"/>
+                                                            </Border>
+
+                                                            <!-- Change Description -->
+                                                            <TextBlock Grid.Column="1" Text="{Binding Description}" TextWrapping="Wrap" FontSize="12" VerticalAlignment="Center"/>
+                                                        </Grid>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
+                                    </Expander>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
                 </StackPanel>
             </Border>
 

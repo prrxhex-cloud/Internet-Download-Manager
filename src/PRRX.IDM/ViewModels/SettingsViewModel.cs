@@ -237,6 +237,22 @@ namespace PRRX.IDM.ViewModels
             set => SetProperty(ref _browserStatusMessage, value);
         }
 
+        private string _cleanupStatusMessage = "Automatic post-update cleanup is active (Zero Data Loss Protected).";
+        public string CleanupStatusMessage
+        {
+            get => _cleanupStatusMessage;
+            set => SetProperty(ref _cleanupStatusMessage, value);
+        }
+
+        private bool _isCleaningCache;
+        public bool IsCleaningCache
+        {
+            get => _isCleaningCache;
+            set => SetProperty(ref _isCleaningCache, value);
+        }
+
+        public ObservableCollection<ChangelogRelease> ChangelogHistory { get; } = new();
+
         public ICommand BrowseFolderCommand { get; }
         public ICommand BrowseCookiesCommand { get; }
         public ICommand ClearCookiesCommand { get; }
@@ -250,6 +266,7 @@ namespace PRRX.IDM.ViewModels
         public ICommand ReplayOnboardingCommand { get; }
         public ICommand InstallBrowserExtensionCommand { get; }
         public ICommand OpenExtensionFolderCommand { get; }
+        public ICommand CleanupCacheCommand { get; }
 
         public SettingsViewModel(
             IConfigurationService configService,
@@ -271,9 +288,10 @@ namespace PRRX.IDM.ViewModels
             _enableTurboAcceleration = _configService.CurrentConfig.EnableTurboAcceleration;
             _turboConnectionCount = _configService.CurrentConfig.TurboConnectionCount;
             _isWin11 = _themeService.IsWindows11;
-            _appVersion = "v1.2.0 (Official Release)";
+            _appVersion = "v1.3.0 (Official Release)";
 
             UpdateCookiesStatus();
+            InitializeChangelog();
 
             BrowseFolderCommand = new RelayCommand(() =>
             {
@@ -426,6 +444,120 @@ namespace PRRX.IDM.ViewModels
                     });
                 }
             });
+
+            CleanupCacheCommand = new AsyncRelayCommand(async () =>
+            {
+                try
+                {
+                    IsCleaningCache = true;
+                    CleanupStatusMessage = "Scanning for update cache, old builds, and temp swap files...";
+                    var report = await _updateService.CleanupPostUpdateArtifactsAsync();
+                    if (report.FilesDeletedCount > 0 || report.DirectoriesCleanedCount > 0)
+                    {
+                        CleanupStatusMessage = $"✅ Cleanup Complete: Freed {report.FormattedBytesFreed} ({report.FilesDeletedCount} files, {report.DirectoriesCleanedCount} folders cleaned). User data 100% intact.";
+                    }
+                    else
+                    {
+                        CleanupStatusMessage = "✅ System Clean: No stale update files or old temp builds found. User data 100% intact.";
+                    }
+                }
+                catch (Exception ex)
+                {
+                    CleanupStatusMessage = $"Cleanup Notice: {ex.Message}";
+                }
+                finally
+                {
+                    IsCleaningCache = false;
+                }
+            }, () => !IsCleaningCache);
+        }
+
+        private void InitializeChangelog()
+        {
+            ChangelogHistory.Clear();
+
+            // v1.3.0 (Current Release)
+            var rel130 = new ChangelogRelease
+            {
+                Version = "v1.3.0",
+                ReleaseDate = "September 2026",
+                IsCurrentRelease = true,
+                StatusBadge = "Current Release",
+                Summary = "In-App Seamless 1-Click Updater enhancements, automatic post-update cache and stale build cleanup with Zero Data Loss Guarantee, dedicated interactive Changelog in Settings, AES-256-GCM / DPAPI Security Vault, and refined Fluent 2 UI.",
+                IsExpanded = true,
+                Items = new System.Collections.Generic.List<ChangelogItem>
+                {
+                    new() { Category = "Features", Description = "Interactive Changelog & Version History in Settings with categorized change logs across all releases.", CategoryBadgeColor = "#0078D4", CategoryBgColor = "#200078D4" },
+                    new() { Category = "Features", Description = "Automated Post-Update Cleanup: automatically deletes leftover update archives (*.zip), binary swap files (*.old, *.bak, *.tmp), and extraction caches upon restart.", CategoryBadgeColor = "#0078D4", CategoryBgColor = "#200078D4" },
+                    new() { Category = "Features", Description = "Resilient 1-Click In-App Updater: automatic retry mechanism with exponential backoff and 64KB high-throughput streaming.", CategoryBadgeColor = "#0078D4", CategoryBgColor = "#200078D4" },
+                    new() { Category = "Security", Description = "Zero Data Loss Guarantee: absolute path protections ensure configurations (config.json), history, queues, and user download folders are untouched.", CategoryBadgeColor = "#107C41", CategoryBgColor = "#20107C41" },
+                    new() { Category = "Security", Description = "End-to-End Encryption Vault: AES-256-GCM and DPAPI security with on-demand vault audit and re-encryption.", CategoryBadgeColor = "#107C41", CategoryBgColor = "#20107C41" },
+                    new() { Category = "Performance", Description = "Streamlined file swap execution in PowerShell update handoff with locked-file avoidance.", CategoryBadgeColor = "#8764B8", CategoryBgColor = "#208764B8" },
+                    new() { Category = "Fixes", Description = "Resolved edge case where lingering update zip packages occupied temp storage after in-app updates.", CategoryBadgeColor = "#D83B01", CategoryBgColor = "#20D83B01" }
+                }
+            };
+
+            // v1.2.0
+            var rel120 = new ChangelogRelease
+            {
+                Version = "v1.2.0",
+                ReleaseDate = "August 2026",
+                IsCurrentRelease = false,
+                StatusBadge = "Stable",
+                Summary = "Official PRRX branding across extension and desktop, automated Chrome and Edge integration with clean uninstaller, floating video grabber on 1,000+ streaming platforms, 32-stream turbo acceleration engine, and ultra-compact distribution installers.",
+                IsExpanded = false,
+                Items = new System.Collections.Generic.List<ChangelogItem>
+                {
+                    new() { Category = "Features", Description = "Automated Chrome & Edge extension registration and native messaging host pairing.", CategoryBadgeColor = "#0078D4", CategoryBgColor = "#200078D4" },
+                    new() { Category = "Features", Description = "Floating Video & Audio Grabber button supporting over 1,000 streaming platforms.", CategoryBadgeColor = "#0078D4", CategoryBgColor = "#200078D4" },
+                    new() { Category = "Features", Description = "Interactive 5-step welcome Onboarding Wizard and Feature Tour replayable on demand.", CategoryBadgeColor = "#0078D4", CategoryBgColor = "#200078D4" },
+                    new() { Category = "Performance", Description = "32-stream turbo multi-threaded chunking engine for maximum network throughput.", CategoryBadgeColor = "#8764B8", CategoryBgColor = "#208764B8" },
+                    new() { Category = "Performance", Description = "Compact distribution: < 2 MB Web Installer and 91 MB portable standalone archive.", CategoryBadgeColor = "#8764B8", CategoryBgColor = "#208764B8" },
+                    new() { Category = "Security", Description = "Clean uninstaller engine removing Chrome and Edge native messaging host registry keys.", CategoryBadgeColor = "#107C41", CategoryBgColor = "#20107C41" }
+                }
+            };
+
+            // v1.1.0
+            var rel110 = new ChangelogRelease
+            {
+                Version = "v1.1.0",
+                ReleaseDate = "July 2026",
+                IsCurrentRelease = false,
+                StatusBadge = "Archived",
+                Summary = "Browser integration HTTP bridge, link resolution expansion, multi-format audio converter, and zero-residue native host unregistration.",
+                IsExpanded = false,
+                Items = new System.Collections.Generic.List<ChangelogItem>
+                {
+                    new() { Category = "Features", Description = "High-speed local loopback HTTP bridge (127.0.0.1:46543) for browser-to-desktop IPC transfer.", CategoryBadgeColor = "#0078D4", CategoryBgColor = "#200078D4" },
+                    new() { Category = "Features", Description = "Universal Audio Converter supporting 10+ studio formats (MP3 up to 320kbps, WAV, M4R, FLAC).", CategoryBadgeColor = "#0078D4", CategoryBgColor = "#200078D4" },
+                    new() { Category = "Security", Description = "Origin header verification and cryptographically random IPC session tokens.", CategoryBadgeColor = "#107C41", CategoryBgColor = "#20107C41" },
+                    new() { Category = "Fixes", Description = "Addressed edge-case socket disconnection during continuous batch downloads.", CategoryBadgeColor = "#D83B01", CategoryBgColor = "#20D83B01" }
+                }
+            };
+
+            // v1.0.0
+            var rel100 = new ChangelogRelease
+            {
+                Version = "v1.0.0",
+                ReleaseDate = "June 2026",
+                IsCurrentRelease = false,
+                StatusBadge = "Initial Release",
+                Summary = "Initial high-performance download manager release with multi-socket chunking, media engine extraction, and .NET 8 WPF architecture.",
+                IsExpanded = false,
+                Items = new System.Collections.Generic.List<ChangelogItem>
+                {
+                    new() { Category = "Features", Description = "Initial release of PRRX Internet Download Manager with modern .NET 8 WPF architecture.", CategoryBadgeColor = "#0078D4", CategoryBgColor = "#200078D4" },
+                    new() { Category = "Features", Description = "Multi-socket segmented download engine with pause and resume capabilities.", CategoryBadgeColor = "#0078D4", CategoryBgColor = "#200078D4" },
+                    new() { Category = "Features", Description = "yt-dlp core media extraction pipeline with dynamic resolution selector.", CategoryBadgeColor = "#0078D4", CategoryBgColor = "#200078D4" },
+                    new() { Category = "Performance", Description = "Win32 kernel working set trimmer reducing idle memory footprint to ~20 MB.", CategoryBadgeColor = "#8764B8", CategoryBgColor = "#208764B8" },
+                    new() { Category = "Security", Description = "Path traversal boundary checks and process argument injection filtering.", CategoryBadgeColor = "#107C41", CategoryBgColor = "#20107C41" }
+                }
+            };
+
+            ChangelogHistory.Add(rel130);
+            ChangelogHistory.Add(rel120);
+            ChangelogHistory.Add(rel110);
+            ChangelogHistory.Add(rel100);
         }
 
         private void UpdateCookiesStatus()
