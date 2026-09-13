@@ -560,6 +560,45 @@ namespace PRRX.IDM.ViewModels
             ChangelogHistory.Add(rel120);
             ChangelogHistory.Add(rel110);
             ChangelogHistory.Add(rel100);
+
+            // Dynamically synchronize current running release with assembly version
+            bool currentFound = false;
+            foreach (var release in ChangelogHistory)
+            {
+                var cleanRel = release.Version.TrimStart('v', 'V').Trim();
+                if (cleanRel == CurrentVersionClean)
+                {
+                    release.IsCurrentRelease = true;
+                    release.StatusBadge = "Current Release";
+                    release.IsExpanded = true;
+                    currentFound = true;
+                }
+                else
+                {
+                    release.IsCurrentRelease = false;
+                    if (release.StatusBadge == "Current Release")
+                    {
+                        release.StatusBadge = "Previous Release";
+                    }
+                }
+            }
+
+            if (!currentFound && UpdateService.IsVersionNewer(CurrentVersionClean, "1.3.0"))
+            {
+                ChangelogHistory.Insert(0, new ChangelogRelease
+                {
+                    Version = $"v{CurrentVersionClean}",
+                    ReleaseDate = DateTime.UtcNow.ToString("MMMM yyyy"),
+                    IsCurrentRelease = true,
+                    StatusBadge = "Current Release",
+                    Summary = $"PRRX IDM v{CurrentVersionClean} installed and running.",
+                    IsExpanded = true,
+                    Items = new System.Collections.Generic.List<ChangelogItem>
+                    {
+                        new() { Category = "Features", Description = $"Running PRRX IDM v{CurrentVersionClean} official build.", CategoryBadgeColor = "#0078D4", CategoryBgColor = "#200078D4" }
+                    }
+                });
+            }
         }
 
         private void UpdateCookiesStatus()

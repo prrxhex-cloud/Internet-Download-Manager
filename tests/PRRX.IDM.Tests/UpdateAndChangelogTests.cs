@@ -164,6 +164,12 @@ namespace PRRX.IDM.Tests
         [InlineData("1.3.1", "1.3.0", true)]
         [InlineData("1.3.0.1", "1.3.0", true)]
         [InlineData("2.0.0", "1.3.0", true)]
+        [InlineData("v2", "1.3.0", true)]
+        [InlineData("v1.2", "1.3.0", false)]
+        [InlineData("1.3.0-rc1", "1.3.0", false)]
+        [InlineData("1.3.0+build123", "1.3.0", false)]
+        [InlineData("1.4.0-preview", "1.3.0", true)]
+        [InlineData("nightly-alpha", "1.3.0", false)]
         [InlineData("", "1.3.0", false)]
         [InlineData(null, "1.3.0", false)]
         public void UpdateService_IsVersionNewer_StrictComparison(string? remoteVersion, string? localVersion, bool expectedIsNewer)
@@ -254,10 +260,47 @@ namespace PRRX.IDM.Tests
             Assert.Equal("v2.5.0 (Official Release)", vm.AppVersion);
         }
 
+        [Fact]
+        public void SettingsViewModel_ChangelogHistory_DynamicallyUpdatesCurrentRelease_WhenRunningNewerVersion()
+        {
+            var config = new ConfigurationService();
+            var theme = new ThemeService(config);
+            var media = new MediaEngineService(config);
+
+            var fakeUpdate = new FakeUpdateService
+            {
+                CurrentVersion = new Version(1, 4, 0)
+            };
+
+            var vm = new SettingsViewModel(config, theme, fakeUpdate, media);
+            Assert.NotNull(vm.ChangelogHistory);
+            Assert.True(vm.ChangelogHistory.Count >= 5);
+            Assert.Equal("v1.4.0", vm.ChangelogHistory[0].Version);
+            Assert.True(vm.ChangelogHistory[0].IsCurrentRelease);
+            Assert.Equal("Current Release", vm.ChangelogHistory[0].StatusBadge);
+
+            // Previous release v1.3.0 is no longer current release
+            Assert.False(vm.ChangelogHistory[1].IsCurrentRelease);
+        }
+
+        [Fact]
+        public void UpdateService_ParseNormalizedVersion_CorrectlyHandlesVariations()
+        {
+            Assert.Equal(new Version(1, 3, 0, 0), UpdateService.ParseNormalizedVersion("v1.3.0"));
+            Assert.Equal(new Version(1, 3, 0, 0), UpdateService.ParseNormalizedVersion("1.3.0"));
+            Assert.Equal(new Version(1, 3, 0, 2), UpdateService.ParseNormalizedVersion("v1.3.0.2"));
+            Assert.Equal(new Version(2, 0, 0, 0), UpdateService.ParseNormalizedVersion("2"));
+            Assert.Equal(new Version(1, 4, 0, 0), UpdateService.ParseNormalizedVersion("v1.4.0-beta.1+sha.abc"));
+            Assert.Equal(new Version(0, 0, 0, 0), UpdateService.ParseNormalizedVersion("invalid"));
+            Assert.Equal(new Version(0, 0, 0, 0), UpdateService.ParseNormalizedVersion(null));
+        }
+
         private class FakeUpdateService : IUpdateService
         {
             public Version CurrentVersion { get; set; } = new Version(1, 3, 0);
-            public string CurrentVersionClean => $"{CurrentVersion.Major}.{CurrentVersion.Minor}.{Math.Max(0, CurrentVersion.Build)}";
+            public string CurrentVersionClean => CurrentVersion.Revision > 0 
+                ? $"{CurrentVersion.Major}.{CurrentVersion.Minor}.{Math.Max(0, CurrentVersion.Build)}.{CurrentVersion.Revision}" 
+                : $"{CurrentVersion.Major}.{CurrentVersion.Minor}.{Math.Max(0, CurrentVersion.Build)}";
             public (bool UpdateAvailable, UpdateManifest? Manifest, string? ErrorMessage) ReleasesResult { get; set; }
 
             public System.Threading.Tasks.Task<(bool UpdateAvailable, UpdateManifest? Manifest, string? ErrorMessage)> CheckGitHubReleasesAsync(string? repoOwnerAndName = null)

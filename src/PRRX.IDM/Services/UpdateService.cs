@@ -56,16 +56,45 @@ namespace PRRX.IDM.Services
         {
             get
             {
-                var ver = typeof(App).Assembly.GetName().Version;
-                if (ver != null)
+                try
                 {
-                    return new Version(ver.Major, ver.Minor, Math.Max(0, ver.Build));
+                    var asm = typeof(App).Assembly;
+                    var infoVer = asm.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+                    if (!string.IsNullOrWhiteSpace(infoVer))
+                    {
+                        var norm = ParseNormalizedVersion(infoVer);
+                        if (norm > new Version(0, 0, 0, 0))
+                        {
+                            return norm.Revision > 0
+                                ? new Version(norm.Major, norm.Minor, Math.Max(0, norm.Build), norm.Revision)
+                                : new Version(norm.Major, norm.Minor, Math.Max(0, norm.Build));
+                        }
+                    }
+
+                    var ver = asm.GetName().Version;
+                    if (ver != null)
+                    {
+                        return ver.Revision > 0
+                            ? new Version(ver.Major, ver.Minor, Math.Max(0, ver.Build), ver.Revision)
+                            : new Version(ver.Major, ver.Minor, Math.Max(0, ver.Build));
+                    }
                 }
+                catch { }
+
                 return new Version(1, 3, 0);
             }
         }
 
-        public string CurrentVersionClean => $"{CurrentVersion.Major}.{CurrentVersion.Minor}.{Math.Max(0, CurrentVersion.Build)}";
+        public string CurrentVersionClean
+        {
+            get
+            {
+                var ver = CurrentVersion;
+                return ver.Revision > 0
+                    ? $"{ver.Major}.{ver.Minor}.{Math.Max(0, ver.Build)}.{ver.Revision}"
+                    : $"{ver.Major}.{ver.Minor}.{Math.Max(0, ver.Build)}";
+            }
+        }
 
         public static Version ParseNormalizedVersion(string? raw)
         {
@@ -109,13 +138,7 @@ namespace PRRX.IDM.Services
             var remoteNorm = ParseNormalizedVersion(remoteVersionClean);
             var localNorm = ParseNormalizedVersion(currentVersionClean);
 
-            if (Version.TryParse(remoteNorm.ToString(), out var remoteVer) &&
-                Version.TryParse(localNorm.ToString(), out var localVer))
-            {
-                return remoteVer > localVer;
-            }
-
-            return false;
+            return remoteNorm > localNorm;
         }
 
         public async Task<(bool UpdateAvailable, UpdateManifest? Manifest, string? ErrorMessage)> CheckGitHubReleasesAsync(string? repoOwnerAndName = null)
@@ -150,8 +173,9 @@ namespace PRRX.IDM.Services
 
                 string downloadUrl = htmlUrl;
                 string? sha256 = null;
+                string? manifestAssetUrl = null;
 
-                // Look for Portable ZIP or EXE asset in GitHub Release assets
+                // Look for Portable ZIP, EXE, or manifest.json in GitHub Release assets
                 if (root.TryGetProperty("assets", out var assetsProp) && assetsProp.ValueKind == JsonValueKind.Array)
                 {
                     foreach (var asset in assetsProp.EnumerateArray())
@@ -159,31 +183,67 @@ namespace PRRX.IDM.Services
                         var assetName = asset.TryGetProperty("name", out var aName) ? aName.GetString() ?? "" : "";
                         var browserDownload = asset.TryGetProperty("browser_download_url", out var bUrl) ? bUrl.GetString() ?? "" : "";
 
+                        if (assetName.Equals("manifest.json", StringComparison.OrdinalIgnoreCase))
+                        {
+                            manifestAssetUrl = browserDownload;
+                        }
+
                         if (assetName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) && 
                             assetName.Contains("Portable", StringComparison.OrdinalIgnoreCase))
                         {
                             downloadUrl = browserDownload;
-                            break;
                         }
-
-                        if (assetName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) || 
-                            assetName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+                        else if ((assetName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) || 
+                                  assetName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)) && 
+                                 downloadUrl == htmlUrl)
                         {
                             downloadUrl = browserDownload;
                         }
                     }
                 }
 
-                // Check if SHA256 is present in release body
-                if (!string.IsNullOrWhiteSpace(releaseBody))
+                // If manifest.json is attached as a release asset, fetch it for authentic SHA256 and metadata
+                if (!string.IsNullOrWhiteSpace(manifestAssetUrl))
                 {
-                    var match = System.Text.RegularExpressions.Regex.Match(
-                        releaseBody, 
-                        @"SHA256[:\s]+([a-fA-F0-9]{64})", 
-                        System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-                    if (match.Success)
+                    try
                     {
-                        sha256 = match.Groups[1].Value.ToLowerInvariant();
+                        var manifestJson = await HttpClient.GetStringAsync(manifestAssetUrl);
+                        var parsed = JsonSerializer.Deserialize<UpdateManifest>(manifestJson);
+                        if (parsed != null)
+                        {
+                            if (!string.IsNullOrWhiteSpace(parsed.Sha256Hash))
+                                sha256 = parsed.Sha256Hash.Trim().ToLowerInvariant();
+                            if (!string.IsNullOrWhiteSpace(parsed.DownloadUrl))
+                                downloadUrl = parsed.DownloadUrl;
+                            if (!string.IsNullOrWhiteSpace(parsed.ReleaseNotes))
+                                releaseBody = parsed.ReleaseNotes;
+                        }
+                    }
+                    catch { }
+                }
+
+                // Fallback: extract SHA-256 hash from release body notes
+                if (string.IsNullOrWhiteSpace(sha256) && !string.IsNullOrWhiteSpace(releaseBody))
+                {
+                    // Match portable zip sha256 in table or list
+                    var tableMatch = System.Text.RegularExpressions.Regex.Match(
+                        releaseBody,
+                        @"Portable.*?([a-fA-F0-9]{64})",
+                        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Singleline);
+                    if (tableMatch.Success)
+                    {
+                        sha256 = tableMatch.Groups[1].Value.ToLowerInvariant();
+                    }
+                    else
+                    {
+                        var match = System.Text.RegularExpressions.Regex.Match(
+                            releaseBody, 
+                            @"SHA256[:\s`*]+([a-fA-F0-9]{64})", 
+                            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                        if (match.Success)
+                        {
+                            sha256 = match.Groups[1].Value.ToLowerInvariant();
+                        }
                     }
                 }
 
