@@ -68,6 +68,7 @@ namespace PRRX.IDM.ViewModels
                 if (param is string tabKey)
                 {
                     SelectedTabKey = tabKey;
+                    var prevTab = CurrentTabViewModel;
                     CurrentTabViewModel = tabKey switch
                     {
                         "Video" => VideoViewModel,
@@ -76,6 +77,11 @@ namespace PRRX.IDM.ViewModels
                         "Settings" => SettingsViewModel,
                         _ => VideoViewModel
                     };
+
+                    if (prevTab is ThumbnailViewModel thumbVm)
+                    {
+                        thumbVm.UnloadResources();
+                    }
 
                     // Free unused tab resources and compact working set
                     MemoryOptimizer.TrimMemory();

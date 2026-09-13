@@ -1,4 +1,4 @@
-﻿/**
+/**
  * ============================================================================
  * Copyright (c) 2026 PRRX Cooperation. All Rights Reserved.
  * PRRX IDM (TM) - Intelligent Download Manager Extension
@@ -93,11 +93,18 @@ chrome.downloads.onDeterminingFilename.addListener((downloadItem, suggest) => {
         chrome.downloads.erase({ id: downloadItem.id });
       });
 
+      let detectedSize = 0;
+      if (typeof downloadItem.fileSize === 'number' && downloadItem.fileSize > 0) {
+        detectedSize = downloadItem.fileSize;
+      } else if (typeof downloadItem.totalBytes === 'number' && downloadItem.totalBytes > 0) {
+        detectedSize = downloadItem.totalBytes;
+      }
+
       sendToPrrxIdm({
         action: "download",
         url: downloadItem.finalUrl || downloadItem.url,
         fileName: downloadItem.filename || "",
-        totalBytes: downloadItem.fileSize || 0
+        totalBytes: detectedSize
       });
     } else {
       suggest();

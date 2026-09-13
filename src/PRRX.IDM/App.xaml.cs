@@ -209,6 +209,8 @@ namespace PRRX.IDM
                 {
                     mainWindow.WindowState = WindowState.Minimized;
                     mainWindow.Visibility = Visibility.Hidden;
+                    mainWindow.ShowInTaskbar = false;
+                    System.Threading.Tasks.Task.Delay(600).ContinueWith(_ => MemoryOptimizer.TrimMemory());
                 }
 
                 // Process any incoming payload from command line arguments
@@ -379,22 +381,9 @@ namespace PRRX.IDM
 
         private static bool CheckAndForwardToRunningInstance(string[] args)
         {
-            // 1. Quick loopback check to see if an instance of PRRX IDM is already running
-            bool isRunning = false;
-            try
-            {
-                using var pingClient = new TcpClient();
-                var pingTask = pingClient.ConnectAsync(IPAddress.Loopback, BrowserIntegrationService.HttpPort);
-                if (pingTask.Wait(150))
-                {
-                    isRunning = true;
-                }
-            }
-            catch { }
+            var sec = new Security.SecurityService();
+            var ipcToken = sec.GetOrCreateIpcToken();
 
-            if (!isRunning) return false;
-
-            // 2. An instance is already running! Parse command line or default to 'show'
             string? url = null;
             string? payloadJson = null;
 
@@ -423,26 +412,57 @@ namespace PRRX.IDM
                 }
             }
 
+            BrowserDownloadPayload payloadObj;
+            if (!string.IsNullOrWhiteSpace(payloadJson))
+            {
+                try
+                {
+                    payloadObj = JsonSerializer.Deserialize<BrowserDownloadPayload>(payloadJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new BrowserDownloadPayload();
+                }
+                catch
+                {
+                    payloadObj = new BrowserDownloadPayload();
+                }
+            }
+            else if (!string.IsNullOrWhiteSpace(url))
+            {
+                payloadObj = new BrowserDownloadPayload { Action = "download", Url = url };
+            }
+            else
+            {
+                payloadObj = new BrowserDownloadPayload { Action = "show" };
+            }
+
+            payloadObj.Token = ipcToken;
+            var json = JsonSerializer.Serialize(payloadObj);
+
+            // Channel 1: Fast Named Pipe probe (<1ms latency)
             try
             {
-                var body = payloadJson ?? (url != null ? JsonSerializer.Serialize(new BrowserDownloadPayload
-                {
-                    Action = "download",
-                    Url = url
-                }) : JsonSerializer.Serialize(new BrowserDownloadPayload
-                {
-                    Action = "show"
-                }));
+                using var pipeClient = new System.IO.Pipes.NamedPipeClientStream(".", BrowserIntegrationService.PipeName, System.IO.Pipes.PipeDirection.Out);
+                pipeClient.Connect(150);
+                using var writer = new StreamWriter(pipeClient, Encoding.UTF8);
+                writer.Write(json);
+                writer.Flush();
+                return true;
+            }
+            catch { }
 
+            // Channel 2: Loopback TCP HTTP bridge fallback
+            try
+            {
                 using var client = new TcpClient();
                 var connectTask = client.ConnectAsync(IPAddress.Loopback, BrowserIntegrationService.HttpPort);
-                if (!connectTask.Wait(400)) return false;
+                if (!connectTask.Wait(200)) return false;
 
                 using var stream = client.GetStream();
                 stream.WriteTimeout = 1000;
-                var bodyBytes = Encoding.UTF8.GetBytes(body);
+                stream.ReadTimeout = 1000;
+
+                var bodyBytes = Encoding.UTF8.GetBytes(json);
                 var request = $"POST /api/download HTTP/1.1\r\n" +
                               $"Host: 127.0.0.1:{BrowserIntegrationService.HttpPort}\r\n" +
+                              $"X-PRRX-Token: {ipcToken}\r\n" +
                               $"Content-Type: application/json\r\n" +
                               $"Content-Length: {bodyBytes.Length}\r\n" +
                               $"Connection: close\r\n\r\n";
@@ -451,7 +471,17 @@ namespace PRRX.IDM
                 stream.Write(bodyBytes, 0, bodyBytes.Length);
                 stream.Flush();
 
-                return true;
+                var respBuf = new byte[256];
+                int read = stream.Read(respBuf, 0, respBuf.Length);
+                if (read > 0)
+                {
+                    var respStr = Encoding.UTF8.GetString(respBuf, 0, read);
+                    if (respStr.StartsWith("HTTP/1.1 200", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+                }
+                return false;
             }
             catch
             {

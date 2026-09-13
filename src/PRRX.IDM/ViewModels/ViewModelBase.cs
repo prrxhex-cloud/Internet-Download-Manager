@@ -36,7 +36,7 @@ namespace PRRX.IDM.ViewModels
         {
             if (System.Windows.Application.Current?.Dispatcher is { } dispatcher && !dispatcher.CheckAccess())
             {
-                dispatcher.Invoke(action);
+                dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Normal, action);
             }
             else
             {

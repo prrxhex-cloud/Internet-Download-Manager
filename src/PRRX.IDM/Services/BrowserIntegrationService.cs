@@ -677,7 +677,6 @@ namespace PRRX.IDM.Services
                 // Do NOT set dlg.Owner = MainWindow to prevent unminimizing or popping up MainWindow
                 dlg.Topmost = true;
                 dlg.Show();
-                dlg.Topmost = false;
                 dlg.Activate();
                 dlg.Focus();
                 try
@@ -688,6 +687,11 @@ namespace PRRX.IDM.Services
                     BringWindowToTop(helper.Handle);
                 }
                 catch { }
+
+                dlg.Loaded += (_, _) =>
+                {
+                    _ = Task.Delay(150).ContinueWith(_ => dlg.Dispatcher.BeginInvoke(new Action(() => dlg.Topmost = false)));
+                };
 
                 dlg.Closed += (_, _) =>
                 {
@@ -704,7 +708,6 @@ namespace PRRX.IDM.Services
                 // Do NOT set dlg.Owner = MainWindow to prevent unminimizing or popping up MainWindow
                 dlg.Topmost = true;
                 dlg.Show();
-                dlg.Topmost = false;
                 dlg.Activate();
                 dlg.Focus();
                 try
@@ -716,8 +719,14 @@ namespace PRRX.IDM.Services
                 }
                 catch { }
 
+                dlg.Loaded += (_, _) =>
+                {
+                    _ = Task.Delay(150).ContinueWith(_ => dlg.Dispatcher.BeginInvoke(new Action(() => dlg.Topmost = false)));
+                };
+
                 dlg.Closed += (_, _) =>
                 {
+                    vm.CancelProbe();
                     if (vm.DialogResult == DownloadDialogResult.StartNow)
                     {
                         var activeVm = new ActiveDownloadViewModel(vm.Url, vm.SaveAsFullPath);

@@ -481,5 +481,58 @@ namespace PRRX.IDM.Tests
             PRRX.IDM.Services.MemoryOptimizer.TrimMemory();
             Assert.True(true);
         }
+
+        [Theory]
+        [InlineData(0)]
+        [InlineData(-1)]
+        [InlineData(-100)]
+        public void DownloadFileInfoViewModel_InstantLaunchWithZeroOrNegativeSize_DisplaysProbingImmediately(long nonPositiveSize)
+        {
+            var baseDownloads = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+            var vm = new PRRX.IDM.ViewModels.DownloadFileInfoViewModel("https://example.com/unknown.bin", baseDownloads, "Unknown Size File", nonPositiveSize);
+
+            Assert.Equal("Probing size...", vm.FileSizeFormatted);
+            Assert.True(vm.IsProbing);
+        }
+
+        [Fact]
+        public void DownloadFileInfoViewModel_CancelProbe_ExecutesWithoutThrowing()
+        {
+            var baseDownloads = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+            var vm = new PRRX.IDM.ViewModels.DownloadFileInfoViewModel("https://example.com/file.bin", baseDownloads, "File");
+            vm.CancelProbe();
+            Assert.True(true);
+        }
+
+        [Fact]
+        public void ThumbnailViewModel_UnloadResources_ClearsPreviewImage()
+        {
+            var configService = new PRRX.IDM.Services.ConfigurationService();
+            var thumbService = new PRRX.IDM.Services.ThumbnailService();
+            var vm = new PRRX.IDM.ViewModels.ThumbnailViewModel(thumbService, configService);
+
+            vm.UnloadResources();
+            Assert.Null(vm.PreviewImage);
+        }
+
+        [Fact]
+        public void BrowserDownloadPayload_IncludesTokenForSecureForwarding()
+        {
+            var sec = new PRRX.IDM.Security.SecurityService();
+            var token = sec.GetOrCreateIpcToken();
+
+            var payload = new PRRX.IDM.Services.BrowserDownloadPayload
+            {
+                Action = "show",
+                Token = token
+            };
+
+            var json = System.Text.Json.JsonSerializer.Serialize(payload);
+            var deserialized = System.Text.Json.JsonSerializer.Deserialize<PRRX.IDM.Services.BrowserDownloadPayload>(json);
+
+            Assert.NotNull(deserialized);
+            Assert.Equal(token, deserialized.Token);
+            Assert.True(sec.ValidateIpcToken(deserialized.Token));
+        }
     }
 }

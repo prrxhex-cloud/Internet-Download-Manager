@@ -166,12 +166,14 @@ namespace PRRX.IDM.ViewModels
 
             StartDownloadCommand = new RelayCommand(_ =>
             {
+                CancelProbe();
                 DialogResult = DownloadDialogResult.StartNow;
                 RequestClose?.Invoke();
             });
 
             DownloadLaterCommand = new RelayCommand(_ =>
             {
+                CancelProbe();
                 DialogResult = DownloadDialogResult.DownloadLater;
                 RequestClose?.Invoke();
             });
@@ -192,6 +194,7 @@ namespace PRRX.IDM.ViewModels
 
             CancelCommand = new RelayCommand(_ =>
             {
+                CancelProbe();
                 DialogResult = DownloadDialogResult.Cancel;
                 RequestClose?.Invoke();
             });
@@ -208,7 +211,7 @@ namespace PRRX.IDM.ViewModels
             }
 
             // Launch size & filename probing strictly in background (<100ms instant dialog launch)
-            _ = ProbeFileSizeAsync(initialUrl);
+            _ = Task.Run(() => ProbeFileSizeAsync(initialUrl));
         }
 
         private void AutoPopulateDescription(string? pageTitle = null, string? mime = null)
@@ -248,6 +251,15 @@ namespace PRRX.IDM.ViewModels
 
             _description = string.Join(Environment.NewLine, parts);
             OnPropertyChanged(nameof(Description));
+        }
+
+        public void CancelProbe()
+        {
+            try
+            {
+                _probeCts?.Cancel();
+            }
+            catch { }
         }
 
         private Task? _activeProbeTask;
@@ -310,7 +322,7 @@ namespace PRRX.IDM.ViewModels
                 headReq.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
                 headReq.Headers.Add("Accept", "*/*");
 
-                using var headResp = await ProbeClient.SendAsync(headReq, HttpCompletionOption.ResponseHeadersRead, headCts.Token);
+                using var headResp = await ProbeClient.SendAsync(headReq, HttpCompletionOption.ResponseHeadersRead, headCts.Token).ConfigureAwait(false);
                 if (headResp.IsSuccessStatusCode)
                 {
                     if (headResp.Content.Headers.ContentLength.HasValue && headResp.Content.Headers.ContentLength.Value > 0)
@@ -351,7 +363,7 @@ namespace PRRX.IDM.ViewModels
                     getReq.Headers.Add("Accept", "*/*");
                     getReq.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(0, 0);
 
-                    using var getResp = await ProbeClient.SendAsync(getReq, HttpCompletionOption.ResponseHeadersRead, getCts.Token);
+                    using var getResp = await ProbeClient.SendAsync(getReq, HttpCompletionOption.ResponseHeadersRead, getCts.Token).ConfigureAwait(false);
                     if (getResp.Content.Headers.ContentType?.MediaType != null)
                     {
                         detectedMime ??= getResp.Content.Headers.ContentType.MediaType;

@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // Copyright (c) 2026 PRRX Cooperation. All Rights Reserved.
 // PRRX IDM (TM) - Intelligent Download Manager Engine
 // Watermark: PRRX-IDM-CORE-WATERMARK-SECURE-VAULT-2026
@@ -298,28 +298,36 @@ namespace PRRX.IDM.Services
                         }
                     }
 
-                    var copyBuffer = new byte[262144]; // 256 KB assembly copy buffer
-                    for (int i = 0; i < threadCount; i++)
+                    var copyBuffer = System.Buffers.ArrayPool<byte>.Shared.Rent(262144); // 256 KB pooled buffer
+                    try
                     {
-                        var partPath = Path.Combine(tempDir, $"part_{i}.tmp");
-                        if (File.Exists(partPath))
+                        for (int i = 0; i < threadCount; i++)
                         {
-                            using (var partStream = new FileStream(partPath, FileMode.Open, FileAccess.Read, FileShare.Read, 262144, true))
+                            var partPath = Path.Combine(tempDir, $"part_{i}.tmp");
+                            if (File.Exists(partPath))
                             {
-                                int read;
-                                while ((read = await partStream.ReadAsync(copyBuffer.AsMemory(0, copyBuffer.Length), _cts.Token)) > 0)
+                                using (var partStream = new FileStream(partPath, FileMode.Open, FileAccess.Read, FileShare.Read, 262144, true))
                                 {
-                                    await outputStream.WriteAsync(copyBuffer.AsMemory(0, read), _cts.Token);
+                                    int read;
+                                    while ((read = await partStream.ReadAsync(copyBuffer.AsMemory(0, 262144), _cts.Token)) > 0)
+                                    {
+                                        await outputStream.WriteAsync(copyBuffer.AsMemory(0, read), _cts.Token);
+                                    }
                                 }
+                                try { File.Delete(partPath); } catch { } // Free disk space immediately
                             }
-                            try { File.Delete(partPath); } catch { } // Free disk space immediately
                         }
+                    }
+                    finally
+                    {
+                        System.Buffers.ArrayPool<byte>.Shared.Return(copyBuffer);
                     }
                 }
 
                 IsRunning = false;
                 ReportProgress("Complete - Downloaded successfully");
                 DownloadCompleted?.Invoke(this, destinationFilePath);
+                MemoryOptimizer.TrimMemory();
                 return true;
             }
             catch (OperationCanceledException)
@@ -387,42 +395,49 @@ namespace PRRX.IDM.Services
                 using var contentStream = await response.Content.ReadAsStreamAsync(token);
                 using var fileStream = new FileStream(tempPartPath, FileMode.Create, FileAccess.Write, FileShare.None, 131072, true);
 
-                var buffer = new byte[131072];
-                int bytesRead;
-
-                while ((bytesRead = await contentStream.ReadAsync(buffer.AsMemory(0, buffer.Length), token)) > 0)
+                var buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(131072);
+                try
                 {
-                    _pauseEvent.Wait(token);
+                    int bytesRead;
 
-                    await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead), token);
-                    thread.DownloadedBytes += bytesRead;
-                    thread.CurrentByte += bytesRead;
-                    Interlocked.Add(ref _totalDownloadedBytes, bytesRead);
-
-                    long threadTotal = (thread.EndByte >= thread.StartByte && thread.StartByte >= 0)
-                        ? (thread.EndByte - thread.StartByte + 1)
-                        : -1;
-
-                    if (threadTotal > 0)
+                    while ((bytesRead = await contentStream.ReadAsync(buffer.AsMemory(0, 131072), token)) > 0)
                     {
-                        thread.ProgressPercentage = Math.Min(100.0, (thread.DownloadedBytes / (double)threadTotal) * 100.0);
-                    }
-                    else
-                    {
-                        thread.ProgressPercentage = 0.0;
-                    }
-                    thread.FormattedDownloaded = FormatBytes(thread.DownloadedBytes);
+                        _pauseEvent.Wait(token);
 
-                    // Speed limiter throttling (delay injection per block)
-                    if (SpeedLimiter.IsEnabled && SpeedLimiter.MaxSpeedKbps > 0)
-                    {
-                        var maxBytesPerSec = SpeedLimiter.MaxSpeedKbps * 1024L;
-                        var targetDelayMs = (bytesRead * 1000L) / Math.Max(1000L, maxBytesPerSec);
-                        if (targetDelayMs > 0)
+                        await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead), token);
+                        thread.DownloadedBytes += bytesRead;
+                        thread.CurrentByte += bytesRead;
+                        Interlocked.Add(ref _totalDownloadedBytes, bytesRead);
+
+                        long threadTotal = (thread.EndByte >= thread.StartByte && thread.StartByte >= 0)
+                            ? (thread.EndByte - thread.StartByte + 1)
+                            : -1;
+
+                        if (threadTotal > 0)
                         {
-                            await Task.Delay((int)targetDelayMs, token);
+                            thread.ProgressPercentage = Math.Min(100.0, (thread.DownloadedBytes / (double)threadTotal) * 100.0);
+                        }
+                        else
+                        {
+                            thread.ProgressPercentage = 0.0;
+                        }
+                        thread.FormattedDownloaded = FormatBytes(thread.DownloadedBytes);
+
+                        // Speed limiter throttling (delay injection per block)
+                        if (SpeedLimiter.IsEnabled && SpeedLimiter.MaxSpeedKbps > 0)
+                        {
+                            var maxBytesPerSec = SpeedLimiter.MaxSpeedKbps * 1024L;
+                            var targetDelayMs = (bytesRead * 1000L) / Math.Max(1000L, maxBytesPerSec);
+                            if (targetDelayMs > 0)
+                            {
+                                await Task.Delay((int)targetDelayMs, token);
+                            }
                         }
                     }
+                }
+                finally
+                {
+                    System.Buffers.ArrayPool<byte>.Shared.Return(buffer);
                 }
 
                 thread.StatusInfo = "Segment Merged";
