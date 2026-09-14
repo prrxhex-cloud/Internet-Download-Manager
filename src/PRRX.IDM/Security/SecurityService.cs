@@ -38,28 +38,29 @@ namespace PRRX.IDM.Security
         private const int GcmTagSize = 16;   // 128-bit authentication tag
         private const int KeySize = 32;       // 256-bit key
 
-        private static readonly string VaultDirectory = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "PRRX Cooperation",
-            "InternetDownloadManager");
-
-        private static readonly string MasterKeyPath = Path.Combine(VaultDirectory, "vault.key");
-        private static readonly string IpcTokenPath = Path.Combine(VaultDirectory, "ipc.token");
+        private readonly string _vaultDirectory;
+        private readonly string _masterKeyPath;
+        private readonly string _ipcTokenPath;
 
         private readonly object _lock = new();
         private byte[]? _cachedMasterKey;
         private string? _cachedIpcToken;
 
-        public SecurityService()
+        public SecurityService(string? customVaultDirectory = null)
         {
+            _vaultDirectory = !string.IsNullOrWhiteSpace(customVaultDirectory)
+                ? customVaultDirectory
+                : Services.ConfigurationService.AppDataFolder;
+            _masterKeyPath = Path.Combine(_vaultDirectory, "vault.key");
+            _ipcTokenPath = Path.Combine(_vaultDirectory, "ipc.token");
             EnsureVaultDirectory();
         }
 
-        private static void EnsureVaultDirectory()
+        private void EnsureVaultDirectory()
         {
-            if (!Directory.Exists(VaultDirectory))
+            if (!Directory.Exists(_vaultDirectory))
             {
-                Directory.CreateDirectory(VaultDirectory);
+                Directory.CreateDirectory(_vaultDirectory);
             }
         }
 
@@ -206,11 +207,11 @@ namespace PRRX.IDM.Security
 
                 EnsureVaultDirectory();
 
-                if (File.Exists(MasterKeyPath))
+                if (File.Exists(_masterKeyPath))
                 {
                     try
                     {
-                        var encryptedKey = File.ReadAllBytes(MasterKeyPath);
+                        var encryptedKey = File.ReadAllBytes(_masterKeyPath);
                         var key = UnprotectData(encryptedKey);
                         if (key.Length == KeySize)
                         {
@@ -231,7 +232,7 @@ namespace PRRX.IDM.Security
                 try
                 {
                     var protectedKey = ProtectData(newKey);
-                    File.WriteAllBytes(MasterKeyPath, protectedKey);
+                    File.WriteAllBytes(_masterKeyPath, protectedKey);
                 }
                 catch (Exception ex)
                 {
@@ -254,11 +255,11 @@ namespace PRRX.IDM.Security
 
                 EnsureVaultDirectory();
 
-                if (File.Exists(IpcTokenPath))
+                if (File.Exists(_ipcTokenPath))
                 {
                     try
                     {
-                        var enc = File.ReadAllText(IpcTokenPath);
+                        var enc = File.ReadAllText(_ipcTokenPath);
                         var token = UnprotectString(enc);
                         if (!string.IsNullOrWhiteSpace(token) && token.Length >= 32)
                         {
@@ -279,7 +280,7 @@ namespace PRRX.IDM.Security
                 try
                 {
                     var protectedToken = ProtectString(newToken);
-                    File.WriteAllText(IpcTokenPath, protectedToken);
+                    File.WriteAllText(_ipcTokenPath, protectedToken);
                 }
                 catch (Exception ex)
                 {

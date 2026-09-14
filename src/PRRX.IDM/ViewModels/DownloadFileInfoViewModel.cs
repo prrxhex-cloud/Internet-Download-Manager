@@ -14,6 +14,7 @@ using System.Windows;
 using System.Windows.Input;
 using Microsoft.Win32;
 using PRRX.IDM.Models;
+using PRRX.IDM.Security;
 using PRRX.IDM.Services;
 using PRRX.IDM.ViewModels;
 
@@ -150,7 +151,21 @@ namespace PRRX.IDM.ViewModels
             }
         }
 
-        public string SaveAsFullPath => Path.Combine(string.IsNullOrWhiteSpace(SaveDirectory) ? "." : SaveDirectory, FileName);
+        public string SaveAsFullPath
+        {
+            get
+            {
+                var dir = string.IsNullOrWhiteSpace(SaveDirectory) ? "." : SaveDirectory;
+                try
+                {
+                    return SecurityGuard.EnsureSafePath(dir, FileName);
+                }
+                catch
+                {
+                    return Path.Combine(Path.GetFullPath(dir), SecurityGuard.SanitizeFileName(FileName));
+                }
+            }
+        }
 
         private bool _isDescriptionUserEdited = false;
         private string? _cachedPageTitle = null;
@@ -803,11 +818,7 @@ namespace PRRX.IDM.ViewModels
         public static string SanitizeFileName(string? fileName)
         {
             if (string.IsNullOrWhiteSpace(fileName)) return "download.bin";
-            var clean = fileName.Trim();
-            foreach (var c in Path.GetInvalidFileNameChars())
-            {
-                clean = clean.Replace(c, '_');
-            }
+            var clean = SecurityGuard.SanitizeFileName(fileName);
             return string.IsNullOrWhiteSpace(clean) ? "download.bin" : clean;
         }
     }

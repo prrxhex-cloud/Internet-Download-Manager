@@ -22,10 +22,10 @@
 - **Optional Fallback**: Cookie authentication is preserved strictly as an optional fallback when downloading private or member-only playlists.
 
 ### ☁️ 3. Cloudflare Edge Server & D1 Database Integration
-- **Live Edge API**: Connected the browser extension and desktop updater with the live Cloudflare Workers edge API (`https://prrx-api.sayurusenavirathna70.workers.dev`).
+- **Live Edge API**: Connected the browser extension and desktop updater with the live serverless Cloudflare Workers edge API.
 - **Cloudflare D1 Database**: Integrated remote database connectivity for real-time domain reputation inspection, malware threat defense, server health metrics, and instant update catalog synchronization.
 - **Dual-Status Browser Extension**: Extension popup now features a real-time status matrix showing dual connectivity for both the Desktop Engine Bridge and the Cloudflare Edge API.
-- **Host Permissions**: Added `https://prrx-api.sayurusenavirathna70.workers.dev/*` to extension manifest permissions.
+- **Host Permissions**: Configured extension manifest permissions for secure cloud edge access.
 
 ### 🔄 4. Upgraded Online Download & Update System
 - **HTTP Range-Resumed Streaming**: Auto-updater now sends `Range: bytes={existingBytes}-` headers to resume interrupted update downloads rather than restarting from 0%, saving bandwidth and user time.
@@ -55,9 +55,9 @@
 
 ```text
 C2984AA0DD8930984D61B3A11023A534C14D164966D141028A826DCCAF5A5846  PRRX_IDM_Setup_Online.exe
-991848B4384A34478139DE645BF949B3003E5C3892CB01CF84B72C13C8711062  PRRX_Internet_Download_Manager_v1.4.0_Setup.exe
-1BE0ED9C8FDCE7F03BB051226C908778206750EFA1FAE34A8C536A6C198441CF  PRRX_Internet_Download_Manager_v1.4.0_Portable.zip
-9FE470B674BF725A6B983155D1B7647F8331555F3A6F78F154DC91440A43CD2F  manifest.json
+5B21E60DFA8211CC45822E419F4D2E4641FBA5C36D0B4641AA42079530859A74  PRRX_Internet_Download_Manager_v1.4.0_Setup.exe
+B176FEB5FF2EC6B7DADE8161033F2CBD64675553A6A7AB679E79057035956C64  PRRX_Internet_Download_Manager_v1.4.0_Portable.zip
+8D21C1CA6655F18D8975D5EF57E203E99A54FB2588BF7AEFDBB92B1D605CD79F  manifest.json
 ```
 
 ---

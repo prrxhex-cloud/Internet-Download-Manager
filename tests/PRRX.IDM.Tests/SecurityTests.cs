@@ -46,7 +46,7 @@ namespace PRRX.IDM.Tests
         [Theory]
         [InlineData("https://www.youtube.com/watch?v=dQw4w9WgXcQ&feature=shared&t=10s")]
         [InlineData("https://youtu.be/CKadA20afFI?si=8guLoZK1oVcuEhQI")]
-        [InlineData("https://www.tiktok.com/@sayurugg/video/7404946443442146580?is_from_webapp=1&sender_device=pc")]
+        [InlineData("https://www.tiktok.com/@creator/video/7404946443442146580?is_from_webapp=1&sender_device=pc")]
         [InlineData("https://vimeo.com/76979871")]
         public void UrlSanitizer_AcceptsLegitimateUrlsWithQueryParameters(string validUrl)
         {
@@ -258,25 +258,93 @@ namespace PRRX.IDM.Tests
         [Fact]
         public void HistoryService_StoresAndLoadsEncryptedHistory_WithoutDataLoss()
         {
-            var sec = new SecurityService();
-            var historyService = new HistoryService(sec);
+            var tempDir = Path.Combine(Path.GetTempPath(), $"prrx_hist_iso_{Guid.NewGuid():N}");
+            Directory.CreateDirectory(tempDir);
+            var tempHistoryFile = Path.Combine(tempDir, "isolated_download_history.json");
 
-            var testItem = new DownloadItem
+            try
             {
-                Title = "SecurityAuditTest.mp4",
-                TargetFilePath = @"C:\Downloads\SecurityAuditTest.mp4",
-                Url = "https://example.com/SecurityAuditTest.mp4",
-                FileSizeFormatted = "1.0 MB",
-                Status = DownloadStatus.Completed
-            };
+                var sec = new SecurityService(tempDir);
+                var historyService = new HistoryService(sec, tempHistoryFile);
 
-            historyService.AddItem(testItem);
+                var testItem = new DownloadItem
+                {
+                    Title = "EncryptedStorageVerification.mp4",
+                    TargetFilePath = Path.Combine(tempDir, "EncryptedStorageVerification.mp4"),
+                    Url = "https://example.com/EncryptedStorageVerification.mp4",
+                    FileSizeFormatted = "1.0 MB",
+                    Status = DownloadStatus.Completed
+                };
 
-            var reloadedHistory = new HistoryService(sec);
-            Assert.Contains(reloadedHistory.HistoryItems, i => i.Title == "SecurityAuditTest.mp4");
+                historyService.AddItem(testItem);
 
-            // Clean up test item
-            reloadedHistory.RemoveItem(testItem);
+                var reloadedHistory = new HistoryService(sec, tempHistoryFile);
+                Assert.Contains(reloadedHistory.HistoryItems, i => i.Title == "EncryptedStorageVerification.mp4");
+
+                // Clean up test item and verify complete removal
+                reloadedHistory.RemoveItem(testItem);
+                Assert.DoesNotContain(reloadedHistory.HistoryItems, i => i.Title == "EncryptedStorageVerification.mp4");
+            }
+            finally
+            {
+                if (Directory.Exists(tempDir))
+                {
+                    try { Directory.Delete(tempDir, true); } catch { }
+                }
+            }
+        }
+
+        [Fact]
+        public void HistoryService_PurgesSecurityAuditTestArtifacts_OnLoad()
+        {
+            var tempDir = Path.Combine(Path.GetTempPath(), $"prrx_purge_test_{Guid.NewGuid():N}");
+            Directory.CreateDirectory(tempDir);
+            var tempHistoryFile = Path.Combine(tempDir, "polluted_history.json");
+
+            try
+            {
+                var sec = new SecurityService(tempDir);
+                var historyService = new HistoryService(sec, tempHistoryFile);
+
+                var realItem = new DownloadItem
+                {
+                    Title = "LegitimateDownload.zip",
+                    TargetFilePath = Path.Combine(tempDir, "LegitimateDownload.zip"),
+                    Url = "https://example.com/LegitimateDownload.zip",
+                    Status = DownloadStatus.Completed
+                };
+                var dummyArtifact1 = new DownloadItem
+                {
+                    Title = "SecurityAuditTest.mp4",
+                    TargetFilePath = @"C:\Downloads\SecurityAuditTest.mp4",
+                    Url = "https://example.com/SecurityAuditTest.mp4",
+                    Status = DownloadStatus.Completed
+                };
+                var dummyArtifact2 = new DownloadItem
+                {
+                    Title = "SecurityAuditTest.mp4",
+                    TargetFilePath = @"C:\Downloads\SecurityAuditTest.mp4",
+                    Url = "https://example.com/SecurityAuditTest.mp4",
+                    Status = DownloadStatus.Completed
+                };
+
+                historyService.AddItem(realItem);
+                historyService.AddItem(dummyArtifact1);
+                historyService.AddItem(dummyArtifact2);
+
+                // Reload must automatically purge dummy test artifacts
+                var cleanedHistory = new HistoryService(sec, tempHistoryFile);
+                Assert.Single(cleanedHistory.HistoryItems);
+                Assert.Equal("LegitimateDownload.zip", cleanedHistory.HistoryItems[0].Title);
+                Assert.DoesNotContain(cleanedHistory.HistoryItems, i => i.Title == "SecurityAuditTest.mp4");
+            }
+            finally
+            {
+                if (Directory.Exists(tempDir))
+                {
+                    try { Directory.Delete(tempDir, true); } catch { }
+                }
+            }
         }
 
         [Fact]

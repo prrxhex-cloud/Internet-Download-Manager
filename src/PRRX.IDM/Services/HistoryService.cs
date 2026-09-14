@@ -29,37 +29,69 @@ namespace PRRX.IDM.Services
 
     public class HistoryService : IHistoryService
     {
+        public static string DefaultHistoryFilePath => Path.Combine(ConfigurationService.AppDataFolder, "download_history.json");
+
         private readonly string _historyFilePath;
         private readonly ISecurityService _securityService;
         public ObservableCollection<DownloadItem> HistoryItems { get; } = new();
 
-        public HistoryService(ISecurityService? securityService = null)
+        public HistoryService(ISecurityService? securityService = null, string? customHistoryPath = null)
         {
             _securityService = securityService ?? new SecurityService();
 
-            var appDataDir = ConfigurationService.AppDataFolder;
-            Directory.CreateDirectory(appDataDir);
-            _historyFilePath = Path.Combine(appDataDir, "download_history.json");
+            _historyFilePath = !string.IsNullOrWhiteSpace(customHistoryPath)
+                ? customHistoryPath
+                : DefaultHistoryFilePath;
 
-            // Auto-migrate legacy history location
-            var legacyPath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "PRRX_IDM",
-                "download_history.json");
-
-            if (!File.Exists(_historyFilePath) && File.Exists(legacyPath))
+            var dir = Path.GetDirectoryName(_historyFilePath);
+            if (!string.IsNullOrWhiteSpace(dir) && !Directory.Exists(dir))
             {
-                try
+                Directory.CreateDirectory(dir);
+            }
+
+            // Auto-migrate legacy history location only for default live file
+            if (string.IsNullOrWhiteSpace(customHistoryPath))
+            {
+                var legacyPath = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                    "PRRX_IDM",
+                    "download_history.json");
+
+                if (!File.Exists(_historyFilePath) && File.Exists(legacyPath))
                 {
-                    File.Copy(legacyPath, _historyFilePath, true);
-                }
-                catch
-                {
-                    // Ignore migration errors
+                    try
+                    {
+                        File.Copy(legacyPath, _historyFilePath, true);
+                    }
+                    catch
+                    {
+                        // Ignore migration errors
+                    }
                 }
             }
 
             LoadHistory();
+        }
+
+        public static bool IsTestArtifact(DownloadItem? item)
+        {
+            if (item == null) return false;
+            return string.Equals(item.Title, "SecurityAuditTest.mp4", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(item.Url, "https://example.com/SecurityAuditTest.mp4", StringComparison.OrdinalIgnoreCase) ||
+                   (!string.IsNullOrEmpty(item.TargetFilePath) && item.TargetFilePath.Contains("SecurityAuditTest.mp4", StringComparison.OrdinalIgnoreCase));
+        }
+
+        public static int PurgeTestArtifacts(string? historyFilePath = null, ISecurityService? securityService = null)
+        {
+            var targetPath = !string.IsNullOrWhiteSpace(historyFilePath)
+                ? historyFilePath
+                : DefaultHistoryFilePath;
+
+            if (!File.Exists(targetPath)) return 0;
+
+            var sec = securityService ?? new SecurityService();
+            var service = new HistoryService(sec, targetPath);
+            return service.HistoryItems.Count;
         }
 
         private void LoadHistory()
@@ -92,9 +124,20 @@ namespace PRRX.IDM.Services
                     if (items != null)
                     {
                         HistoryItems.Clear();
+                        bool purgedTestArtifacts = false;
                         foreach (var item in items)
                         {
+                            if (IsTestArtifact(item))
+                            {
+                                purgedTestArtifacts = true;
+                                continue;
+                            }
                             HistoryItems.Add(item);
+                        }
+
+                        if (purgedTestArtifacts)
+                        {
+                            SaveHistory();
                         }
                     }
                 }
@@ -140,9 +183,24 @@ namespace PRRX.IDM.Services
 
         public void RemoveItem(DownloadItem item)
         {
+            if (item == null) return;
+
+            DownloadItem? toRemove = null;
             if (HistoryItems.Contains(item))
             {
-                HistoryItems.Remove(item);
+                toRemove = item;
+            }
+            else
+            {
+                toRemove = System.Linq.Enumerable.FirstOrDefault(HistoryItems, i =>
+                    (!string.IsNullOrEmpty(item.Id) && i.Id == item.Id) ||
+                    (!string.IsNullOrEmpty(item.TargetFilePath) && i.TargetFilePath.Equals(item.TargetFilePath, StringComparison.OrdinalIgnoreCase) && i.Url == item.Url) ||
+                    (i.Title == item.Title && i.Url == item.Url));
+            }
+
+            if (toRemove != null)
+            {
+                HistoryItems.Remove(toRemove);
                 SaveHistory();
             }
         }

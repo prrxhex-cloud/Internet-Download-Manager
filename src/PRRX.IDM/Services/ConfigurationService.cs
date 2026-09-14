@@ -35,12 +35,16 @@ namespace PRRX.IDM.Services
 
     public class ConfigurationService : IConfigurationService
     {
-        public static readonly string AppDataFolder = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "PRRX Cooperation",
-            "InternetDownloadManager");
+        public static string? OverrideAppDataFolder { get; set; }
 
-        public static readonly string DefaultConfigFilePath = Path.Combine(AppDataFolder, "config.json");
+        public static string AppDataFolder => !string.IsNullOrWhiteSpace(OverrideAppDataFolder)
+            ? OverrideAppDataFolder
+            : Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "PRRX Cooperation",
+                "InternetDownloadManager");
+
+        public static string DefaultConfigFilePath => Path.Combine(AppDataFolder, "config.json");
         private readonly string _configFilePath;
 
         // Legacy storage path for backward-compatibility auto-migration
