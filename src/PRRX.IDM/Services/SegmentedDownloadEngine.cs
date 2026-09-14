@@ -215,19 +215,7 @@ namespace PRRX.IDM.Services
                 }
 
                 // Maximize download throughput: adaptive high-speed multi-socket pooling (up to 32–64 parallel streams)
-                if (threadCount <= 0)
-                {
-                    if (_totalBytes > 100 * 1024 * 1024) threadCount = 64;       // 100 MB+ : 64 parallel sockets for high-bandwidth fiber
-                    else if (_totalBytes > 25 * 1024 * 1024) threadCount = 32;  // 25 MB+  : 32 parallel sockets
-                    else if (_totalBytes > 5 * 1024 * 1024) threadCount = 16;   // 5 MB+   : 16 parallel sockets
-                    else if (_totalBytes > 1024 * 1024) threadCount = 8;        // 1 MB+   : 8 parallel sockets
-                    else if (_totalBytes > 0) threadCount = 4;
-                    else threadCount = 1;
-                }
-                else
-                {
-                    threadCount = Math.Clamp(threadCount, 1, 64);
-                }
+                threadCount = MultiSegmentDownloader.CalculateOptimalConcurrency(_totalBytes, threadCount);
 
                 // If server doesn't support ranges or size unknown, single-stream download
                 if (!acceptRanges || _totalBytes <= 0)
@@ -242,7 +230,7 @@ namespace PRRX.IDM.Services
                 Directory.CreateDirectory(tempDir);
 
                 // Initialize Threads and Byte Ranges
-                var segmentSize = _totalBytes > 0 ? _totalBytes / threadCount : -1;
+                var segmentSize = _totalBytes > 0 ? Math.Max(1, _totalBytes / threadCount) : -1;
                 for (int i = 0; i < threadCount; i++)
                 {
                     long start = _totalBytes > 0 ? (i * segmentSize) : 0;
@@ -316,6 +304,10 @@ namespace PRRX.IDM.Services
                                 }
                                 try { File.Delete(partPath); } catch { } // Free disk space immediately
                             }
+                        }
+                        if (outputStream.Position != outputStream.Length)
+                        {
+                            outputStream.SetLength(outputStream.Position);
                         }
                         await outputStream.FlushAsync(_cts.Token);
                     }

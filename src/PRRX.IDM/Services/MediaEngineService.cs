@@ -138,45 +138,17 @@ namespace PRRX.IDM.Services
             }
         }
 
-        private string? ResolveCookiesPath()
+        public string? ResolveCookiesPath()
         {
-            if (_configService != null && !_configService.CurrentConfig.IsCookiesEnabled)
+            // Cookies are strictly optional fallback (never mandatory)
+            if (_configService == null || !_configService.CurrentConfig.IsCookiesEnabled)
             {
                 return null;
             }
 
-            if (_configService != null && !string.IsNullOrWhiteSpace(_configService.CurrentConfig.CookiesFilePath) && File.Exists(_configService.CurrentConfig.CookiesFilePath))
+            if (!string.IsNullOrWhiteSpace(_configService.CurrentConfig.CookiesFilePath) && File.Exists(_configService.CurrentConfig.CookiesFilePath))
             {
                 return _configService.CurrentConfig.CookiesFilePath;
-            }
-
-            var localCookies = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "cookies.txt");
-            if (File.Exists(localCookies)) return localCookies;
-
-            var devCookies = @"D:\Internet Download Manager\cookies.txt";
-            if (File.Exists(devCookies)) return devCookies;
-
-            // Search Downloads folder for most recent cookie export if enabled
-            try
-            {
-                var downloadsDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
-                if (Directory.Exists(downloadsDir))
-                {
-                    var cookieFiles = Directory.GetFiles(downloadsDir, "*cookie*.txt")
-                        .Concat(Directory.GetFiles(downloadsDir, "*youtube*.txt"))
-                        .Select(f => new FileInfo(f))
-                        .OrderByDescending(f => f.LastWriteTimeUtc)
-                        .ToList();
-
-                    if (cookieFiles.Count > 0 && cookieFiles[0].Length > 100)
-                    {
-                        return cookieFiles[0].FullName;
-                    }
-                }
-            }
-            catch
-            {
-                // Fall through
             }
 
             return null;

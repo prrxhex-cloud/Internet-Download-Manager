@@ -546,7 +546,8 @@ namespace PRRX.IDM.Services
             try
             {
                 var appDir = AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\', '/');
-                var stagingDir = Path.Combine(Path.GetTempPath(), $"PRRX_IDM_Update_{Guid.NewGuid():N}");
+                var tempDir = Path.GetTempPath();
+                var stagingDir = Path.Combine(tempDir, $"PRRX_IDM_Update_{Guid.NewGuid():N}");
                 Directory.CreateDirectory(stagingDir);
 
                 string packageFileName = "PRRX_Update_Package.zip";
@@ -604,9 +605,10 @@ namespace PRRX.IDM.Services
                 }
                 catch { }
 
-                // 5. Generate and trigger the update helper process
+                // 5. Generate and trigger the update helper process outside staging dir
                 int currentPid = Environment.ProcessId;
                 var targetExe = Path.Combine(appDir, "PRRX.InternetDownloadManager.exe");
+                var scriptPath = Path.Combine(tempDir, $"apply_update_{Guid.NewGuid():N}.ps1");
 
                 var scriptContent =
 $@"Start-Sleep -Milliseconds 600
@@ -641,7 +643,7 @@ try {{
     Get-ChildItem -Path '{appDir}' -File -Filter '*.bak' -ErrorAction SilentlyContinue | Where-Object {{ $_.Name -notmatch '\.(json|sqlite|db|key|token)$' }} | Remove-Item -Force -ErrorAction SilentlyContinue
     Get-ChildItem -Path '{appDir}' -File -Filter '*.tmp' -ErrorAction SilentlyContinue | Where-Object {{ $_.Name -notmatch '\.(json|sqlite|db|key|token)$' }} | Remove-Item -Force -ErrorAction SilentlyContinue
     
-    # Remove staging directory
+    # Remove staging directory (now cleanly unlocked since script runs outside it)
     if (Test-Path '{stagingDir}') {{
         Remove-Item -Path '{stagingDir}' -Recurse -Force -ErrorAction SilentlyContinue
     }}
@@ -650,10 +652,13 @@ try {{
 if (Test-Path '{targetExe}') {{
     Start-Process -FilePath '{targetExe}' -WorkingDirectory '{appDir}'
 }}
-Start-Sleep -Seconds 3
+Start-Sleep -Seconds 1
+try {{
+    # Self-clean helper script in background after powershell exits
+    Start-Process cmd.exe -ArgumentList '/c timeout /t 2 >nul & del /f /q ""{scriptPath}""' -WindowStyle Hidden
+}} catch {{}}
 ";
 
-                var scriptPath = Path.Combine(stagingDir, "apply_update.ps1");
                 await File.WriteAllTextAsync(scriptPath, scriptContent, cancellationToken);
 
                 var psi = new ProcessStartInfo

@@ -32,9 +32,9 @@ namespace PRRX.IDM.Models
         public string DownloadDirectory { get; set; } = string.Empty;
         
         /// <summary>
-        /// Explicit cookie authentication toggle
+        /// Explicit cookie authentication toggle (optional fallback; defaults to false in v1.4.0 in favor of tokenless client emulation)
         /// </summary>
-        public bool IsCookiesEnabled { get; set; } = true;
+        public bool IsCookiesEnabled { get; set; } = false;
 
         /// <summary>
         /// Path to custom exported cookies.txt file for YouTube authentication

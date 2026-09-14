@@ -40,7 +40,8 @@ namespace PRRX.IDM.Services
             "PRRX Cooperation",
             "InternetDownloadManager");
 
-        private static readonly string ConfigFilePath = Path.Combine(AppDataFolder, "config.json");
+        public static readonly string DefaultConfigFilePath = Path.Combine(AppDataFolder, "config.json");
+        private readonly string _configFilePath;
 
         // Legacy storage path for backward-compatibility auto-migration
         private static readonly string LegacyAppDataFolder = Path.Combine(
@@ -54,18 +55,20 @@ namespace PRRX.IDM.Services
 
         public AppConfig CurrentConfig { get; private set; } = new();
 
-        public ConfigurationService(ISecurityService? securityService = null)
+        public ConfigurationService(ISecurityService? securityService = null, string? customConfigPath = null)
         {
             _securityService = securityService ?? new SecurityService();
+            _configFilePath = !string.IsNullOrWhiteSpace(customConfigPath) ? customConfigPath : DefaultConfigFilePath;
             EnsureDirectoryExists();
             LoadConfig();
         }
 
         private void EnsureDirectoryExists()
         {
-            if (!Directory.Exists(AppDataFolder))
+            var dir = Path.GetDirectoryName(_configFilePath);
+            if (!string.IsNullOrWhiteSpace(dir) && !Directory.Exists(dir))
             {
-                Directory.CreateDirectory(AppDataFolder);
+                Directory.CreateDirectory(dir);
             }
         }
 
@@ -74,12 +77,12 @@ namespace PRRX.IDM.Services
             try
             {
                 // Auto-migrate legacy configuration if new path does not exist
-                if (!File.Exists(ConfigFilePath) && File.Exists(LegacyConfigFilePath))
+                if (!File.Exists(_configFilePath) && File.Exists(LegacyConfigFilePath))
                 {
                     try
                     {
                         EnsureDirectoryExists();
-                        File.Copy(LegacyConfigFilePath, ConfigFilePath, true);
+                        File.Copy(LegacyConfigFilePath, _configFilePath, true);
                     }
                     catch
                     {
@@ -87,9 +90,9 @@ namespace PRRX.IDM.Services
                     }
                 }
 
-                if (File.Exists(ConfigFilePath))
+                if (File.Exists(_configFilePath))
                 {
-                    var fileContent = File.ReadAllText(ConfigFilePath);
+                    var fileContent = File.ReadAllText(_configFilePath);
                     string plainJson = fileContent;
 
                     // Check if file is stored in encrypted vault container
@@ -161,7 +164,7 @@ namespace PRRX.IDM.Services
                 };
 
                 var vaultJson = JsonSerializer.Serialize(vault, JsonOptions);
-                File.WriteAllText(ConfigFilePath, vaultJson);
+                File.WriteAllText(_configFilePath, vaultJson);
             }
             catch (Exception ex)
             {

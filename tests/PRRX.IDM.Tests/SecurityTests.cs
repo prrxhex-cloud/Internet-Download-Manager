@@ -232,19 +232,27 @@ namespace PRRX.IDM.Tests
         [Fact]
         public void ConfigurationService_StoresAndLoadsEncryptedVault_WithoutDataLoss()
         {
-            var sec = new SecurityService();
-            var configService = new ConfigurationService(sec);
+            var tempConfigFile = Path.Combine(Path.GetTempPath(), $"prrx_cfg_test_{Guid.NewGuid():N}.json");
+            try
+            {
+                var sec = new SecurityService();
+                var configService = new ConfigurationService(sec, tempConfigFile);
 
-            configService.CurrentConfig.TurboConnectionCount = 32;
-            configService.CurrentConfig.EnableTurboAcceleration = true;
-            configService.CurrentConfig.CookiesFilePath = @"D:\Internet Download Manager\test_cookies.txt";
-            configService.SaveConfig();
+                configService.CurrentConfig.TurboConnectionCount = 32;
+                configService.CurrentConfig.EnableTurboAcceleration = true;
+                configService.CurrentConfig.CookiesFilePath = @"D:\Internet Download Manager\test_cookies.txt";
+                configService.SaveConfig();
 
-            // Load into a new service instance
-            var reloadedService = new ConfigurationService(sec);
-            Assert.Equal(32, reloadedService.CurrentConfig.TurboConnectionCount);
-            Assert.True(reloadedService.CurrentConfig.EnableTurboAcceleration);
-            Assert.Equal(@"D:\Internet Download Manager\test_cookies.txt", reloadedService.CurrentConfig.CookiesFilePath);
+                // Load into a new service instance
+                var reloadedService = new ConfigurationService(sec, tempConfigFile);
+                Assert.Equal(32, reloadedService.CurrentConfig.TurboConnectionCount);
+                Assert.True(reloadedService.CurrentConfig.EnableTurboAcceleration);
+                Assert.Equal(@"D:\Internet Download Manager\test_cookies.txt", reloadedService.CurrentConfig.CookiesFilePath);
+            }
+            finally
+            {
+                if (File.Exists(tempConfigFile)) File.Delete(tempConfigFile);
+            }
         }
 
         [Fact]

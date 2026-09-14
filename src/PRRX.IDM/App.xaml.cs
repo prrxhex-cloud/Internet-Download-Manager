@@ -79,7 +79,7 @@ namespace PRRX.IDM
             {
                 _configService = new ConfigurationService();
                 _themeService = new ThemeService(_configService);
-                _mediaEngine = new MediaEngineService(_configService);
+                _mediaEngine = new MediaDownloaderService(_configService);
                 _thumbnailService = new ThumbnailService();
                 _updateService = new UpdateService();
                 _historyService = new HistoryService();

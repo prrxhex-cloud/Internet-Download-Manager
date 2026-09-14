@@ -112,6 +112,68 @@ namespace PRRX.IDM.Tests
             Assert.NotNull(config.CurrentConfig);
             Assert.True(config.CurrentConfig.TurboConnectionCount >= 8);
             Assert.True(config.CurrentConfig.EnableTurboAcceleration);
+            Assert.False(config.CurrentConfig.IsCookiesEnabled); // Tokenless YouTube emulation by default
+        }
+
+        [Theory]
+        [InlineData(0, 0, 1)]
+        [InlineData(-1, 0, 1)]
+        [InlineData(5, 0, 4)]
+        [InlineData(5, 32, 5)] // Concurrency must never exceed file size
+        [InlineData(2, 64, 2)] // Concurrency clamped to total bytes
+        [InlineData(100, 32, 32)]
+        [InlineData(2 * 1024 * 1024, 0, 8)]      // 2 MB -> 8 sockets
+        [InlineData(10 * 1024 * 1024, 0, 16)]   // 10 MB -> 16 sockets
+        [InlineData(30 * 1024 * 1024, 0, 32)]   // 30 MB -> 32 sockets
+        [InlineData(150 * 1024 * 1024, 0, 64)]  // 150 MB -> 64 sockets
+        [InlineData(200 * 1024 * 1024, 128, 64)]// Clamped to MaxSupportedConcurrency (64)
+        public void MultiSegmentDownloader_CalculateOptimalConcurrency_CalculatesAccurately(long totalBytes, int requested, int expected)
+        {
+            int actual = MultiSegmentDownloader.CalculateOptimalConcurrency(totalBytes, requested);
+            Assert.Equal(expected, actual);
+        }
+
+        [Fact]
+        public void MediaEngineService_ResolveCookiesPath_StrictlyOptional_NoScraping()
+        {
+            var config = new ConfigurationService();
+            var service = new MediaEngineService(config);
+
+            // Default: cookies disabled -> null
+            Assert.False(config.CurrentConfig.IsCookiesEnabled);
+            Assert.Null(service.ResolveCookiesPath());
+
+            // Cookies enabled, but empty path -> null
+            config.CurrentConfig.IsCookiesEnabled = true;
+            config.CurrentConfig.CookiesFilePath = string.Empty;
+            Assert.Null(service.ResolveCookiesPath());
+
+            // Cookies enabled, but nonexistent file -> null
+            config.CurrentConfig.CookiesFilePath = @"C:\nonexistent_path_cookie.txt";
+            Assert.Null(service.ResolveCookiesPath());
+
+            // Cookies enabled with real temporary file -> returns path
+            var tempCookie = Path.GetTempFileName();
+            try
+            {
+                config.CurrentConfig.CookiesFilePath = tempCookie;
+                Assert.Equal(tempCookie, service.ResolveCookiesPath());
+            }
+            finally
+            {
+                if (File.Exists(tempCookie)) File.Delete(tempCookie);
+            }
+        }
+
+        [Fact]
+        public void ActiveDownloadViewModel_InstantiatesMultiSegmentDownloaderByDefault()
+        {
+            var vm = new ViewModels.ActiveDownloadViewModel("https://example.com/file.dat", @"C:\temp\file.dat");
+            var field = typeof(ViewModels.ActiveDownloadViewModel).GetField("_downloadEngine", BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.NotNull(field);
+            var engine = field.GetValue(vm);
+            Assert.NotNull(engine);
+            Assert.IsType<MultiSegmentDownloader>(engine);
         }
     }
 }

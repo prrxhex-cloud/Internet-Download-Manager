@@ -56,14 +56,14 @@
 ```text
 C2984AA0DD8930984D61B3A11023A534C14D164966D141028A826DCCAF5A5846  PRRX_IDM_Setup_Online.exe
 5AC2DEAD4A728C58C26F8AC57CC07B3BE31232778AC79F02B39448959DDB137E  PRRX_Internet_Download_Manager_v1.4.0_Setup.exe
-07BE035905A73987128D32F51521C5BE3A6143C5DA6735D94F44268C31ED4BB4  PRRX_Internet_Download_Manager_v1.4.0_Portable.zip
-2CD8F46C269AEA78405C579508FDB5BE7B2645225D9E4FBAED64D1DC81C29623  manifest.json
+AC16EDD8EE6A7FF93E82DA49A19A4B7CD409BF39F995FE4F33A6FFDB0B3AD284  PRRX_Internet_Download_Manager_v1.4.0_Portable.zip
+415FE3CDCFE165BED41334F9952CF17B4172FB5FE12796197D3CDB6F6AE26D4D  manifest.json
 ```
 
 ---
 
 ## 🧪 Verification & Test Results
-- **Unit Test Suite**: 146 of 146 tests passed (`PRRX.IDM.Tests.dll`, 0 failures, 0 skipped)
+- **Unit Test Suite**: 160 of 160 tests passed (`PRRX.IDM.Tests.dll`, 0 failures, 0 skipped)
 - **Build Status**: Clean Release win-x64 single-file build with zero errors
 - **Zero Data Loss Protection**: Verified by unit test suite — config, SQLite databases, and download files protected
 - **Inno Setup Compilers**: Offline and Online installers generated cleanly without lock contention

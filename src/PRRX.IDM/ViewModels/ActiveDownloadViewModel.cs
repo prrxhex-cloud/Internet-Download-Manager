@@ -163,7 +163,7 @@ namespace PRRX.IDM.ViewModels
             _url = url;
             _destinationFilePath = destinationFilePath;
             _fileName = Path.GetFileName(destinationFilePath);
-            _downloadEngine = downloadEngine ?? new SegmentedDownloadEngine();
+            _downloadEngine = downloadEngine ?? new MultiSegmentDownloader();
             _powerService = powerService ?? new SystemPowerService();
             _cloudService = cloudService ?? new CloudIntelligenceService();
 
