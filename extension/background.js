@@ -6,9 +6,11 @@
  * Confidential and Proprietary - Licensed under PRRX Open Source Initiative
  * ============================================================================
  */
-// PRRX IDM Integration Module - High-Reliability Dual-Channel Background Worker
+// PRRX IDM Integration Module v1.4.0 - High-Reliability Dual-Channel Background Worker
 const HOST_NAME = "com.prrx.idm";
 const HTTP_BRIDGE_URL = "http://127.0.0.1:46543/api/download";
+const HTTP_PING_URL = "http://127.0.0.1:46543/api/ping";
+const CLOUD_API_BASE = "https://prrx-api.sayurusenavirathna70.workers.dev";
 
 // 1. Register Context Menus Safely
 function setupContextMenus() {
@@ -19,7 +21,7 @@ function setupContextMenus() {
       contexts: ["link", "video", "audio", "image", "selection"]
     }, () => {
       if (chrome.runtime.lastError) {
-        // Silently ignore if already created
+        // Silently ignore if already registered
       }
     });
 
@@ -29,7 +31,7 @@ function setupContextMenus() {
       contexts: ["page"]
     }, () => {
       if (chrome.runtime.lastError) {
-        // Silently ignore if already created
+        // Silently ignore if already registered
       }
     });
   });
@@ -46,7 +48,86 @@ chrome.runtime.onStartup.addListener(() => {
 // Also ensure context menus are initialized when service worker wakes up
 setupContextMenus();
 
-// 2. Handle Context Menu Clicks
+// 2. Cloud Intelligence & Health Query Utilities
+async function checkCloudHealth() {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 1800);
+    const res = await fetch(`${CLOUD_API_BASE}/api/health`, {
+      method: "GET",
+      headers: { "Accept": "application/json" },
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (err) {
+    console.debug("PRRX IDM: Cloud health check offline or timed out:", err.message);
+  }
+  return { status: "offline" };
+}
+
+async function checkDomainHealth(domain) {
+  if (!domain) return null;
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 1500);
+    const cleanDomain = domain.replace(/^www\./i, "").trim();
+    const res = await fetch(`${CLOUD_API_BASE}/api/domain/health?domain=${encodeURIComponent(cleanDomain)}`, {
+      method: "GET",
+      headers: { "Accept": "application/json" },
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (err) {
+    console.debug("PRRX IDM: Domain health check skipped or timed out:", err.message);
+  }
+  return null;
+}
+
+async function checkFileReputation(sha256Hash) {
+  if (!sha256Hash) return null;
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 1500);
+    const res = await fetch(`${CLOUD_API_BASE}/api/reputation?hash=${encodeURIComponent(sha256Hash)}`, {
+      method: "GET",
+      headers: { "Accept": "application/json" },
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (err) {
+    console.debug("PRRX IDM: File reputation check skipped:", err.message);
+  }
+  return null;
+}
+
+async function checkDesktopBridge() {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 1200);
+    const res = await fetch(HTTP_PING_URL, {
+      method: "GET",
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (err) {
+    // Desktop bridge offline
+  }
+  return { status: "offline" };
+}
+
+// 3. Handle Context Menu Clicks
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === "prrx_download_link") {
     // Robust URL resolution: linkUrl -> srcUrl -> selected URL -> pageUrl
@@ -85,7 +166,7 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   }
 });
 
-// 3. Intercept Standard Browser Downloads
+// 4. Intercept Standard Browser Downloads
 chrome.downloads.onDeterminingFilename.addListener((downloadItem, suggest) => {
   chrome.storage.local.get({ enableInterception: true }, (items) => {
     if (items.enableInterception && downloadItem.url && !downloadItem.url.startsWith("blob:") && !downloadItem.url.startsWith("data:")) {
@@ -113,7 +194,7 @@ chrome.downloads.onDeterminingFilename.addListener((downloadItem, suggest) => {
   return true;
 });
 
-// 4. Handle Messages from Content Script (e.g. Floating Video Panel)
+// 5. Handle Messages from Content Script & Popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === "download_video" || message.action === "download_url") {
     sendToPrrxIdm({
@@ -123,12 +204,35 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       pageTitle: sender.tab?.title || ""
     });
     sendResponse({ status: "sent" });
+  } else if (message.action === "ping_desktop") {
+    checkDesktopBridge().then((res) => sendResponse(res));
+    return true;
+  } else if (message.action === "get_cloud_status") {
+    checkCloudHealth().then((res) => sendResponse(res));
+    return true;
+  } else if (message.action === "check_domain_health") {
+    checkDomainHealth(message.domain).then((res) => sendResponse(res));
+    return true;
   }
   return true;
 });
 
-// 5. Dual-Channel Transmitter: Fast Local HTTP Bridge + Native Messaging Fallback
+// 6. Dual-Channel Transmitter: Fast Local HTTP Bridge + Native Messaging Fallback
 async function sendToPrrxIdm(payload) {
+  // Pre-flight cloud domain health & reputation check
+  if (payload && payload.url) {
+    try {
+      const parsedUrl = new URL(payload.url);
+      const domainHealth = await checkDomainHealth(parsedUrl.hostname);
+      if (domainHealth) {
+        payload.domainHealth = domainHealth;
+        console.log(`PRRX IDM: Domain health verified for ${parsedUrl.hostname}:`, domainHealth.status);
+      }
+    } catch (e) {
+      // Ignore URL parsing errors for non-standard links
+    }
+  }
+
   try {
     // Channel A: Zero-latency Localhost HTTP Server (100% reliable across all browsers)
     const controller = new AbortController();

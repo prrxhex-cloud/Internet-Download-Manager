@@ -190,8 +190,15 @@ namespace PRRX.IDM.Services
                 startInfo.ArgumentList.Add(FfmpegDirectoryPath);
             }
 
+            // Modern tokenless / client emulation extractor arguments to bypass YouTube bot detection without requiring cookies
+            startInfo.ArgumentList.Add("--extractor-args");
+            startInfo.ArgumentList.Add("youtube:player_client=android,ios,web_creator");
+            startInfo.ArgumentList.Add("--extractor-args");
+            startInfo.ArgumentList.Add("youtubetab:approximate_date");
+
+            // Cookies are strictly optional fallback (never mandatory)
             var cookies = ResolveCookiesPath();
-            if (!string.IsNullOrWhiteSpace(cookies))
+            if (!string.IsNullOrWhiteSpace(cookies) && File.Exists(cookies))
             {
                 startInfo.ArgumentList.Add("--cookies");
                 startInfo.ArgumentList.Add(cookies);

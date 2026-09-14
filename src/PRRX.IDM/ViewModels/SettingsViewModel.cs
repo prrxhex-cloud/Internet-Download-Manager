@@ -478,15 +478,36 @@ namespace PRRX.IDM.ViewModels
         {
             ChangelogHistory.Clear();
 
-            // v1.3.0 (Current Release)
+            // v1.4.0 (Current Release)
+            var rel140 = new ChangelogRelease
+            {
+                Version = "v1.4.0",
+                ReleaseDate = "September 2026",
+                IsCurrentRelease = true,
+                StatusBadge = "Current Release",
+                Summary = "High-speed multi-socket download engine with adaptive 64 parallel threads and Win32 direct cluster pre-allocation, tokenless YouTube media extraction bypassing bot detection without cookies, complete browser extension connectivity with live Cloudflare Edge & D1 database, upgraded SHA-256 update pipeline, and end-to-end data security vault.",
+                IsExpanded = true,
+                Items = new System.Collections.Generic.List<ChangelogItem>
+                {
+                    new() { Category = "Performance", Description = "Adaptive Multi-Socket Concurrency: Upgraded download engine to support up to 64 parallel stream sockets for gigabit fiber connections.", CategoryBadgeColor = "#8764B8", CategoryBgColor = "#208764B8" },
+                    new() { Category = "Performance", Description = "Win32 Direct Cluster Pre-allocation: SetFileInformationByHandle sparse disk allocation prevents fragmentation and eliminates disk allocation write stalls.", CategoryBadgeColor = "#8764B8", CategoryBgColor = "#208764B8" },
+                    new() { Category = "Performance", Description = "Expanded High-Throughput Buffering: Upgraded memory streaming buffers from 128KB to 512KB pooled blocks with sequential asynchronous copying.", CategoryBadgeColor = "#8764B8", CategoryBgColor = "#208764B8" },
+                    new() { Category = "Features", Description = "Tokenless YouTube Extraction: Native client emulation (android, ios, web_creator) bypasses bot detection without requiring manual cookies or browser cookie files.", CategoryBadgeColor = "#0078D4", CategoryBgColor = "#200078D4" },
+                    new() { Category = "Features", Description = "Cloudflare D1 & Edge Server Integration: Browser extension connects directly to local IDM bridge and live Cloudflare Workers edge backend with pre-flight domain health and reputation checks.", CategoryBadgeColor = "#0078D4", CategoryBgColor = "#200078D4" },
+                    new() { Category = "Security", Description = "End-to-End Encryption Vault: Zero secrets/env vars in client code; configs, download history, queues, and categories secured with AES-256-GCM / DPAPI.", CategoryBadgeColor = "#107C41", CategoryBgColor = "#20107C41" },
+                    new() { Category = "Fixes", Description = "Strengthened in-app update pipeline with cryptographic SHA-256 integrity verification and post-update temporary artifact cleanup.", CategoryBadgeColor = "#D83B01", CategoryBgColor = "#20D83B01" }
+                }
+            };
+
+            // v1.3.0
             var rel130 = new ChangelogRelease
             {
                 Version = "v1.3.0",
                 ReleaseDate = "September 2026",
-                IsCurrentRelease = true,
-                StatusBadge = "Current Release",
+                IsCurrentRelease = false,
+                StatusBadge = "Previous Release",
                 Summary = "In-App Seamless 1-Click Updater enhancements, automatic post-update cache and stale build cleanup with Zero Data Loss Guarantee, dedicated interactive Changelog in Settings, AES-256-GCM / DPAPI Security Vault, and refined Fluent 2 UI.",
-                IsExpanded = true,
+                IsExpanded = false,
                 Items = new System.Collections.Generic.List<ChangelogItem>
                 {
                     new() { Category = "Features", Description = "Interactive Changelog & Version History in Settings with categorized change logs across all releases.", CategoryBadgeColor = "#0078D4", CategoryBgColor = "#200078D4" },
@@ -556,6 +577,7 @@ namespace PRRX.IDM.ViewModels
                 }
             };
 
+            ChangelogHistory.Add(rel140);
             ChangelogHistory.Add(rel130);
             ChangelogHistory.Add(rel120);
             ChangelogHistory.Add(rel110);
@@ -583,7 +605,7 @@ namespace PRRX.IDM.ViewModels
                 }
             }
 
-            if (!currentFound && UpdateService.IsVersionNewer(CurrentVersionClean, "1.3.0"))
+            if (!currentFound && UpdateService.IsVersionNewer(CurrentVersionClean, "1.4.0"))
             {
                 ChangelogHistory.Insert(0, new ChangelogRelease
                 {

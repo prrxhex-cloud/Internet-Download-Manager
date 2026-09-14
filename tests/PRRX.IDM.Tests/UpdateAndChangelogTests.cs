@@ -111,44 +111,54 @@ namespace PRRX.IDM.Tests
             var vm = new SettingsViewModel(config, theme, update, media);
 
             Assert.NotNull(vm.ChangelogHistory);
-            Assert.Equal(4, vm.ChangelogHistory.Count);
+            Assert.Equal(5, vm.ChangelogHistory.Count);
 
-            // 1. v1.3.0 Current Release
-            var v130 = vm.ChangelogHistory[0];
+            // 1. v1.4.0 Current Release
+            var v140 = vm.ChangelogHistory[0];
+            Assert.Equal("v1.4.0", v140.Version);
+            Assert.True(v140.IsCurrentRelease);
+            Assert.True(v140.IsExpanded);
+            Assert.Equal("Current Release", v140.StatusBadge);
+            Assert.Contains("High-speed multi-socket download engine", v140.Summary);
+            Assert.Contains(v140.Items, i => i.Category == "Performance" && i.Description.Contains("Adaptive Multi-Socket"));
+            Assert.Contains(v140.Items, i => i.Category == "Features" && i.Description.Contains("Tokenless YouTube"));
+            Assert.Contains(v140.Items, i => i.Category == "Features" && i.Description.Contains("Cloudflare D1"));
+            Assert.Contains(v140.Items, i => i.Category == "Security" && i.Description.Contains("End-to-End Encryption"));
+
+            // 2. v1.3.0
+            var v130 = vm.ChangelogHistory[1];
             Assert.Equal("v1.3.0", v130.Version);
-            Assert.True(v130.IsCurrentRelease);
-            Assert.True(v130.IsExpanded);
-            Assert.Equal("Current Release", v130.StatusBadge);
+            Assert.False(v130.IsCurrentRelease);
             Assert.Contains("In-App Seamless", v130.Summary);
             Assert.Contains(v130.Items, i => i.Category == "Features" && i.Description.Contains("Changelog"));
             Assert.Contains(v130.Items, i => i.Category == "Features" && i.Description.Contains("Post-Update Cleanup"));
             Assert.Contains(v130.Items, i => i.Category == "Security" && i.Description.Contains("Zero Data Loss"));
 
-            // 2. v1.2.0
-            var v120 = vm.ChangelogHistory[1];
+            // 3. v1.2.0
+            var v120 = vm.ChangelogHistory[2];
             Assert.Equal("v1.2.0", v120.Version);
             Assert.False(v120.IsCurrentRelease);
             Assert.Contains(v120.Items, i => i.Description.Contains("Chrome"));
 
-            // 3. v1.1.0
-            var v110 = vm.ChangelogHistory[2];
+            // 4. v1.1.0
+            var v110 = vm.ChangelogHistory[3];
             Assert.Equal("v1.1.0", v110.Version);
             Assert.False(v110.IsCurrentRelease);
             Assert.Contains(v110.Items, i => i.Description.Contains("HTTP bridge"));
 
-            // 4. v1.0.0
-            var v100 = vm.ChangelogHistory[3];
+            // 5. v1.0.0
+            var v100 = vm.ChangelogHistory[4];
             Assert.Equal("v1.0.0", v100.Version);
             Assert.False(v100.IsCurrentRelease);
             Assert.Contains(v100.Items, i => i.Description.Contains(".NET 8"));
         }
 
         [Fact]
-        public void UpdateService_CurrentVersion_ReflectsV1_3_0()
+        public void UpdateService_CurrentVersion_ReflectsV1_4_0()
         {
             var service = new UpdateService();
             Assert.NotNull(service.CurrentVersion);
-            Assert.Equal("1.3.0", service.CurrentVersionClean);
+            Assert.Equal("1.4.0", service.CurrentVersionClean);
         }
 
         [Theory]

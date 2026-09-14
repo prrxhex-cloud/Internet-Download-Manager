@@ -40,13 +40,41 @@ namespace PRRX.IDM.Services
     {
         private static readonly HttpClient HttpClient = CreateHttpClient();
         private const string DefaultGitHubRepo = "prrxhex-cloud/Internet-Download-Manager";
+        public const string CloudflareWorkerApi = "https://prrx-api.sayurusenavirathna70.workers.dev/api/manifest";
+
+        public async Task<UpdateManifest?> QueryCloudflareWorkerManifestAsync()
+        {
+            try
+            {
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3.5));
+                using var req = new HttpRequestMessage(HttpMethod.Get, CloudflareWorkerApi);
+                using var resp = await HttpClient.SendAsync(req, cts.Token);
+                if (resp.IsSuccessStatusCode)
+                {
+                    var json = await resp.Content.ReadAsStringAsync(cts.Token);
+                    var manifest = JsonSerializer.Deserialize<UpdateManifest>(json, new JsonSerializerOptions
+                    {
+                        PropertyNameCaseInsensitive = true
+                    });
+                    if (manifest != null && !string.IsNullOrWhiteSpace(manifest.Version))
+                    {
+                        return manifest;
+                    }
+                }
+            }
+            catch
+            {
+                // Degrades gracefully to GitHub API / fallback
+            }
+            return null;
+        }
 
         private static HttpClient CreateHttpClient()
         {
             var client = new HttpClient { Timeout = TimeSpan.FromSeconds(35) };
             var asm = typeof(App).Assembly;
             var ver = asm.GetName().Version;
-            var verStr = ver != null ? $"{ver.Major}.{ver.Minor}.{Math.Max(0, ver.Build)}" : "1.3.0";
+            var verStr = ver != null ? $"{ver.Major}.{ver.Minor}.{Math.Max(0, ver.Build)}" : "1.4.0";
             client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("PRRX-IDM", verStr));
             client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github.v3+json"));
             return client;
@@ -81,7 +109,7 @@ namespace PRRX.IDM.Services
                 }
                 catch { }
 
-                return new Version(1, 3, 0);
+                return new Version(1, 4, 0);
             }
         }
 
@@ -146,16 +174,34 @@ namespace PRRX.IDM.Services
             var repo = string.IsNullOrWhiteSpace(repoOwnerAndName) ? DefaultGitHubRepo : repoOwnerAndName.Trim();
             var apiUrl = $"https://api.github.com/repos/{repo}/releases/latest";
 
+            // 1. Query Cloudflare Worker edge API
+            UpdateManifest? cloudManifest = null;
+            try
+            {
+                cloudManifest = await QueryCloudflareWorkerManifestAsync();
+            }
+            catch { }
+
             try
             {
                 using var response = await HttpClient.GetAsync(apiUrl);
                 if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
                 {
+                    if (cloudManifest != null)
+                    {
+                        bool isCloudNewer = IsVersionNewer(cloudManifest.Version, CurrentVersionClean);
+                        return (isCloudNewer, cloudManifest, null);
+                    }
                     return await CheckFallbackLocalManifestAsync("No published GitHub releases found. Checking update repository...");
                 }
 
                 if (!response.IsSuccessStatusCode)
                 {
+                    if (cloudManifest != null)
+                    {
+                        bool isCloudNewer = IsVersionNewer(cloudManifest.Version, CurrentVersionClean);
+                        return (isCloudNewer, cloudManifest, null);
+                    }
                     return await CheckFallbackLocalManifestAsync($"GitHub API responded with {response.StatusCode}.");
                 }
 
@@ -163,7 +209,7 @@ namespace PRRX.IDM.Services
                 using var doc = JsonDocument.Parse(json);
                 var root = doc.RootElement;
 
-                var rawTag = root.TryGetProperty("tag_name", out var tagProp) ? tagProp.GetString() ?? "1.3.0" : "1.3.0";
+                var rawTag = root.TryGetProperty("tag_name", out var tagProp) ? tagProp.GetString() ?? "1.4.0" : "1.4.0";
                 var cleanVersion = rawTag.TrimStart('v', 'V').Trim();
 
                 var releaseName = root.TryGetProperty("name", out var nameProp) ? nameProp.GetString() : rawTag;
@@ -247,7 +293,7 @@ namespace PRRX.IDM.Services
                     }
                 }
 
-                var manifest = new UpdateManifest
+                var gitHubManifest = new UpdateManifest
                 {
                     Version = cleanVersion,
                     ReleaseDate = publishedAt.Length >= 10 ? publishedAt.Substring(0, 10) : DateTime.UtcNow.ToString("yyyy-MM-dd"),
@@ -256,12 +302,22 @@ namespace PRRX.IDM.Services
                     Sha256Hash = sha256 ?? string.Empty
                 };
 
-                bool isNewer = IsVersionNewer(cleanVersion, CurrentVersionClean);
-                return (isNewer, manifest, null);
+                // Compare GitHub release with Cloudflare worker manifest and choose the newest
+                var finalManifest = (cloudManifest != null && IsVersionNewer(cloudManifest.Version, gitHubManifest.Version))
+                    ? cloudManifest
+                    : gitHubManifest;
+
+                bool isNewer = IsVersionNewer(finalManifest.Version, CurrentVersionClean);
+                return (isNewer, finalManifest, null);
             }
             catch (Exception ex)
             {
-                return await CheckFallbackLocalManifestAsync($"GitHub connection notice: {ex.Message}");
+                if (cloudManifest != null)
+                {
+                    bool isCloudNewer = IsVersionNewer(cloudManifest.Version, CurrentVersionClean);
+                    return (isCloudNewer, cloudManifest, null);
+                }
+                return await CheckFallbackLocalManifestAsync($"Update repository notice: {ex.Message}");
             }
         }
 
@@ -323,46 +379,80 @@ namespace PRRX.IDM.Services
 
                 bool downloaded = false;
 
-                // 2. Resilient HTTP streaming download with retry logic, chunk validation, and progress tracking
+                // 2. Resilient HTTP streaming download with range-resume support, 256KB buffer, and SHA-256 verification
                 int maxRetries = 3;
                 for (int attempt = 1; attempt <= maxRetries; attempt++)
                 {
                     try
                     {
+                        var dir = Path.GetDirectoryName(destinationPath);
+                        if (!string.IsNullOrWhiteSpace(dir)) Directory.CreateDirectory(dir);
+
+                        long existingBytes = 0;
+                        if (File.Exists(destinationPath))
+                        {
+                            existingBytes = new FileInfo(destinationPath).Length;
+                        }
+
                         using var request = new HttpRequestMessage(HttpMethod.Get, manifest.DownloadUrl);
+                        if (existingBytes > 0)
+                        {
+                            request.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(existingBytes, null);
+                        }
+
                         using var response = await HttpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+
+                        bool isPartial = response.StatusCode == System.Net.HttpStatusCode.PartialContent;
                         if (response.IsSuccessStatusCode)
                         {
-                            var totalBytes = response.Content.Headers.ContentLength ?? -1L;
+                            long totalExpected = response.Content.Headers.ContentLength ?? -1L;
+                            if (isPartial && response.Content.Headers.ContentRange?.Length != null)
+                            {
+                                totalExpected = response.Content.Headers.ContentRange.Length.Value;
+                            }
+                            else if (isPartial && totalExpected > 0)
+                            {
+                                totalExpected += existingBytes;
+                            }
+
                             await using var contentStream = await response.Content.ReadAsStreamAsync();
 
-                            var dir = Path.GetDirectoryName(destinationPath);
-                            if (!string.IsNullOrWhiteSpace(dir)) Directory.CreateDirectory(dir);
+                            FileMode fileMode = (isPartial && existingBytes > 0) ? FileMode.Append : FileMode.Create;
+                            await using var fileStream = new FileStream(
+                                destinationPath,
+                                fileMode,
+                                FileAccess.Write,
+                                FileShare.None,
+                                262144,
+                                FileOptions.Asynchronous | FileOptions.SequentialScan);
 
-                            await using var fileStream = new FileStream(destinationPath, FileMode.Create, FileAccess.Write, FileShare.None, 65536, true);
-
-                            var buffer = new byte[65536];
-                            long totalRead = 0;
-                            int bytesRead;
-
-                            while ((bytesRead = await contentStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
+                            var buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(262144);
+                            long totalRead = isPartial ? existingBytes : 0;
+                            try
                             {
-                                await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead));
-                                totalRead += bytesRead;
-
-                                if (totalBytes > 0 && progress != null)
+                                int bytesRead;
+                                while ((bytesRead = await contentStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
                                 {
-                                    progress.Report(Math.Min(100.0, (double)totalRead / totalBytes * 100.0));
+                                    await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead));
+                                    totalRead += bytesRead;
+
+                                    if (totalExpected > 0 && progress != null)
+                                    {
+                                        progress.Report(Math.Min(100.0, (double)totalRead / totalExpected * 100.0));
+                                    }
                                 }
+                            }
+                            finally
+                            {
+                                System.Buffers.ArrayPool<byte>.Shared.Return(buffer);
                             }
 
                             await fileStream.FlushAsync();
                             fileStream.Close();
 
-                            // Validate downloaded size integrity
-                            if (totalBytes > 0 && totalRead < totalBytes)
+                            // Validate downloaded size integrity if known
+                            if (totalExpected > 0 && totalRead < totalExpected)
                             {
-                                if (File.Exists(destinationPath)) File.Delete(destinationPath);
                                 continue;
                             }
 

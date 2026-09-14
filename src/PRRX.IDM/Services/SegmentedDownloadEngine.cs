@@ -13,6 +13,7 @@ using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using PRRX.IDM.Models;
+using PRRX.IDM.Native;
 
 namespace PRRX.IDM.Services
 {
@@ -41,7 +42,7 @@ namespace PRRX.IDM.Services
         Task<bool> StartDownloadAsync(
             string url,
             string destinationFilePath,
-            int threadCount = 16,
+            int threadCount = 32,
             CancellationToken cancellationToken = default);
 
         void Pause();
@@ -56,9 +57,9 @@ namespace PRRX.IDM.Services
         {
             PooledConnectionLifetime = TimeSpan.FromMinutes(15),
             PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2),
-            MaxConnectionsPerServer = 64,
+            MaxConnectionsPerServer = 128,
             EnableMultipleHttp2Connections = true,
-            InitialHttp2StreamWindowSize = 2 * 1024 * 1024,
+            InitialHttp2StreamWindowSize = 4 * 1024 * 1024,
             AutomaticDecompression = System.Net.DecompressionMethods.None,
             KeepAlivePingPolicy = HttpKeepAlivePingPolicy.Always,
             KeepAlivePingDelay = TimeSpan.FromSeconds(30),
@@ -213,14 +214,19 @@ namespace PRRX.IDM.Services
                     }
                 }
 
-                // Maximize download throughput: adaptive 16-32 streams
+                // Maximize download throughput: adaptive high-speed multi-socket pooling (up to 32–64 parallel streams)
                 if (threadCount <= 0)
                 {
-                    if (_totalBytes > 50 * 1024 * 1024) threadCount = 32;
-                    else if (_totalBytes > 10 * 1024 * 1024) threadCount = 24;
-                    else if (_totalBytes > 2 * 1024 * 1024) threadCount = 16;
-                    else if (_totalBytes > 0) threadCount = 8;
+                    if (_totalBytes > 100 * 1024 * 1024) threadCount = 64;       // 100 MB+ : 64 parallel sockets for high-bandwidth fiber
+                    else if (_totalBytes > 25 * 1024 * 1024) threadCount = 32;  // 25 MB+  : 32 parallel sockets
+                    else if (_totalBytes > 5 * 1024 * 1024) threadCount = 16;   // 5 MB+   : 16 parallel sockets
+                    else if (_totalBytes > 1024 * 1024) threadCount = 8;        // 1 MB+   : 8 parallel sockets
+                    else if (_totalBytes > 0) threadCount = 4;
                     else threadCount = 1;
+                }
+                else
+                {
+                    threadCount = Math.Clamp(threadCount, 1, 64);
                 }
 
                 // If server doesn't support ranges or size unknown, single-stream download
@@ -282,23 +288,17 @@ namespace PRRX.IDM.Services
                 _progressTimer?.Dispose();
                 _progressTimer = null;
 
-                // All segments completed - Assemble parts into final target file with pre-allocation
+                // All segments completed - Assemble parts into final target file with fast Win32 pre-allocation
                 ReportProgress("Assembling segments into final file...");
-                using (var outputStream = new FileStream(destinationFilePath, FileMode.Create, FileAccess.Write, FileShare.None, 262144, true))
+                using (var outputStream = new FileStream(destinationFilePath, FileMode.Create, FileAccess.Write, FileShare.None, 524288, FileOptions.Asynchronous | FileOptions.SequentialScan))
                 {
                     if (_totalBytes > 0)
                     {
-                        try
-                        {
-                            outputStream.SetLength(_totalBytes); // Pre-allocate contiguous clusters to prevent disk allocation lock contention
-                        }
-                        catch
-                        {
-                            // If disk is full or filesystem doesn't support SetLength, proceed with normal stream writes
-                        }
+                        // Pre-allocate sparse disk space to eliminate file-allocation stalls and fragmentation
+                        NativeFileHelper.FastPreallocate(outputStream, _totalBytes);
                     }
 
-                    var copyBuffer = System.Buffers.ArrayPool<byte>.Shared.Rent(262144); // 256 KB pooled buffer
+                    var copyBuffer = System.Buffers.ArrayPool<byte>.Shared.Rent(524288); // 512 KB high-throughput pooled buffer
                     try
                     {
                         for (int i = 0; i < threadCount; i++)
@@ -306,10 +306,10 @@ namespace PRRX.IDM.Services
                             var partPath = Path.Combine(tempDir, $"part_{i}.tmp");
                             if (File.Exists(partPath))
                             {
-                                using (var partStream = new FileStream(partPath, FileMode.Open, FileAccess.Read, FileShare.Read, 262144, true))
+                                using (var partStream = new FileStream(partPath, FileMode.Open, FileAccess.Read, FileShare.Read, 524288, FileOptions.Asynchronous | FileOptions.SequentialScan))
                                 {
                                     int read;
-                                    while ((read = await partStream.ReadAsync(copyBuffer.AsMemory(0, 262144), _cts.Token)) > 0)
+                                    while ((read = await partStream.ReadAsync(copyBuffer.AsMemory(0, 524288), _cts.Token)) > 0)
                                     {
                                         await outputStream.WriteAsync(copyBuffer.AsMemory(0, read), _cts.Token);
                                     }
@@ -317,6 +317,7 @@ namespace PRRX.IDM.Services
                                 try { File.Delete(partPath); } catch { } // Free disk space immediately
                             }
                         }
+                        await outputStream.FlushAsync(_cts.Token);
                     }
                     finally
                     {
@@ -393,14 +394,14 @@ namespace PRRX.IDM.Services
 
                 thread.StatusInfo = "Receiving data...";
                 using var contentStream = await response.Content.ReadAsStreamAsync(token);
-                using var fileStream = new FileStream(tempPartPath, FileMode.Create, FileAccess.Write, FileShare.None, 131072, true);
+                using var fileStream = new FileStream(tempPartPath, FileMode.Create, FileAccess.Write, FileShare.None, 524288, FileOptions.Asynchronous | FileOptions.SequentialScan);
 
-                var buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(131072);
+                var buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(524288);
                 try
                 {
                     int bytesRead;
 
-                    while ((bytesRead = await contentStream.ReadAsync(buffer.AsMemory(0, 131072), token)) > 0)
+                    while ((bytesRead = await contentStream.ReadAsync(buffer.AsMemory(0, 524288), token)) > 0)
                     {
                         _pauseEvent.Wait(token);
 
@@ -434,6 +435,7 @@ namespace PRRX.IDM.Services
                             }
                         }
                     }
+                    await fileStream.FlushAsync(token);
                 }
                 finally
                 {
