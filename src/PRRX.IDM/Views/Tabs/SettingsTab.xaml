@@ -510,7 +510,7 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
                                   SelectedItem="{Binding TurboConnectionCount, Mode=TwoWay}" 
                                   IsEnabled="{Binding EnableTurboAcceleration}" Height="38"/>
                     </Grid>
-                    <TextBlock Text="Recommended: 16 streams for optimal balance between network throughput and low CPU usage." 
+                    <TextBlock Text="Recommended: 16 streams for balanced throughput; up to 64 streams for ultra-high-speed fiber networks." 
                                FontSize="11" Opacity="0.6"/>
                 </StackPanel>
             </Border>

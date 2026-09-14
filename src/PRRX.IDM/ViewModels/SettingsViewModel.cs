@@ -149,7 +149,9 @@ namespace PRRX.IDM.ViewModels
             8,
             16,
             24,
-            32
+            32,
+            48,
+            64
         };
 
         public bool IsWin11
@@ -164,7 +166,7 @@ namespace PRRX.IDM.ViewModels
             set => SetProperty(ref _appVersion, value);
         }
 
-        public string CurrentVersionClean => _updateService?.CurrentVersionClean ?? "1.3.0";
+        public string CurrentVersionClean => _updateService?.CurrentVersionClean ?? "1.4.0";
 
         public string UpdateStatusMessage
         {
