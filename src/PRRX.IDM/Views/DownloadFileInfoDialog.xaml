@@ -158,7 +158,7 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
                             Background="#20E81123" Foreground="#F87171" BorderBrush="#40E81123" BorderThickness="1"
                             Padding="7,3" Margin="0,0,8,0" Cursor="Hand" FontSize="10" FontWeight="SemiBold"
                             ToolTip="Report this file as suspicious/malware to the community threat intelligence network"/>
-                    <TextBlock Text="{Binding VoteFeedbackText}" Foreground="#4ADE80" FontSize="10" FontWeight="Medium" 
+                    <TextBlock Text="{Binding VoteFeedbackText}" Foreground="{Binding VoteFeedbackFgColor}" FontSize="10" FontWeight="Medium" 
                                VerticalAlignment="Center" Visibility="{Binding HasVoteFeedback, Converter={StaticResource BoolToVis}}"/>
                 </StackPanel>
 

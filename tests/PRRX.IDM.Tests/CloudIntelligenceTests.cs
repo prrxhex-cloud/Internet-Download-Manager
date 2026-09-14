@@ -116,6 +116,7 @@ namespace PRRX.IDM.Tests
             var ip = service.GetLocalLanIp();
             Assert.NotEmpty(ip);
             Assert.True(IPAddress.TryParse(ip, out _));
+            Assert.NotEqual("192.168.56.1", ip); // Confirms VirtualBox host-only adapter is filtered out in favor of active gateway adapter
         }
 
         [Fact]
@@ -491,6 +492,156 @@ namespace PRRX.IDM.Tests
             Assert.Equal("#F87171", vm.SecurityBadgeFgColor);
             Assert.Equal(ReputationBadgeStatus.Suspicious, vm.ReputationStatus);
             Assert.Equal("⚠ Malware report submitted!", vm.VoteFeedbackText);
+            Assert.Equal("#F87171", vm.VoteFeedbackFgColor);
+        }
+
+        [Fact]
+        public void ExtractOrComputeSha256_HashInPathWithoutQuery_ExtractsCorrectly()
+        {
+            var service = new CloudIntelligenceService();
+            const string explicitHash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+            var url = $"https://cdn.example.com/builds/{explicitHash}/app.zip";
+            var extracted = service.ExtractOrComputeSha256(url);
+            Assert.Equal(explicitHash, extracted);
+        }
+
+        [Fact]
+        public void ExtractOrComputeSha256_IgnoresTimestampedPlaceholderFilenames()
+        {
+            var service = new CloudIntelligenceService();
+            var url = "https://example.com/download?id=99";
+            var hash1 = service.ExtractOrComputeSha256(url, "download_20260914_140001.bin");
+            var hash2 = service.ExtractOrComputeSha256(url, "download_20260914_140002.bin");
+            var hash3 = service.ExtractOrComputeSha256(url, "download.bin");
+            var hashBare = service.ExtractOrComputeSha256(url);
+            Assert.Equal(hash1, hash2);
+            Assert.Equal(hash1, hash3);
+            Assert.Equal(hash1, hashBare);
+        }
+
+        [Theory]
+        [InlineData("https://github.com/path", "github.com")]
+        [InlineData("http://api.site.com:8080/v1", "api.site.com")]
+        [InlineData("ftp://ftp.is.co.za/file.iso", "ftp.is.co.za")]
+        [InlineData("sftp://files.corp.net/data.tar", "files.corp.net")]
+        [InlineData("example.com/downloads", "example.com")]
+        [InlineData("sub.domain.org:9000", "sub.domain.org")]
+        public async Task GetDomainHealthAsync_CleansVariedDomainFormats(string rawDomain, string expectedCleanDomain)
+        {
+            var handler = new MockHttpMessageHandler
+            {
+                ResponseFactory = req =>
+                {
+                    Assert.Contains($"domain={expectedCleanDomain}", req.RequestUri?.ToString());
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("{\"domain\":\"" + expectedCleanDomain + "\",\"status\":\"online\",\"avg_speed_mbps\":50.0}", Encoding.UTF8, "application/json")
+                    };
+                }
+            };
+            var httpClient = new HttpClient(handler);
+            var service = new CloudIntelligenceService("https://mock.prrx.io", httpClient);
+
+            var res = await service.GetDomainHealthAsync(rawDomain);
+            Assert.Equal(expectedCleanDomain, res.Domain);
+            Assert.Equal("online", res.Status);
+        }
+
+        [Fact]
+        public async Task FastExit_WhenHashIsEmpty_DoesNotSendNetworkRequests()
+        {
+            var handler = new MockHttpMessageHandler
+            {
+                ResponseFactory = _ => throw new InvalidOperationException("Should not be called")
+            };
+            var httpClient = new HttpClient(handler);
+            var service = new CloudIntelligenceService("https://mock.prrx.io", httpClient);
+
+            var peers = await service.GetLanPeersAsync("");
+            Assert.Equal(0, peers.TotalPeers);
+
+            var announce = await service.AnnounceLanPeerAsync("peer", "");
+            Assert.False(announce);
+
+            var mirrors = await service.GetMirrorsAsync("");
+            Assert.Empty(mirrors.Mirrors);
+        }
+
+        [Fact]
+        public void FileReputationResult_SafeVerdictWithMinorReport_PreservesSafeBadge()
+        {
+            var rep = new FileReputationResult
+            {
+                Found = true,
+                Sha256 = "hash123",
+                SafeVotes = 100,
+                MalwareReports = 1,
+                SafetyScore = 95,
+                Verdict = "safe"
+            };
+
+            Assert.True(rep.IsSafe);
+            Assert.False(rep.IsSuspicious);
+            Assert.Equal(ReputationBadgeStatus.Safe, rep.BadgeStatus);
+            Assert.Contains("Community Verified: Safe (95%)", rep.BadgeText);
+        }
+
+        [Fact]
+        public void FileReputationResult_NeutralVerdict_RendersNeutralBadge()
+        {
+            var rep = new FileReputationResult
+            {
+                Found = true,
+                Sha256 = "hash456",
+                SafeVotes = 2,
+                MalwareReports = 1,
+                SafetyScore = 60,
+                Verdict = "neutral"
+            };
+
+            Assert.False(rep.IsSafe);
+            Assert.False(rep.IsSuspicious);
+            Assert.Equal(ReputationBadgeStatus.Neutral, rep.BadgeStatus);
+            Assert.Contains("Neutral (60%)", rep.BadgeText);
+        }
+
+        [Fact]
+        public void DownloadFileInfoViewModel_WithInitialFileName_InitializesAccurately()
+        {
+            var handler = new MockHttpMessageHandler();
+            var httpClient = new HttpClient(handler);
+            var mockCloudService = new CloudIntelligenceService("https://mock.prrx.io", httpClient);
+
+            var vm = new DownloadFileInfoViewModel(
+                "https://example.com/get?id=123",
+                Path.GetTempPath(),
+                "Download Site",
+                precalculatedSize: 1024,
+                initialFileName: "custom_app.zip",
+                cloudService: mockCloudService);
+
+            Assert.Equal("custom_app.zip", vm.FileName);
+            Assert.False(string.IsNullOrWhiteSpace(vm.CurrentFileHash));
+        }
+
+        [Fact]
+        public void DownloadFileInfoViewModel_ChangingFileName_UpdatesHash()
+        {
+            var handler = new MockHttpMessageHandler();
+            var httpClient = new HttpClient(handler);
+            var mockCloudService = new CloudIntelligenceService("https://mock.prrx.io", httpClient);
+
+            var vm = new DownloadFileInfoViewModel(
+                "https://example.com/file",
+                Path.GetTempPath(),
+                initialFileName: "alpha.zip",
+                cloudService: mockCloudService);
+
+            var hash1 = vm.CurrentFileHash;
+            vm.FileName = "beta.zip";
+            var hash2 = vm.CurrentFileHash;
+
+            Assert.NotEqual(hash1, hash2);
         }
 
         [Fact]

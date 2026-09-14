@@ -225,6 +225,11 @@ namespace PRRX.IDM.Services
         public async Task<LanPeersResult> GetLanPeersAsync(string sha256Hash, string? localLanIp = null, CancellationToken cancellationToken = default)
         {
             var cleanHash = NormalizeHash(sha256Hash);
+            if (string.IsNullOrWhiteSpace(cleanHash))
+            {
+                return new LanPeersResult { TotalPeers = 0, Peers = new List<LanPeerItem>() };
+            }
+
             var lanIp = !string.IsNullOrWhiteSpace(localLanIp) ? localLanIp : GetLocalLanIp();
 
             using var timeoutCts = CreateLinkedTimeout(cancellationToken);
@@ -257,6 +262,11 @@ namespace PRRX.IDM.Services
             CancellationToken cancellationToken = default)
         {
             var cleanHash = NormalizeHash(sha256Hash);
+            if (string.IsNullOrWhiteSpace(cleanHash))
+            {
+                return false;
+            }
+
             var lanIp = !string.IsNullOrWhiteSpace(localLanIp) ? localLanIp : GetLocalLanIp();
 
             using var timeoutCts = CreateLinkedTimeout(cancellationToken);
@@ -295,6 +305,11 @@ namespace PRRX.IDM.Services
         public async Task<MirrorsResult> GetMirrorsAsync(string sha256Hash, CancellationToken cancellationToken = default)
         {
             var cleanHash = NormalizeHash(sha256Hash);
+            if (string.IsNullOrWhiteSpace(cleanHash))
+            {
+                return new MirrorsResult { Sha256 = string.Empty, Mirrors = new List<string>() };
+            }
+
             using var timeoutCts = CreateLinkedTimeout(cancellationToken);
             try
             {
@@ -340,7 +355,7 @@ namespace PRRX.IDM.Services
 
             try
             {
-                using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, useAsync: true);
+                using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 131072, useAsync: true);
                 var hashBytes = await SHA256.HashDataAsync(stream, cancellationToken).ConfigureAwait(false);
                 return Convert.ToHexString(hashBytes).ToLowerInvariant();
             }
@@ -357,29 +372,32 @@ namespace PRRX.IDM.Services
 
             try
             {
-                // 1. Check for SHA-256 in query string parameters (e.g. hash=, sha256=, checksum=)
-                if (Uri.TryCreate(url, UriKind.Absolute, out var uri) && !string.IsNullOrWhiteSpace(uri.Query))
+                if (Uri.TryCreate(url, UriKind.Absolute, out var uri))
                 {
-                    var query = uri.Query.TrimStart('?');
-                    var parts = query.Split('&');
-                    foreach (var p in parts)
+                    // 1. Check for SHA-256 in query string parameters (e.g. hash=, sha256=, checksum=, digest=)
+                    if (!string.IsNullOrWhiteSpace(uri.Query))
                     {
-                        var kv = p.Split('=');
-                        if (kv.Length == 2)
+                        var query = uri.Query.TrimStart('?');
+                        var parts = query.Split('&');
+                        foreach (var p in parts)
                         {
-                            var key = kv[0].ToLowerInvariant();
-                            if (key is "sha256" or "hash" or "checksum" or "sha" or "filehash")
+                            var kv = p.Split('=');
+                            if (kv.Length == 2)
                             {
-                                var val = Uri.UnescapeDataString(kv[1]).Trim();
-                                if (Regex.IsMatch(val, "^[0-9a-fA-F]{64}$"))
+                                var key = kv[0].ToLowerInvariant();
+                                if (key is "sha256" or "hash" or "checksum" or "sha" or "filehash" or "digest")
                                 {
-                                    return val.ToLowerInvariant();
+                                    var val = Uri.UnescapeDataString(kv[1]).Trim();
+                                    if (Regex.IsMatch(val, "^[0-9a-fA-F]{64}$"))
+                                    {
+                                        return val.ToLowerInvariant();
+                                    }
                                 }
                             }
                         }
                     }
 
-                    // Check path segments
+                    // 2. Check path segments (evaluated even when uri.Query is empty)
                     foreach (var seg in uri.Segments)
                     {
                         var cleanSeg = seg.Trim('/');
@@ -392,9 +410,11 @@ namespace PRRX.IDM.Services
             }
             catch { }
 
-            // 2. Fallback: Fast deterministic fingerprint computed on canonical URL + optional fileName
+            // 3. Fallback: Fast deterministic fingerprint computed on canonical URL + optional clean fileName
             var canonical = url.Trim();
-            if (!string.IsNullOrWhiteSpace(fileName))
+            if (!string.IsNullOrWhiteSpace(fileName) &&
+                !fileName.StartsWith("download_", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(fileName, "download.bin", StringComparison.OrdinalIgnoreCase))
             {
                 canonical = $"{canonical}|{fileName.Trim().ToLowerInvariant()}";
             }
@@ -408,22 +428,40 @@ namespace PRRX.IDM.Services
                 var interfaces = NetworkInterface.GetAllNetworkInterfaces()
                     .Where(ni => ni.OperationalStatus == OperationalStatus.Up &&
                                  ni.NetworkInterfaceType != NetworkInterfaceType.Loopback)
-                    .OrderByDescending(ni => ni.NetworkInterfaceType == NetworkInterfaceType.Ethernet ||
-                                             ni.NetworkInterfaceType == NetworkInterfaceType.Wireless80211);
+                    .OrderByDescending(ni => ni.GetIPProperties().GatewayAddresses.Any(g => g.Address != null && !IPAddress.IsLoopback(g.Address) && !g.Address.Equals(IPAddress.Any)))
+                    .ThenByDescending(ni => !(ni.Description.Contains("Virtual", StringComparison.OrdinalIgnoreCase) ||
+                                              ni.Description.Contains("VMware", StringComparison.OrdinalIgnoreCase) ||
+                                              ni.Description.Contains("vEthernet", StringComparison.OrdinalIgnoreCase) ||
+                                              ni.Description.Contains("Hyper-V", StringComparison.OrdinalIgnoreCase) ||
+                                              ni.Description.Contains("TAP", StringComparison.OrdinalIgnoreCase) ||
+                                              ni.Description.Contains("VPN", StringComparison.OrdinalIgnoreCase) ||
+                                              ni.Name.Contains("Virtual", StringComparison.OrdinalIgnoreCase)))
+                    .ThenByDescending(ni => ni.NetworkInterfaceType == NetworkInterfaceType.Ethernet ||
+                                            ni.NetworkInterfaceType == NetworkInterfaceType.Wireless80211);
 
                 foreach (var ni in interfaces)
                 {
                     var props = ni.GetIPProperties();
                     foreach (var ip in props.UnicastAddresses)
                     {
-                        if (ip.Address.AddressFamily == AddressFamily.InterNetwork &&
-                            !IPAddress.IsLoopback(ip.Address))
+                        if (IsPrivateIPv4(ip.Address))
                         {
-                            var ipStr = ip.Address.ToString();
-                            // Standard private LAN subnets
-                            if (ipStr.StartsWith("192.168.") || ipStr.StartsWith("10.") || ipStr.StartsWith("172."))
+                            return ip.Address.ToString();
+                        }
+                    }
+                }
+
+                // Secondary pass: any non-loopback IPv4 with a default gateway
+                foreach (var ni in interfaces)
+                {
+                    var props = ni.GetIPProperties();
+                    if (props.GatewayAddresses.Any(g => g.Address != null && !IPAddress.IsLoopback(g.Address) && !g.Address.Equals(IPAddress.Any)))
+                    {
+                        foreach (var ip in props.UnicastAddresses)
+                        {
+                            if (ip.Address.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(ip.Address))
                             {
-                                return ipStr;
+                                return ip.Address.ToString();
                             }
                         }
                     }
@@ -432,6 +470,22 @@ namespace PRRX.IDM.Services
             catch { }
 
             return "127.0.0.1";
+        }
+
+        private static bool IsPrivateIPv4(IPAddress ip)
+        {
+            if (ip.AddressFamily != AddressFamily.InterNetwork || IPAddress.IsLoopback(ip))
+                return false;
+
+            var bytes = ip.GetAddressBytes();
+            // 10.0.0.0/8
+            if (bytes[0] == 10) return true;
+            // 172.16.0.0/12 (172.16.0.0 to 172.31.255.255)
+            if (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31) return true;
+            // 192.168.0.0/16
+            if (bytes[0] == 192 && bytes[1] == 168) return true;
+
+            return false;
         }
 
         private static CancellationTokenSource CreateLinkedTimeout(CancellationToken userToken)
@@ -444,21 +498,25 @@ namespace PRRX.IDM.Services
         private static string NormalizeHash(string? hash)
         {
             if (string.IsNullOrWhiteSpace(hash)) return string.Empty;
-            var clean = hash.Trim().ToLowerInvariant();
-            return Regex.IsMatch(clean, "^[0-9a-f]{64}$") ? clean : clean;
+            return hash.Trim().ToLowerInvariant();
         }
 
         private static string CleanDomain(string? domain)
         {
             if (string.IsNullOrWhiteSpace(domain)) return string.Empty;
             var d = domain.Trim().ToLowerInvariant();
-            if (d.StartsWith("http://") || d.StartsWith("https://"))
+            if (d.Contains("://"))
             {
                 if (Uri.TryCreate(d, UriKind.Absolute, out var uri))
                 {
                     return uri.Host;
                 }
             }
+            if (Uri.TryCreate("http://" + d, UriKind.Absolute, out var uriWithHttp))
+            {
+                return uriWithHttp.Host;
+            }
+
             var slashIdx = d.IndexOf('/');
             if (slashIdx > 0) d = d[..slashIdx];
             var colonIdx = d.IndexOf(':');

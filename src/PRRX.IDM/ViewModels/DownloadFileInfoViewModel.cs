@@ -62,6 +62,7 @@ namespace PRRX.IDM.ViewModels
         private string _currentFileHash = string.Empty;
         private bool _hasVoted = false;
         private string _voteFeedbackText = string.Empty;
+        private string _voteFeedbackFgColor = "#4ADE80";
         private long? _detectedBytes = null;
 
         public DownloadDialogResult DialogResult { get; private set; } = DownloadDialogResult.Cancel;
@@ -80,6 +81,7 @@ namespace PRRX.IDM.ViewModels
                 if (SetProperty(ref _url, value))
                 {
                     _ = ProbeFileSizeAsync(value);
+                    _ = LoadCloudIntelligenceAsync(value);
                 }
             }
         }
@@ -96,6 +98,16 @@ namespace PRRX.IDM.ViewModels
                     if (!_isDescriptionUserEdited)
                     {
                         AutoPopulateDescription();
+                    }
+
+                    if (!_hasVoted && !string.IsNullOrWhiteSpace(_url))
+                    {
+                        var newHash = _cloudService.ExtractOrComputeSha256(_url, sanitized);
+                        if (!string.Equals(newHash, CurrentFileHash, StringComparison.OrdinalIgnoreCase))
+                        {
+                            CurrentFileHash = newHash;
+                            _ = Task.Run(() => RefreshReputationAsync(newHash));
+                        }
                     }
                 }
             }
@@ -254,6 +266,12 @@ namespace PRRX.IDM.ViewModels
             }
         }
 
+        public string VoteFeedbackFgColor
+        {
+            get => _voteFeedbackFgColor;
+            set => SetProperty(ref _voteFeedbackFgColor, value);
+        }
+
         public bool HasVoteFeedback => !string.IsNullOrWhiteSpace(_voteFeedbackText);
 
         public ICommand StartDownloadCommand { get; }
@@ -270,13 +288,17 @@ namespace PRRX.IDM.ViewModels
             string defaultDownloadDir, 
             string? pageTitle = null, 
             long? precalculatedSize = null,
+            string? initialFileName = null,
             ICloudIntelligenceService? cloudService = null)
         {
             _cloudService = cloudService ?? new CloudIntelligenceService();
             _url = initialUrl;
-            _fileName = ExtractFileNameFromUrl(initialUrl);
+            _fileName = !string.IsNullOrWhiteSpace(initialFileName)
+                ? SanitizeFileName(initialFileName)
+                : ExtractFileNameFromUrl(initialUrl);
             _selectedCategory = FileCategoryHelper.DetectCategory(_fileName);
             _cachedPageTitle = pageTitle;
+            _currentFileHash = _cloudService.ExtractOrComputeSha256(initialUrl, _fileName);
 
             var baseDownloads = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
             _saveDirectory = !string.IsNullOrWhiteSpace(defaultDownloadDir)
@@ -320,8 +342,8 @@ namespace PRRX.IDM.ViewModels
                 RequestClose?.Invoke();
             });
 
-            VoteSafeCommand = new RelayCommand(async _ => await VoteReputationAsync("safe"));
-            VoteSuspiciousCommand = new RelayCommand(async _ => await VoteReputationAsync("malware"));
+            VoteSafeCommand = new AsyncRelayCommand(() => VoteReputationAsync("safe"), () => CanVote);
+            VoteSuspiciousCommand = new AsyncRelayCommand(() => VoteReputationAsync("malware"), () => CanVote);
 
             if (precalculatedSize.HasValue && precalculatedSize.Value > 0)
             {
@@ -356,6 +378,7 @@ namespace PRRX.IDM.ViewModels
                 SecurityBadgeBorderColor = "#50E81123";
                 SecurityBadgeTooltip = "Reported suspicious by user. Flagged in community threat database.";
                 VoteFeedbackText = "⚠ Malware report submitted!";
+                VoteFeedbackFgColor = "#F87171";
                 ReputationStatus = ReputationBadgeStatus.Suspicious;
             }
             else
@@ -366,6 +389,7 @@ namespace PRRX.IDM.ViewModels
                 SecurityBadgeBorderColor = "#40107C41";
                 SecurityBadgeTooltip = "Marked safe by user vote. Contributed to global community database.";
                 VoteFeedbackText = "✓ Safe vote submitted!";
+                VoteFeedbackFgColor = "#4ADE80";
                 ReputationStatus = ReputationBadgeStatus.Safe;
             }
 
@@ -407,16 +431,52 @@ namespace PRRX.IDM.ViewModels
                                 DomainHealthSummary = $"Server Health: {domainHealth.Status}";
                                 HasDomainHealthSummary = true;
                             }
+                            else if (!string.IsNullOrWhiteSpace(domainHealth.DisplayText))
+                            {
+                                DomainSpeedFormatted = domainHealth.DisplayText;
+                                HasDomainSpeedInfo = true;
+                                DomainHealthSummary = $"Server Health: {domainHealth.Status}";
+                                HasDomainHealthSummary = true;
+                            }
                         });
                     }
                 }
             }
             catch { }
 
-            // 2. Non-blocking global community reputation lookup
+            // 2. Non-blocking mirrors check
             try
             {
-                var rep = await _cloudService.GetFileReputationAsync(CurrentFileHash);
+                var mirrors = await _cloudService.GetMirrorsAsync(CurrentFileHash);
+                if (mirrors?.Mirrors.Count > 0)
+                {
+                    DispatchToUi(() =>
+                    {
+                        if (HasDomainHealthSummary)
+                        {
+                            DomainHealthSummary += $" | {mirrors.Mirrors.Count} cloud mirror(s)";
+                        }
+                        else
+                        {
+                            DomainHealthSummary = $"Cloud Mirrors: {mirrors.Mirrors.Count} available";
+                            HasDomainHealthSummary = true;
+                        }
+                    });
+                }
+            }
+            catch { }
+
+            // 3. Non-blocking global community reputation lookup
+            await RefreshReputationAsync(CurrentFileHash);
+        }
+
+        public async Task RefreshReputationAsync(string hash)
+        {
+            if (string.IsNullOrWhiteSpace(hash) || _hasVoted) return;
+
+            try
+            {
+                var rep = await _cloudService.GetFileReputationAsync(hash);
                 DispatchToUi(() =>
                 {
                     if (!_hasVoted && rep != null)
@@ -447,6 +507,15 @@ namespace PRRX.IDM.ViewModels
                 SecurityBadgeBorderColor = "#40107C41";
                 SecurityBadgeTooltip = rep.BadgeTooltip;
                 ReputationStatus = ReputationBadgeStatus.Safe;
+            }
+            else if (rep.BadgeStatus == ReputationBadgeStatus.Neutral)
+            {
+                SecurityBadgeText = $"🛡️ Community Verified: Neutral ({rep.SafetyScore}%)";
+                SecurityBadgeFgColor = "#60A5FA";
+                SecurityBadgeBgColor = "#200078D4";
+                SecurityBadgeBorderColor = "#400078D4";
+                SecurityBadgeTooltip = rep.BadgeTooltip;
+                ReputationStatus = ReputationBadgeStatus.Neutral;
             }
             else
             {

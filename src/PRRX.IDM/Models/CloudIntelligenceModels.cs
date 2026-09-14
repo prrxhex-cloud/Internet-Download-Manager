@@ -82,7 +82,9 @@ namespace PRRX.IDM.Models
 
         public bool IsSafe => string.Equals(Verdict, "safe", StringComparison.OrdinalIgnoreCase);
 
-        public bool IsSuspicious => string.Equals(Verdict, "suspicious", StringComparison.OrdinalIgnoreCase) || MalwareReports > 0;
+        public bool IsSuspicious => string.Equals(Verdict, "suspicious", StringComparison.OrdinalIgnoreCase);
+
+        public bool IsNeutral => string.Equals(Verdict, "neutral", StringComparison.OrdinalIgnoreCase);
 
         public bool IsUnrated => !Found || string.Equals(Verdict, "unrated", StringComparison.OrdinalIgnoreCase);
 
@@ -92,6 +94,7 @@ namespace PRRX.IDM.Models
             {
                 if (IsSuspicious) return ReputationBadgeStatus.Suspicious;
                 if (IsSafe) return ReputationBadgeStatus.Safe;
+                if (IsNeutral) return ReputationBadgeStatus.Neutral;
                 return ReputationBadgeStatus.Unrated;
             }
         }
@@ -100,6 +103,7 @@ namespace PRRX.IDM.Models
         {
             ReputationBadgeStatus.Suspicious => "⚠️ Suspicious / Malware Reported",
             ReputationBadgeStatus.Safe => $"🛡️ Community Verified: Safe ({SafetyScore}%)",
+            ReputationBadgeStatus.Neutral => $"🛡️ Community Verified: Neutral ({SafetyScore}%)",
             _ => "🛡️ Unrated File (New)"
         };
 
@@ -107,6 +111,7 @@ namespace PRRX.IDM.Models
         {
             ReputationBadgeStatus.Suspicious => $"Warning: {MalwareReports} malware report(s). Community safety score: {SafetyScore}%.",
             ReputationBadgeStatus.Safe => $"Community Verified Safe: {SafeVotes} safe vote(s), {DownloadCount} total download(s).",
+            ReputationBadgeStatus.Neutral => $"Community Neutral: {SafeVotes} safe vote(s), {MalwareReports} report(s). Safety score: {SafetyScore}%.",
             _ => !string.IsNullOrWhiteSpace(Message) ? Message : "New file - No community reports yet. PRRX IDM Cloud Intelligence active."
         };
     }
@@ -186,6 +191,9 @@ namespace PRRX.IDM.Models
 
         [JsonPropertyName("total_chunks")]
         public int TotalChunks { get; set; } = 0;
+
+        [JsonPropertyName("last_heartbeat")]
+        public string? LastHeartbeat { get; set; }
     }
 
     public class LanPeersResult

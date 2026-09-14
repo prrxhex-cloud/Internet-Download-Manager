@@ -333,20 +333,35 @@ namespace PRRX.IDM.ViewModels
                 {
                     if (File.Exists(finalPath))
                     {
-                        var hash = await _cloudService.ComputeFileSha256Async(finalPath);
-                        if (!string.IsNullOrWhiteSpace(hash))
+                        var fileHash = await _cloudService.ComputeFileSha256Async(finalPath);
+                        if (!string.IsNullOrWhiteSpace(fileHash))
                         {
                             var fi = new FileInfo(finalPath);
-                            await _cloudService.ReportReputationAsync(hash, Path.GetFileName(finalPath), fi.Length, "safe");
+                            var name = Path.GetFileName(finalPath);
 
-                            // Update LAN P2P matchmaker announcement to 100% chunks completed
+                            // 1. Authoritative binary SHA-256 report and LAN peer announcement (100% completed)
+                            await _cloudService.ReportReputationAsync(fileHash, name, fi.Length, "safe");
                             await _cloudService.AnnounceLanPeerAsync(
                                 Environment.MachineName,
-                                hash,
+                                fileHash,
                                 localLanIp: null,
                                 port: 6881,
                                 completedChunks: 100,
                                 totalChunks: 100);
+
+                            // 2. Also register the pre-download URL fingerprint so future queries prior to download match
+                            var urlHash = _cloudService.ExtractOrComputeSha256(Url, name);
+                            if (!string.IsNullOrWhiteSpace(urlHash) && !string.Equals(urlHash, fileHash, StringComparison.OrdinalIgnoreCase))
+                            {
+                                await _cloudService.ReportReputationAsync(urlHash, name, fi.Length, "safe");
+                                await _cloudService.AnnounceLanPeerAsync(
+                                    Environment.MachineName,
+                                    urlHash,
+                                    localLanIp: null,
+                                    port: 6881,
+                                    completedChunks: 100,
+                                    totalChunks: 100);
+                            }
                         }
                     }
                 }

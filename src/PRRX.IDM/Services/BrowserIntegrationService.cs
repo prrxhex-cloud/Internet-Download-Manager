@@ -700,7 +700,7 @@ namespace PRRX.IDM.Services
             }
             else if (!string.IsNullOrWhiteSpace(payload.Url))
             {
-                var vm = new DownloadFileInfoViewModel(payload.Url, defaultDir, payload.PageTitle, payload.TotalBytes);
+                var vm = new DownloadFileInfoViewModel(payload.Url, defaultDir, payload.PageTitle, payload.TotalBytes, payload.FileName);
                 if (!string.IsNullOrWhiteSpace(payload.FileName)) vm.FileName = payload.FileName;
 
                 var dlg = new DownloadFileInfoDialog(vm);
