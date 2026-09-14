@@ -18,6 +18,7 @@ namespace PRRX.IDM.ViewModels
     {
         private readonly ISegmentedDownloadEngine _downloadEngine;
         private readonly ISystemPowerService _powerService;
+        private readonly ICloudIntelligenceService _cloudService;
 
         private string _url = string.Empty;
         private string _fileName = string.Empty;
@@ -156,13 +157,15 @@ namespace PRRX.IDM.ViewModels
             string url,
             string destinationFilePath,
             ISegmentedDownloadEngine? downloadEngine = null,
-            ISystemPowerService? powerService = null)
+            ISystemPowerService? powerService = null,
+            ICloudIntelligenceService? cloudService = null)
         {
             _url = url;
             _destinationFilePath = destinationFilePath;
             _fileName = Path.GetFileName(destinationFilePath);
             _downloadEngine = downloadEngine ?? new SegmentedDownloadEngine();
             _powerService = powerService ?? new SystemPowerService();
+            _cloudService = cloudService ?? new CloudIntelligenceService();
 
             _downloadEngine.ProgressChanged += OnEngineProgressChanged;
             _downloadEngine.DownloadCompleted += OnEngineDownloadCompleted;
@@ -225,6 +228,26 @@ namespace PRRX.IDM.ViewModels
         public void Start()
         {
             _downloadEngine.StartDownloadAsync(Url, DestinationFilePath, 0);
+
+            // Announce to LAN P2P matchmaker non-blocking
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var hash = _cloudService.ExtractOrComputeSha256(Url, FileName);
+                    if (!string.IsNullOrWhiteSpace(hash))
+                    {
+                        await _cloudService.AnnounceLanPeerAsync(
+                            Environment.MachineName,
+                            hash,
+                            localLanIp: null,
+                            port: 6881,
+                            completedChunks: 0,
+                            totalChunks: 100);
+                    }
+                }
+                catch { }
+            });
         }
 
         private void OnEngineProgressChanged(object? sender, SegmentProgressEventArgs e)
@@ -300,6 +323,36 @@ namespace PRRX.IDM.ViewModels
                 else if (ExitWhenDone)
                 {
                     _powerService.ExecuteCompletionAction(CompletionAction.ExitApplication);
+                }
+            });
+
+            // Post-download community reputation reporting (non-blocking)
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    if (File.Exists(finalPath))
+                    {
+                        var hash = await _cloudService.ComputeFileSha256Async(finalPath);
+                        if (!string.IsNullOrWhiteSpace(hash))
+                        {
+                            var fi = new FileInfo(finalPath);
+                            await _cloudService.ReportReputationAsync(hash, Path.GetFileName(finalPath), fi.Length, "safe");
+
+                            // Update LAN P2P matchmaker announcement to 100% chunks completed
+                            await _cloudService.AnnounceLanPeerAsync(
+                                Environment.MachineName,
+                                hash,
+                                localLanIp: null,
+                                port: 6881,
+                                completedChunks: 100,
+                                totalChunks: 100);
+                        }
+                    }
+                }
+                catch
+                {
+                    // Fail silently - never disrupt user experience
                 }
             });
         }

@@ -13,13 +13,17 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
         Title="PRRX IDM Module" 
-        Height="420" Width="640"
+        Height="440" Width="660"
         WindowStartupLocation="CenterScreen"
         WindowStyle="None"
         AllowsTransparency="True"
         Background="Transparent"
         Icon="/Assets/app_icon.png"
         ResizeMode="NoResize">
+
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+    </Window.Resources>
 
     <Border Background="#1C202B" 
             BorderBrush="#25FFFFFF" 
@@ -48,6 +52,14 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
                             <TextBlock Text="PRRX IDM — Download Task" FontSize="15" FontWeight="Bold" FontFamily="Segoe UI Variable Display, Segoe UI" Foreground="#FFFFFF" VerticalAlignment="Center"/>
                             <Border Background="#200078D4" BorderBrush="#400078D4" BorderThickness="1" CornerRadius="4" Padding="6,2" Margin="10,0,0,0" VerticalAlignment="Center">
                                 <TextBlock Text="High Priority" FontSize="10" FontWeight="SemiBold" Foreground="#0078D4"/>
+                            </Border>
+
+                            <!-- Global Community Intelligence Security Badge -->
+                            <Border Background="{Binding SecurityBadgeBgColor}" 
+                                    BorderBrush="{Binding SecurityBadgeBorderColor}" 
+                                    BorderThickness="1" CornerRadius="4" Padding="6,2" Margin="8,0,0,0" VerticalAlignment="Center"
+                                    ToolTip="{Binding SecurityBadgeTooltip}">
+                                <TextBlock Text="{Binding SecurityBadgeText}" FontSize="10" FontWeight="SemiBold" Foreground="{Binding SecurityBadgeFgColor}"/>
                             </Border>
                         </StackPanel>
                         <TextBlock Text="{Binding FileName}" FontSize="12" Foreground="#8FA0B8" Margin="0,2,0,0"
@@ -85,26 +97,37 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
                 <ComboBox Grid.Row="1" Grid.Column="1" ItemsSource="{Binding AvailableCategories}" SelectedItem="{Binding SelectedCategory}"
                           Background="#161922" Foreground="#FFFFFF" BorderBrush="#2A3245"
                           Padding="8,6" Margin="0,0,10,12" FontSize="12"/>
-                <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding FileSizeFormatted}" Foreground="#0078D4" VerticalAlignment="Center" Margin="0,0,0,12" FontWeight="Bold" FontSize="12">
-                    <TextBlock.Style>
-                        <Style TargetType="TextBlock">
-                            <Style.Triggers>
-                                <DataTrigger Binding="{Binding IsProbing}" Value="True">
-                                    <DataTrigger.EnterActions>
-                                        <BeginStoryboard x:Name="ProbingPulseStoryboard">
-                                            <Storyboard RepeatBehavior="Forever" AutoReverse="True">
-                                                <DoubleAnimation Storyboard.TargetProperty="Opacity" From="1.0" To="0.35" Duration="0:0:0.6"/>
-                                            </Storyboard>
-                                        </BeginStoryboard>
-                                    </DataTrigger.EnterActions>
-                                    <DataTrigger.ExitActions>
-                                        <StopStoryboard BeginStoryboardName="ProbingPulseStoryboard"/>
-                                    </DataTrigger.ExitActions>
-                                </DataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </TextBlock.Style>
-                </TextBlock>
+                
+                <StackPanel Grid.Row="1" Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,0,12">
+                    <TextBlock Text="{Binding FileSizeFormatted}" Foreground="#0078D4" VerticalAlignment="Center" FontWeight="Bold" FontSize="12">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsProbing}" Value="True">
+                                        <DataTrigger.EnterActions>
+                                            <BeginStoryboard x:Name="ProbingPulseStoryboard">
+                                                <Storyboard RepeatBehavior="Forever" AutoReverse="True">
+                                                    <DoubleAnimation Storyboard.TargetProperty="Opacity" From="1.0" To="0.35" Duration="0:0:0.6"/>
+                                                </Storyboard>
+                                            </BeginStoryboard>
+                                        </DataTrigger.EnterActions>
+                                        <DataTrigger.ExitActions>
+                                            <StopStoryboard BeginStoryboardName="ProbingPulseStoryboard"/>
+                                        </DataTrigger.ExitActions>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+
+                    <!-- Cloud Acceleration & Domain Speed Badge -->
+                    <Border Visibility="{Binding HasDomainSpeedInfo, Converter={StaticResource BoolToVis}}"
+                            Background="#1500C853" BorderBrush="#3500C853" BorderThickness="1" CornerRadius="4" 
+                            Padding="5,2" Margin="8,0,0,0" VerticalAlignment="Center"
+                            ToolTip="{Binding DomainHealthSummary}">
+                        <TextBlock Text="{Binding DomainSpeedFormatted}" FontSize="10" FontWeight="SemiBold" Foreground="#4ADE80"/>
+                    </Border>
+                </StackPanel>
 
                 <!-- Save As -->
                 <TextBlock Grid.Row="2" Grid.Column="0" Text="Save To:" Foreground="#8FA0B8" VerticalAlignment="Center" Margin="0,0,0,12" FontWeight="Medium" FontSize="12"/>
@@ -124,6 +147,21 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
 
             <!-- 3. Bottom Actions -->
             <Grid Grid.Row="2">
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center">
+                    <!-- Community Reputation Voting -->
+                    <TextBlock Text="Community Security:" Foreground="#8FA0B8" FontSize="11" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                    <Button Content="✓ Safe" Command="{Binding VoteSafeCommand}" IsEnabled="{Binding CanVote}"
+                            Background="#18107C41" Foreground="#4ADE80" BorderBrush="#35107C41" BorderThickness="1"
+                            Padding="7,3" Margin="0,0,4,0" Cursor="Hand" FontSize="10" FontWeight="SemiBold"
+                            ToolTip="Verify and vote this download as safe in the community database"/>
+                    <Button Content="⚠ Report" Command="{Binding VoteSuspiciousCommand}" IsEnabled="{Binding CanVote}"
+                            Background="#20E81123" Foreground="#F87171" BorderBrush="#40E81123" BorderThickness="1"
+                            Padding="7,3" Margin="0,0,8,0" Cursor="Hand" FontSize="10" FontWeight="SemiBold"
+                            ToolTip="Report this file as suspicious/malware to the community threat intelligence network"/>
+                    <TextBlock Text="{Binding VoteFeedbackText}" Foreground="#4ADE80" FontSize="10" FontWeight="Medium" 
+                               VerticalAlignment="Center" Visibility="{Binding HasVoteFeedback, Converter={StaticResource BoolToVis}}"/>
+                </StackPanel>
+
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                     <Button Content="Download Later" Command="{Binding DownloadLaterCommand}"
                             Background="#222836" Foreground="#A0AEC0" BorderBrush="#333D52" BorderThickness="1"

@@ -14,6 +14,7 @@ using System.Windows;
 using System.Windows.Input;
 using Microsoft.Win32;
 using PRRX.IDM.Models;
+using PRRX.IDM.Services;
 using PRRX.IDM.ViewModels;
 
 namespace PRRX.IDM.ViewModels
@@ -36,6 +37,8 @@ namespace PRRX.IDM.ViewModels
             ConnectTimeout = TimeSpan.FromSeconds(2)
         }) { Timeout = TimeSpan.FromSeconds(5) };
 
+        private readonly ICloudIntelligenceService _cloudService;
+
         private string _url = string.Empty;
         private string _fileName = string.Empty;
         private FileCategory _selectedCategory = FileCategory.General;
@@ -44,6 +47,22 @@ namespace PRRX.IDM.ViewModels
         private string _fileSizeFormatted = "Probing size...";
         private bool _isProbing = false;
         private CancellationTokenSource? _probeCts;
+
+        // Cloud Intelligence & Security properties
+        private string _securityBadgeText = "🛡️ Unrated File (New)";
+        private string _securityBadgeFgColor = "#60A5FA";
+        private string _securityBadgeBgColor = "#200078D4";
+        private string _securityBadgeBorderColor = "#400078D4";
+        private string _securityBadgeTooltip = "New file - No community reports yet. PRRX IDM Cloud Intelligence active.";
+        private ReputationBadgeStatus _reputationStatus = ReputationBadgeStatus.Unrated;
+        private string _domainSpeedFormatted = string.Empty;
+        private bool _hasDomainSpeedInfo = false;
+        private string _domainHealthSummary = string.Empty;
+        private bool _hasDomainHealthSummary = false;
+        private string _currentFileHash = string.Empty;
+        private bool _hasVoted = false;
+        private string _voteFeedbackText = string.Empty;
+        private long? _detectedBytes = null;
 
         public DownloadDialogResult DialogResult { get; private set; } = DownloadDialogResult.Cancel;
 
@@ -143,15 +162,117 @@ namespace PRRX.IDM.ViewModels
             set => SetProperty(ref _fileSizeFormatted, value);
         }
 
+        public string SecurityBadgeText
+        {
+            get => _securityBadgeText;
+            set => SetProperty(ref _securityBadgeText, value);
+        }
+
+        public string SecurityBadgeFgColor
+        {
+            get => _securityBadgeFgColor;
+            set => SetProperty(ref _securityBadgeFgColor, value);
+        }
+
+        public string SecurityBadgeBgColor
+        {
+            get => _securityBadgeBgColor;
+            set => SetProperty(ref _securityBadgeBgColor, value);
+        }
+
+        public string SecurityBadgeBorderColor
+        {
+            get => _securityBadgeBorderColor;
+            set => SetProperty(ref _securityBadgeBorderColor, value);
+        }
+
+        public string SecurityBadgeTooltip
+        {
+            get => _securityBadgeTooltip;
+            set => SetProperty(ref _securityBadgeTooltip, value);
+        }
+
+        public ReputationBadgeStatus ReputationStatus
+        {
+            get => _reputationStatus;
+            set => SetProperty(ref _reputationStatus, value);
+        }
+
+        public string DomainSpeedFormatted
+        {
+            get => _domainSpeedFormatted;
+            set => SetProperty(ref _domainSpeedFormatted, value);
+        }
+
+        public bool HasDomainSpeedInfo
+        {
+            get => _hasDomainSpeedInfo;
+            set => SetProperty(ref _hasDomainSpeedInfo, value);
+        }
+
+        public string DomainHealthSummary
+        {
+            get => _domainHealthSummary;
+            set => SetProperty(ref _domainHealthSummary, value);
+        }
+
+        public bool HasDomainHealthSummary
+        {
+            get => _hasDomainHealthSummary;
+            set => SetProperty(ref _hasDomainHealthSummary, value);
+        }
+
+        public string CurrentFileHash
+        {
+            get => _currentFileHash;
+            set => SetProperty(ref _currentFileHash, value);
+        }
+
+        public bool HasVoted
+        {
+            get => _hasVoted;
+            set
+            {
+                if (SetProperty(ref _hasVoted, value))
+                {
+                    OnPropertyChanged(nameof(CanVote));
+                }
+            }
+        }
+
+        public bool CanVote => !_hasVoted;
+
+        public string VoteFeedbackText
+        {
+            get => _voteFeedbackText;
+            set
+            {
+                if (SetProperty(ref _voteFeedbackText, value))
+                {
+                    OnPropertyChanged(nameof(HasVoteFeedback));
+                }
+            }
+        }
+
+        public bool HasVoteFeedback => !string.IsNullOrWhiteSpace(_voteFeedbackText);
+
         public ICommand StartDownloadCommand { get; }
         public ICommand DownloadLaterCommand { get; }
         public ICommand BrowseDirectoryCommand { get; }
         public ICommand CancelCommand { get; }
+        public ICommand VoteSafeCommand { get; }
+        public ICommand VoteSuspiciousCommand { get; }
 
         public event Action? RequestClose;
 
-        public DownloadFileInfoViewModel(string initialUrl, string defaultDownloadDir, string? pageTitle = null, long? precalculatedSize = null)
+        public DownloadFileInfoViewModel(
+            string initialUrl, 
+            string defaultDownloadDir, 
+            string? pageTitle = null, 
+            long? precalculatedSize = null,
+            ICloudIntelligenceService? cloudService = null)
         {
+            _cloudService = cloudService ?? new CloudIntelligenceService();
             _url = initialUrl;
             _fileName = ExtractFileNameFromUrl(initialUrl);
             _selectedCategory = FileCategoryHelper.DetectCategory(_fileName);
@@ -199,8 +320,12 @@ namespace PRRX.IDM.ViewModels
                 RequestClose?.Invoke();
             });
 
+            VoteSafeCommand = new RelayCommand(async _ => await VoteReputationAsync("safe"));
+            VoteSuspiciousCommand = new RelayCommand(async _ => await VoteReputationAsync("malware"));
+
             if (precalculatedSize.HasValue && precalculatedSize.Value > 0)
             {
+                _detectedBytes = precalculatedSize.Value;
                 _fileSizeFormatted = FormatBytes(precalculatedSize.Value);
                 _isProbing = false;
             }
@@ -212,6 +337,126 @@ namespace PRRX.IDM.ViewModels
 
             // Launch size & filename probing strictly in background (<100ms instant dialog launch)
             _ = Task.Run(() => ProbeFileSizeAsync(initialUrl));
+
+            // Launch non-blocking background lookup for domain health & community reputation
+            _ = Task.Run(() => LoadCloudIntelligenceAsync(initialUrl));
+        }
+
+        public async Task VoteReputationAsync(string vote)
+        {
+            if (HasVoted) return;
+            HasVoted = true;
+
+            var isMalware = string.Equals(vote, "malware", StringComparison.OrdinalIgnoreCase);
+            if (isMalware)
+            {
+                SecurityBadgeText = "⚠️ Suspicious / Malware Reported";
+                SecurityBadgeFgColor = "#F87171";
+                SecurityBadgeBgColor = "#25E81123";
+                SecurityBadgeBorderColor = "#50E81123";
+                SecurityBadgeTooltip = "Reported suspicious by user. Flagged in community threat database.";
+                VoteFeedbackText = "⚠ Malware report submitted!";
+                ReputationStatus = ReputationBadgeStatus.Suspicious;
+            }
+            else
+            {
+                SecurityBadgeText = "🛡️ Community Verified: Safe (100%)";
+                SecurityBadgeFgColor = "#4ADE80";
+                SecurityBadgeBgColor = "#20107C41";
+                SecurityBadgeBorderColor = "#40107C41";
+                SecurityBadgeTooltip = "Marked safe by user vote. Contributed to global community database.";
+                VoteFeedbackText = "✓ Safe vote submitted!";
+                ReputationStatus = ReputationBadgeStatus.Safe;
+            }
+
+            try
+            {
+                var size = _detectedBytes ?? 0;
+                await _cloudService.ReportReputationAsync(CurrentFileHash, FileName, size, vote);
+            }
+            catch { }
+        }
+
+        public async Task LoadCloudIntelligenceAsync(string url)
+        {
+            if (string.IsNullOrWhiteSpace(url)) return;
+
+            CurrentFileHash = _cloudService.ExtractOrComputeSha256(url, FileName);
+
+            // 1. Non-blocking domain speed & health lookup
+            try
+            {
+                if (Uri.TryCreate(url, UriKind.Absolute, out var uri))
+                {
+                    var domainHealth = await _cloudService.GetDomainHealthAsync(uri.Host);
+                    if (domainHealth != null)
+                    {
+                        DispatchToUi(() =>
+                        {
+                            if (domainHealth.AvgSpeedMbps > 0)
+                            {
+                                DomainSpeedFormatted = $"⚡ {domainHealth.AvgSpeedMbps:F1} Mbps";
+                                HasDomainSpeedInfo = true;
+                                DomainHealthSummary = $"Cloud Acceleration: ~{domainHealth.AvgSpeedMbps:F1} Mbps ({domainHealth.Status.ToUpperInvariant()})";
+                                HasDomainHealthSummary = true;
+                            }
+                            else if (domainHealth.IsOnline)
+                            {
+                                DomainSpeedFormatted = "⚡ Online";
+                                HasDomainSpeedInfo = true;
+                                DomainHealthSummary = $"Server Health: {domainHealth.Status}";
+                                HasDomainHealthSummary = true;
+                            }
+                        });
+                    }
+                }
+            }
+            catch { }
+
+            // 2. Non-blocking global community reputation lookup
+            try
+            {
+                var rep = await _cloudService.GetFileReputationAsync(CurrentFileHash);
+                DispatchToUi(() =>
+                {
+                    if (!_hasVoted && rep != null)
+                    {
+                        ApplyReputationToBadge(rep);
+                    }
+                });
+            }
+            catch { }
+        }
+
+        private void ApplyReputationToBadge(FileReputationResult rep)
+        {
+            if (rep.IsSuspicious)
+            {
+                SecurityBadgeText = "⚠️ Suspicious / Malware Reported";
+                SecurityBadgeFgColor = "#F87171";
+                SecurityBadgeBgColor = "#25E81123";
+                SecurityBadgeBorderColor = "#50E81123";
+                SecurityBadgeTooltip = rep.BadgeTooltip;
+                ReputationStatus = ReputationBadgeStatus.Suspicious;
+            }
+            else if (rep.IsSafe)
+            {
+                SecurityBadgeText = $"🛡️ Community Verified: Safe ({rep.SafetyScore}%)";
+                SecurityBadgeFgColor = "#4ADE80";
+                SecurityBadgeBgColor = "#20107C41";
+                SecurityBadgeBorderColor = "#40107C41";
+                SecurityBadgeTooltip = rep.BadgeTooltip;
+                ReputationStatus = ReputationBadgeStatus.Safe;
+            }
+            else
+            {
+                SecurityBadgeText = "🛡️ Unrated File (New)";
+                SecurityBadgeFgColor = "#60A5FA";
+                SecurityBadgeBgColor = "#200078D4";
+                SecurityBadgeBorderColor = "#400078D4";
+                SecurityBadgeTooltip = rep.BadgeTooltip;
+                ReputationStatus = ReputationBadgeStatus.Unrated;
+            }
         }
 
         private void AutoPopulateDescription(string? pageTitle = null, string? mime = null)
@@ -428,6 +673,7 @@ namespace PRRX.IDM.ViewModels
 
                 if (detectedBytes.HasValue && detectedBytes.Value > 0)
                 {
+                    _detectedBytes = detectedBytes.Value;
                     FileSizeFormatted = FormatBytes(detectedBytes.Value);
                 }
                 else
