@@ -42,15 +42,19 @@ namespace PRRX.IDM.Services
         }
 
         /// <summary>
-        /// Initiates high-speed download with adaptive multi-socket concurrency and 512KB chunk buffers.
+        /// Initiates high-speed download with adaptive multi-socket concurrency, browser headers, and 512KB chunk buffers.
         /// </summary>
         public System.Threading.Tasks.Task<bool> DownloadAsync(
             string url,
             string destinationFilePath,
             int concurrency = 0,
-            System.Threading.CancellationToken cancellationToken = default)
+            System.Threading.CancellationToken cancellationToken = default,
+            string? referer = null,
+            string? userAgent = null,
+            string? cookies = null,
+            Dictionary<string, string>? customHeaders = null)
         {
-            return StartDownloadAsync(url, destinationFilePath, concurrency, cancellationToken);
+            return StartDownloadAsync(url, destinationFilePath, concurrency, cancellationToken, referer, userAgent, cookies, customHeaders);
         }
     }
 }

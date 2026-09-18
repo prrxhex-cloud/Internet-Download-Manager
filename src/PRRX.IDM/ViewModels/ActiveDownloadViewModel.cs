@@ -35,6 +35,11 @@ namespace PRRX.IDM.ViewModels
         private bool _isPaused = false;
         private bool _isCompleted = false;
 
+        public string Referer { get; set; } = string.Empty;
+        public string UserAgent { get; set; } = string.Empty;
+        public string Cookies { get; set; } = string.Empty;
+        public Dictionary<string, string> CustomHeaders { get; } = new();
+
         // Speed Limiter
         private bool _useSpeedLimiter = false;
         private int _maxSpeedKbps = 1024;
@@ -158,7 +163,11 @@ namespace PRRX.IDM.ViewModels
             string destinationFilePath,
             ISegmentedDownloadEngine? downloadEngine = null,
             ISystemPowerService? powerService = null,
-            ICloudIntelligenceService? cloudService = null)
+            ICloudIntelligenceService? cloudService = null,
+            string? referer = null,
+            string? userAgent = null,
+            string? cookies = null,
+            Dictionary<string, string>? customHeaders = null)
         {
             _url = url;
             _destinationFilePath = destinationFilePath;
@@ -166,6 +175,17 @@ namespace PRRX.IDM.ViewModels
             _downloadEngine = downloadEngine ?? new MultiSegmentDownloader();
             _powerService = powerService ?? new SystemPowerService();
             _cloudService = cloudService ?? new CloudIntelligenceService();
+
+            Referer = referer ?? string.Empty;
+            UserAgent = userAgent ?? string.Empty;
+            Cookies = cookies ?? string.Empty;
+            if (customHeaders != null)
+            {
+                foreach (var kvp in customHeaders)
+                {
+                    CustomHeaders[kvp.Key] = kvp.Value;
+                }
+            }
 
             _downloadEngine.ProgressChanged += OnEngineProgressChanged;
             _downloadEngine.DownloadCompleted += OnEngineDownloadCompleted;
@@ -227,7 +247,7 @@ namespace PRRX.IDM.ViewModels
 
         public void Start()
         {
-            _downloadEngine.StartDownloadAsync(Url, DestinationFilePath, 0);
+            _downloadEngine.StartDownloadAsync(Url, DestinationFilePath, 0, default, Referer, UserAgent, Cookies, CustomHeaders);
 
             // Announce to LAN P2P matchmaker non-blocking
             _ = Task.Run(async () =>

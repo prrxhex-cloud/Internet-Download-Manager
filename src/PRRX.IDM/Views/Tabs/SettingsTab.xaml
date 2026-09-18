@@ -536,6 +536,23 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
                 </StackPanel>
             </Border>
 
+            <!-- Windows Startup & System Integration Card -->
+            <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" 
+                    CornerRadius="12" Padding="20" Margin="0,0,0,18"
+                    BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+                <StackPanel>
+                    <TextBlock Text="System Integration &amp; Startup" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                    <TextBlock Text="Preload configuration on PC startup and run silently in background so downloads start instantly without opening the application window." 
+                               Opacity="0.7" FontSize="12" Margin="0,0,0,14"/>
+
+                    <CheckBox Content="Start PRRX IDM silently on Windows startup (Background Preload)" 
+                              IsChecked="{Binding LaunchOnStartup, Mode=TwoWay}" 
+                              FontWeight="Medium" Margin="0,0,0,8"/>
+                    <TextBlock Text="When enabled, IDM loads all configurations, browser native messaging, and download listeners silently in the background when your PC boots without opening the main window." 
+                               FontSize="11" Opacity="0.6"/>
+                </StackPanel>
+            </Border>
+
             <!-- Company Info, Watermark & Branding -->
             <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" 
                     CornerRadius="12" Padding="20"

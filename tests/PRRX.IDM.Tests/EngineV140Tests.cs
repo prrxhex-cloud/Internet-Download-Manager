@@ -175,5 +175,56 @@ namespace PRRX.IDM.Tests
             Assert.NotNull(engine);
             Assert.IsType<MultiSegmentDownloader>(engine);
         }
+
+        [Fact]
+        public void ApplyStandardHeaders_InjectsSmartCinevibesReferer_ForCvCloud()
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, "https://cv-cloud.top/download/69a03bc5ff033");
+            SegmentedDownloadEngine.ApplyStandardHeaders(request, "https://cv-cloud.top/download/69a03bc5ff033", referer: null, userAgent: null, cookies: null);
+
+            Assert.True(request.Headers.Contains("User-Agent"));
+            Assert.True(request.Headers.Contains("Referer"));
+            Assert.Equal("https://cinevibes.lk/", request.Headers.Referrer?.ToString());
+            Assert.True(request.Headers.Contains("Sec-Fetch-Site"));
+            Assert.True(request.Headers.Contains("Sec-Fetch-Mode"));
+        }
+
+        [Fact]
+        public void ApplyStandardHeaders_PreservesCustomRefererAndCookies()
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, "https://example.com/file.iso");
+            SegmentedDownloadEngine.ApplyStandardHeaders(
+                request, 
+                "https://example.com/file.iso", 
+                referer: "https://custom-portal.org/item/123", 
+                userAgent: "CustomIDM/1.4", 
+                cookies: "session=abc123xyz; secure=true");
+
+            Assert.Equal("https://custom-portal.org/item/123", request.Headers.Referrer?.ToString());
+            Assert.Equal("CustomIDM/1.4", request.Headers.UserAgent.ToString());
+            Assert.True(request.Headers.Contains("Cookie"));
+        }
+
+        [Fact]
+        public void AppConfig_LaunchOnStartup_HasCorrectDefault()
+        {
+            var config = new AppConfig();
+            Assert.False(config.LaunchOnStartup);
+            config.LaunchOnStartup = true;
+            Assert.True(config.LaunchOnStartup);
+        }
+
+        [Fact]
+        public void BrowserDownloadPayload_IncludesHeadersAndReferer()
+        {
+            var json = "{\"action\":\"download\",\"url\":\"https://cv-cloud.top/download/123\",\"referer\":\"https://cinevibes.lk/\",\"userAgent\":\"Mozilla/5.0\",\"cookies\":\"id=test\"}";
+            var payload = System.Text.Json.JsonSerializer.Deserialize<BrowserDownloadPayload>(json, new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            
+            Assert.NotNull(payload);
+            Assert.Equal("https://cv-cloud.top/download/123", payload.Url);
+            Assert.Equal("https://cinevibes.lk/", payload.Referer);
+            Assert.Equal("Mozilla/5.0", payload.UserAgent);
+            Assert.Equal("id=test", payload.Cookies);
+        }
     }
 }

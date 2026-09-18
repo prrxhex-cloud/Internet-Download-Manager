@@ -51,6 +51,11 @@ namespace PRRX.IDM.Models
         public bool AutoCheckUpdates { get; set; } = true;
         public int MaxConcurrentDownloads { get; set; } = 3;
         public string AudioBitrateDefault { get; set; } = "320k";
+
+        /// <summary>
+        /// Launch on Windows PC startup silently in background / system tray
+        /// </summary>
+        public bool LaunchOnStartup { get; set; } = false;
     }
 
     public enum DownloadStatus

@@ -43,7 +43,11 @@ namespace PRRX.IDM.Services
             string url,
             string destinationFilePath,
             int threadCount = 32,
-            CancellationToken cancellationToken = default);
+            CancellationToken cancellationToken = default,
+            string? referer = null,
+            string? userAgent = null,
+            string? cookies = null,
+            Dictionary<string, string>? customHeaders = null);
 
         void Pause();
         void Resume();
@@ -130,7 +134,11 @@ namespace PRRX.IDM.Services
             string url,
             string destinationFilePath,
             int threadCount = 16,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            string? referer = null,
+            string? userAgent = null,
+            string? cookies = null,
+            Dictionary<string, string>? customHeaders = null)
         {
             string? tempDir = null;
             try
@@ -154,8 +162,7 @@ namespace PRRX.IDM.Services
                     headCts.CancelAfter(TimeSpan.FromSeconds(2.5));
 
                     using var headReq = new HttpRequestMessage(HttpMethod.Head, url);
-                    headReq.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
-                    headReq.Headers.Add("Accept", "*/*");
+                    ApplyStandardHeaders(headReq, url, referer, userAgent, cookies, customHeaders);
 
                     using var headResp = await HttpClient.SendAsync(headReq, HttpCompletionOption.ResponseHeadersRead, headCts.Token);
                     if (headResp.IsSuccessStatusCode)
@@ -178,8 +185,7 @@ namespace PRRX.IDM.Services
                         getCts.CancelAfter(TimeSpan.FromSeconds(3.0));
 
                         using var getReq = new HttpRequestMessage(HttpMethod.Get, url);
-                        getReq.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
-                        getReq.Headers.Add("Accept", "*/*");
+                        ApplyStandardHeaders(getReq, url, referer, userAgent, cookies, customHeaders);
                         getReq.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(0, 0);
 
                         using var getResp = await HttpClient.SendAsync(getReq, HttpCompletionOption.ResponseHeadersRead, getCts.Token);
@@ -267,7 +273,11 @@ namespace PRRX.IDM.Services
                         url,
                         _threads[index],
                         Path.Combine(tempDir, $"part_{index}.tmp"),
-                        _cts.Token)));
+                        _cts.Token,
+                        referer,
+                        userAgent,
+                        cookies,
+                        customHeaders)));
                 }
 
                 await Task.WhenAll(tasks);
@@ -350,12 +360,16 @@ namespace PRRX.IDM.Services
             string url,
             DownloadConnectionThread thread,
             string tempPartPath,
-            CancellationToken token)
+            CancellationToken token,
+            string? referer = null,
+            string? userAgent = null,
+            string? cookies = null,
+            Dictionary<string, string>? customHeaders = null)
         {
             try
             {
                 using var request = new HttpRequestMessage(HttpMethod.Get, url);
-                request.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
+                ApplyStandardHeaders(request, url, referer, userAgent, cookies, customHeaders);
 
                 if (thread.StartByte >= 0 && thread.EndByte >= thread.StartByte)
                 {
@@ -501,8 +515,69 @@ namespace PRRX.IDM.Services
             });
         }
 
+        public static void ApplyStandardHeaders(
+            HttpRequestMessage request,
+            string url,
+            string? referer = null,
+            string? userAgent = null,
+            string? cookies = null,
+            Dictionary<string, string>? customHeaders = null)
+        {
+            var ua = !string.IsNullOrWhiteSpace(userAgent)
+                ? userAgent
+                : "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+            request.Headers.TryAddWithoutValidation("User-Agent", ua);
+            request.Headers.TryAddWithoutValidation("Accept", "*/*");
+            request.Headers.TryAddWithoutValidation("Accept-Language", "en-US,en;q=0.9");
+            request.Headers.TryAddWithoutValidation("Sec-Ch-Ua", "\"Chromium\";v=\"124\", \"Google Chrome\";v=\"124\", \"Not-A.Brand\";v=\"99\"");
+            request.Headers.TryAddWithoutValidation("Sec-Ch-Ua-Mobile", "?0");
+            request.Headers.TryAddWithoutValidation("Sec-Ch-Ua-Platform", "\"Windows\"");
+            request.Headers.TryAddWithoutValidation("Sec-Fetch-Dest", "empty");
+            request.Headers.TryAddWithoutValidation("Sec-Fetch-Mode", "cors");
+            request.Headers.TryAddWithoutValidation("Sec-Fetch-Site", "cross-site");
+
+            // Smart Referer Attachment:
+            // If explicit referer is provided, use it.
+            // If none provided and target is cv-cloud.top (anti-hotlink CDN), use https://cinevibes.lk/
+            // Otherwise default to the origin of the target URL to bypass common origin/hotlink filters.
+            if (!string.IsNullOrWhiteSpace(referer))
+            {
+                request.Headers.TryAddWithoutValidation("Referer", referer);
+            }
+            else if (Uri.TryCreate(url, UriKind.Absolute, out var uri))
+            {
+                if (uri.Host.Contains("cv-cloud", StringComparison.OrdinalIgnoreCase))
+                {
+                    request.Headers.TryAddWithoutValidation("Referer", "https://cinevibes.lk/");
+                }
+                else
+                {
+                    request.Headers.TryAddWithoutValidation("Referer", $"https://{uri.Host}/");
+                }
+            }
+
+            // Session Cookies attachment
+            if (!string.IsNullOrWhiteSpace(cookies))
+            {
+                request.Headers.TryAddWithoutValidation("Cookie", cookies);
+            }
+
+            // Custom headers
+            if (customHeaders != null)
+            {
+                foreach (var kvp in customHeaders)
+                {
+                    if (!string.IsNullOrWhiteSpace(kvp.Key) && !string.IsNullOrWhiteSpace(kvp.Value))
+                    {
+                        request.Headers.TryAddWithoutValidation(kvp.Key, kvp.Value);
+                    }
+                }
+            }
+        }
+
         private static string FormatBytes(long bytes)
         {
+            if (bytes <= 0) return "0 B";
             if (bytes >= 1024 * 1024 * 1024) return $"{(bytes / (1024.0 * 1024.0 * 1024.0)):F2} GB";
             if (bytes >= 1024 * 1024) return $"{(bytes / (1024.0 * 1024.0)):F2} MB";
             if (bytes >= 1024) return $"{(bytes / 1024.0):F1} KB";

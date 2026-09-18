@@ -1,4 +1,4 @@
-﻿<!--
+<!--
 ============================================================================
 Copyright (c) 2026 PRRX Cooperation. All Rights Reserved.
 PRRX IDM (TM) - Intelligent Download Manager Engine
@@ -54,6 +54,65 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
                 </Setter.Value>
             </Setter>
         </Style>
+
+        <!-- Vector Window Caption Control Button Styles -->
+        <Style x:Key="CaptionMinimizeButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Width" Value="30"/>
+            <Setter Property="Height" Value="26"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="BtnBorder" Background="{TemplateBinding Background}" CornerRadius="5">
+                            <Path x:Name="IconPath" Data="M 0,0 L 10,0" Stroke="#8A9BB4" StrokeThickness="1.5"
+                                  HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="BtnBorder" Property="Background" Value="#253046"/>
+                                <Setter TargetName="IconPath" Property="Stroke" Value="#00E5FF"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="BtnBorder" Property="Background" Value="#1C2436"/>
+                                <Setter TargetName="IconPath" Property="Stroke" Value="#FFFFFF"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="CaptionCloseButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Width" Value="30"/>
+            <Setter Property="Height" Value="26"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="BtnBorder" Background="{TemplateBinding Background}" CornerRadius="5">
+                            <Path x:Name="IconPath" Data="M 0,0 L 9,9 M 0,9 L 9,0" Stroke="#8A9BB4" StrokeThickness="1.5"
+                                  HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="BtnBorder" Property="Background" Value="#E81123"/>
+                                <Setter TargetName="IconPath" Property="Stroke" Value="#FFFFFF"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="BtnBorder" Property="Background" Value="#C42B1C"/>
+                                <Setter TargetName="IconPath" Property="Stroke" Value="#FFFFFF"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
 
     <Border Background="#10141D" 
@@ -91,11 +150,9 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
                     </StackPanel>
                 </StackPanel>
 
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                    <Button Content="🗕" Width="28" Height="24" Background="Transparent" Foreground="#8A9BB4" BorderThickness="0"
-                            FontSize="11" Cursor="Hand" Click="Minimize_Click"/>
-                    <Button Content="✕" Width="28" Height="24" Background="Transparent" Foreground="#8A9BB4" BorderThickness="0"
-                            FontSize="12" Cursor="Hand" Click="Close_Click"/>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,0,-4,0">
+                    <Button Style="{StaticResource CaptionMinimizeButtonStyle}" ToolTip="Minimize" Click="Minimize_Click" Margin="0,0,4,0"/>
+                    <Button Style="{StaticResource CaptionCloseButtonStyle}" ToolTip="Close" Click="Close_Click"/>
                 </StackPanel>
             </Grid>
 

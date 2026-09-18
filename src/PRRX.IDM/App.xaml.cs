@@ -144,11 +144,25 @@ namespace PRRX.IDM
                 }
 
                 bool hasStartupPayload = !string.IsNullOrWhiteSpace(pendingPayloadJson);
+                bool isSilentLaunch = false;
+                for (int i = 0; i < e.Args.Length; i++)
+                {
+                    var arg = e.Args[i];
+                    if (arg.Equals("--silent", StringComparison.OrdinalIgnoreCase) ||
+                        arg.Equals("--preload", StringComparison.OrdinalIgnoreCase) ||
+                        arg.Equals("--background", StringComparison.OrdinalIgnoreCase) ||
+                        arg.Equals("/silent", StringComparison.OrdinalIgnoreCase) ||
+                        arg.Equals("/preload", StringComparison.OrdinalIgnoreCase))
+                    {
+                        isSilentLaunch = true;
+                        break;
+                    }
+                }
 
                 // Onboarding Wizard check on first run
                 if (!_configService.CurrentConfig.IsOnboardingCompleted)
                 {
-                    if (!hasStartupPayload)
+                    if (!hasStartupPayload && !isSilentLaunch)
                     {
                         var onboardingVm = new OnboardingViewModel(_configService, _themeService, _browserService);
                         var onboardingWindow = new OnboardingWindow(onboardingVm);
@@ -156,17 +170,17 @@ namespace PRRX.IDM
                         _themeService.ApplyTheme(_configService.CurrentConfig.ThemeMode, onboardingWindow);
 
                         onboardingWindow.ShowDialog();
-                    }
 
-                    _configService.CurrentConfig.IsOnboardingCompleted = true;
-                    _configService.CurrentConfig.HasCompletedQuickTour = true;
-                    _configService.SaveConfig();
+                        _configService.CurrentConfig.IsOnboardingCompleted = true;
+                        _configService.CurrentConfig.HasCompletedQuickTour = true;
+                        _configService.SaveConfig();
+                    }
                 }
 
                 // First-time Interactive Quick Tour / Setup Guide check
                 if (!_configService.CurrentConfig.HasCompletedQuickTour)
                 {
-                    if (!hasStartupPayload)
+                    if (!hasStartupPayload && !isSilentLaunch)
                     {
                         var tourVm = new QuickTourViewModel(_configService, _themeService);
                         var tourWindow = new QuickTourWindow(tourVm);
@@ -174,10 +188,10 @@ namespace PRRX.IDM
                         _themeService.ApplyTheme(_configService.CurrentConfig.ThemeMode, tourWindow);
 
                         tourWindow.ShowDialog();
-                    }
 
-                    _configService.CurrentConfig.HasCompletedQuickTour = true;
-                    _configService.SaveConfig();
+                        _configService.CurrentConfig.HasCompletedQuickTour = true;
+                        _configService.SaveConfig();
+                    }
                 }
 
                 // Launch Main Application Window
@@ -201,7 +215,7 @@ namespace PRRX.IDM
 
                 _themeService.ApplyTheme(_configService.CurrentConfig.ThemeMode, mainWindow);
 
-                if (!hasStartupPayload)
+                if (!hasStartupPayload && !isSilentLaunch)
                 {
                     mainWindow.Show();
                 }
@@ -386,12 +400,21 @@ namespace PRRX.IDM
 
             string? url = null;
             string? payloadJson = null;
+            bool isSilent = false;
 
             if (args != null && args.Length > 0)
             {
                 for (int i = 0; i < args.Length; i++)
                 {
-                    if (args[i] == "--payload" && i + 1 < args.Length)
+                    if (args[i].Equals("--silent", StringComparison.OrdinalIgnoreCase) ||
+                        args[i].Equals("--preload", StringComparison.OrdinalIgnoreCase) ||
+                        args[i].Equals("--background", StringComparison.OrdinalIgnoreCase) ||
+                        args[i].Equals("/silent", StringComparison.OrdinalIgnoreCase) ||
+                        args[i].Equals("/preload", StringComparison.OrdinalIgnoreCase))
+                    {
+                        isSilent = true;
+                    }
+                    else if (args[i] == "--payload" && i + 1 < args.Length)
                     {
                         try
                         {
@@ -427,6 +450,10 @@ namespace PRRX.IDM
             else if (!string.IsNullOrWhiteSpace(url))
             {
                 payloadObj = new BrowserDownloadPayload { Action = "download", Url = url };
+            }
+            else if (isSilent)
+            {
+                payloadObj = new BrowserDownloadPayload { Action = "sync" };
             }
             else
             {

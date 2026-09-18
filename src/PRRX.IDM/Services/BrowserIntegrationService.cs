@@ -28,13 +28,16 @@ namespace PRRX.IDM.Services
 {
     public class BrowserDownloadPayload
     {
-        public string Action { get; set; } = "download"; // "download" or "batch"
+        public string Action { get; set; } = "download"; // "download", "batch", "show", "sync"
         public string Url { get; set; } = string.Empty;
         public string FileName { get; set; } = string.Empty;
         public string PageTitle { get; set; } = string.Empty;
+        public string Referer { get; set; } = string.Empty;
+        public string UserAgent { get; set; } = string.Empty;
         public string Cookies { get; set; } = string.Empty;
         public string Token { get; set; } = string.Empty;
         public long TotalBytes { get; set; } = 0;
+        public Dictionary<string, string>? Headers { get; set; }
         public List<BatchLinkItem>? Links { get; set; }
     }
 
@@ -445,6 +448,7 @@ namespace PRRX.IDM.Services
                     }
 
                     string allowedOrigin = !string.IsNullOrWhiteSpace(origin) && _securityService.ValidateOrigin(origin) ? origin : "*";
+                    string credHeader = allowedOrigin != "*" ? "Access-Control-Allow-Credentials: true\r\n" : "";
 
                     // Handle CORS Preflight
                     if (method == "OPTIONS")
@@ -454,7 +458,7 @@ namespace PRRX.IDM.Services
                                           "Access-Control-Allow-Methods: POST, GET, OPTIONS\r\n" +
                                           "Access-Control-Allow-Headers: Content-Type, X-Requested-With, Authorization, Accept, Origin, X-PRRX-Token\r\n" +
                                           "Access-Control-Allow-Private-Network: true\r\n" +
-                                          "Access-Control-Allow-Credentials: true\r\n" +
+                                          credHeader +
                                           "Access-Control-Max-Age: 86400\r\n" +
                                           "Content-Length: 0\r\n" +
                                           "Connection: close\r\n\r\n";
@@ -471,7 +475,34 @@ namespace PRRX.IDM.Services
                         var response = $"HTTP/1.1 200 OK\r\n" +
                                        $"Access-Control-Allow-Origin: {allowedOrigin}\r\n" +
                                        "Access-Control-Allow-Private-Network: true\r\n" +
-                                       "Access-Control-Allow-Credentials: true\r\n" +
+                                       credHeader +
+                                       "Content-Type: application/json; charset=utf-8\r\n" +
+                                       $"Content-Length: {bodyBytes.Length}\r\n" +
+                                       "Connection: close\r\n\r\n";
+                        var respBytes = Encoding.UTF8.GetBytes(response);
+                        await stream.WriteAsync(respBytes.AsMemory(0, respBytes.Length), token);
+                        await stream.WriteAsync(bodyBytes.AsMemory(0, bodyBytes.Length), token);
+                        await stream.FlushAsync(token);
+                        return;
+                    }
+
+                    if ((method == "GET" || method == "POST") && path.StartsWith("/api/sync", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var body = JsonSerializer.Serialize(new
+                        {
+                            status = "ok",
+                            app = "PRRX IDM",
+                            version = "1.4.0",
+                            turboStreams = _configService.CurrentConfig.TurboConnectionCount,
+                            enableTurbo = _configService.CurrentConfig.EnableTurboAcceleration,
+                            downloadDir = _configService.CurrentConfig.DownloadDirectory,
+                            timestamp = DateTime.UtcNow.ToString("o")
+                        });
+                        var bodyBytes = Encoding.UTF8.GetBytes(body);
+                        var response = $"HTTP/1.1 200 OK\r\n" +
+                                       $"Access-Control-Allow-Origin: {allowedOrigin}\r\n" +
+                                       "Access-Control-Allow-Private-Network: true\r\n" +
+                                       credHeader +
                                        "Content-Type: application/json; charset=utf-8\r\n" +
                                        $"Content-Length: {bodyBytes.Length}\r\n" +
                                        "Connection: close\r\n\r\n";
@@ -656,6 +687,28 @@ namespace PRRX.IDM.Services
                 return;
             }
 
+            if (payload.Action == "sync")
+            {
+                Debug.WriteLine("[PRRX IDM] Auto-sync received from browser extension.");
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(payload.Url) && 
+                (payload.Url.StartsWith("blob:", StringComparison.OrdinalIgnoreCase) || payload.Url.StartsWith("data:", StringComparison.OrdinalIgnoreCase)))
+            {
+                if (!string.IsNullOrWhiteSpace(payload.Referer) && 
+                    !payload.Referer.StartsWith("blob:", StringComparison.OrdinalIgnoreCase) && 
+                    !payload.Referer.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+                {
+                    payload.Url = payload.Referer;
+                }
+                else
+                {
+                    Debug.WriteLine($"[PRRX IDM] Ignored direct browser blob memory object: {payload.Url}");
+                    return;
+                }
+            }
+
             var defaultDir = _configService.CurrentConfig.DownloadDirectory;
             if (string.IsNullOrWhiteSpace(defaultDir))
             {
@@ -700,7 +753,18 @@ namespace PRRX.IDM.Services
             }
             else if (!string.IsNullOrWhiteSpace(payload.Url))
             {
-                var vm = new DownloadFileInfoViewModel(payload.Url, defaultDir, payload.PageTitle, payload.TotalBytes, payload.FileName);
+                var vm = new DownloadFileInfoViewModel(
+                    payload.Url, 
+                    defaultDir, 
+                    payload.PageTitle, 
+                    payload.TotalBytes, 
+                    payload.FileName,
+                    null,
+                    payload.Referer,
+                    payload.UserAgent,
+                    payload.Cookies,
+                    payload.Headers);
+
                 if (!string.IsNullOrWhiteSpace(payload.FileName)) vm.FileName = payload.FileName;
 
                 var dlg = new DownloadFileInfoDialog(vm);
@@ -729,7 +793,17 @@ namespace PRRX.IDM.Services
                     vm.CancelProbe();
                     if (vm.DialogResult == DownloadDialogResult.StartNow)
                     {
-                        var activeVm = new ActiveDownloadViewModel(vm.Url, vm.SaveAsFullPath);
+                        var activeVm = new ActiveDownloadViewModel(
+                            vm.Url, 
+                            vm.SaveAsFullPath,
+                            null,
+                            null,
+                            null,
+                            vm.Referer,
+                            vm.UserAgent,
+                            vm.Cookies,
+                            vm.CustomHeaders);
+
                         var activeWin = new ActiveDownloadWindow(activeVm);
                         activeWin.Closed += (_, _) => MemoryOptimizer.TrimMemory();
                         activeWin.Show();

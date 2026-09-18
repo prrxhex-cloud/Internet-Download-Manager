@@ -128,7 +128,7 @@ async function checkDesktopBridge() {
 }
 
 // 3. Handle Context Menu Clicks
-chrome.contextMenus.onClicked.addListener((info, tab) => {
+chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId === "prrx_download_link") {
     // Robust URL resolution: linkUrl -> srcUrl -> selected URL -> pageUrl
     let targetUrl = info.linkUrl || info.srcUrl;
@@ -144,10 +144,23 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 
     if (targetUrl) {
       console.log("PRRX IDM: Captured URL from context menu:", targetUrl);
+      let cookiesStr = "";
+      try {
+        if (chrome.cookies) {
+          const cookieList = await chrome.cookies.getAll({ url: targetUrl });
+          if (cookieList && cookieList.length > 0) {
+            cookiesStr = cookieList.map(c => `${c.name}=${c.value}`).join("; ");
+          }
+        }
+      } catch (e) { }
+
       sendToPrrxIdm({
         action: "download",
         url: targetUrl,
-        pageTitle: tab?.title || "Web Link"
+        pageTitle: tab?.title || "Web Link",
+        referer: tab?.url || info.pageUrl || "",
+        userAgent: navigator.userAgent,
+        cookies: cookiesStr
       });
     }
   } else if (info.menuItemId === "prrx_download_all") {
@@ -158,6 +171,8 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
             action: "batch",
             url: tab.url,
             pageTitle: tab.title,
+            referer: tab.url,
+            userAgent: navigator.userAgent,
             links: response.links
           });
         }
@@ -168,8 +183,21 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 
 // 4. Intercept Standard Browser Downloads
 chrome.downloads.onDeterminingFilename.addListener((downloadItem, suggest) => {
-  chrome.storage.local.get({ enableInterception: true }, (items) => {
-    if (items.enableInterception && downloadItem.url && !downloadItem.url.startsWith("blob:") && !downloadItem.url.startsWith("data:")) {
+  chrome.storage.local.get({ enableInterception: true }, async (items) => {
+    if (items.enableInterception && downloadItem.url) {
+      let targetUrl = downloadItem.finalUrl || downloadItem.url;
+
+      // Safeguard against in-browser blob memory streams (e.g. YouTube media buffer)
+      if (targetUrl.startsWith("blob:") || targetUrl.startsWith("data:")) {
+        if (downloadItem.referrer && (downloadItem.referrer.startsWith("http://") || downloadItem.referrer.startsWith("https://"))) {
+          targetUrl = downloadItem.referrer;
+        } else {
+          // Direct browser memory blob cannot be re-fetched by external process
+          suggest();
+          return;
+        }
+      }
+
       chrome.downloads.cancel(downloadItem.id, () => {
         chrome.downloads.erase({ id: downloadItem.id });
       });
@@ -181,11 +209,24 @@ chrome.downloads.onDeterminingFilename.addListener((downloadItem, suggest) => {
         detectedSize = downloadItem.totalBytes;
       }
 
+      let cookiesStr = "";
+      try {
+        if (chrome.cookies) {
+          const cookieList = await chrome.cookies.getAll({ url: targetUrl });
+          if (cookieList && cookieList.length > 0) {
+            cookiesStr = cookieList.map(c => `${c.name}=${c.value}`).join("; ");
+          }
+        }
+      } catch (e) { }
+
       sendToPrrxIdm({
         action: "download",
-        url: downloadItem.finalUrl || downloadItem.url,
+        url: targetUrl,
         fileName: downloadItem.filename || "",
-        totalBytes: detectedSize
+        totalBytes: detectedSize,
+        referer: downloadItem.referrer || "",
+        userAgent: navigator.userAgent,
+        cookies: cookiesStr
       });
     } else {
       suggest();
@@ -197,21 +238,43 @@ chrome.downloads.onDeterminingFilename.addListener((downloadItem, suggest) => {
 // 5. Handle Messages from Content Script & Popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === "download_video" || message.action === "download_url") {
-    sendToPrrxIdm({
-      action: "download",
-      url: message.url,
-      fileName: message.fileName || "",
-      pageTitle: sender.tab?.title || ""
-    });
-    sendResponse({ status: "sent" });
+    (async () => {
+      let cookiesStr = "";
+      try {
+        if (chrome.cookies && message.url) {
+          const cookieList = await chrome.cookies.getAll({ url: message.url });
+          if (cookieList && cookieList.length > 0) {
+            cookiesStr = cookieList.map(c => `${c.name}=${c.value}`).join("; ");
+          }
+        }
+      } catch (e) { }
+
+      sendToPrrxIdm({
+        action: "download",
+        url: message.url,
+        fileName: message.fileName || "",
+        pageTitle: sender.tab?.title || "",
+        referer: message.referer || sender.tab?.url || "",
+        userAgent: navigator.userAgent,
+        cookies: cookiesStr
+      });
+      sendResponse({ status: "sent" });
+    })();
+    return true;
   } else if (message.action === "ping_desktop") {
-    checkDesktopBridge().then((res) => sendResponse(res));
+    checkDesktopBridge().then((res) => sendResponse(res)).catch(() => sendResponse({ status: "offline" }));
     return true;
   } else if (message.action === "get_cloud_status") {
-    checkCloudHealth().then((res) => sendResponse(res));
+    checkCloudHealth().then((res) => sendResponse(res)).catch(() => sendResponse({ status: "offline" }));
     return true;
   } else if (message.action === "check_domain_health") {
-    checkDomainHealth(message.domain).then((res) => sendResponse(res));
+    checkDomainHealth(message.domain).then((res) => sendResponse(res)).catch(() => sendResponse(null));
+    return true;
+  } else if (message.action === "sync_desktop") {
+    fetch("http://127.0.0.1:46543/api/sync", { method: "GET" })
+      .then(res => res.json())
+      .then(data => sendResponse({ status: "ok", data }))
+      .catch(() => sendResponse({ status: "offline" }));
     return true;
   }
   return true;
@@ -219,6 +282,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 // 6. Dual-Channel Transmitter: Fast Local HTTP Bridge + Native Messaging Fallback
 async function sendToPrrxIdm(payload) {
+  if (payload && !payload.userAgent) {
+    payload.userAgent = navigator.userAgent;
+  }
+
   // Pre-flight cloud domain health & reputation check
   if (payload && payload.url) {
     try {

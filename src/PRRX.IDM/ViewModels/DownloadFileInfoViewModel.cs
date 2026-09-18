@@ -66,6 +66,11 @@ namespace PRRX.IDM.ViewModels
         private string _voteFeedbackFgColor = "#4ADE80";
         private long? _detectedBytes = null;
 
+        public string Referer { get; set; } = string.Empty;
+        public string UserAgent { get; set; } = string.Empty;
+        public string Cookies { get; set; } = string.Empty;
+        public Dictionary<string, string> CustomHeaders { get; } = new();
+
         public DownloadDialogResult DialogResult { get; private set; } = DownloadDialogResult.Cancel;
 
         public bool IsProbing
@@ -304,7 +309,11 @@ namespace PRRX.IDM.ViewModels
             string? pageTitle = null, 
             long? precalculatedSize = null,
             string? initialFileName = null,
-            ICloudIntelligenceService? cloudService = null)
+            ICloudIntelligenceService? cloudService = null,
+            string? referer = null,
+            string? userAgent = null,
+            string? cookies = null,
+            Dictionary<string, string>? customHeaders = null)
         {
             _cloudService = cloudService ?? new CloudIntelligenceService();
             _url = initialUrl;
@@ -314,6 +323,17 @@ namespace PRRX.IDM.ViewModels
             _selectedCategory = FileCategoryHelper.DetectCategory(_fileName);
             _cachedPageTitle = pageTitle;
             _currentFileHash = _cloudService.ExtractOrComputeSha256(initialUrl, _fileName);
+
+            Referer = referer ?? string.Empty;
+            UserAgent = userAgent ?? string.Empty;
+            Cookies = cookies ?? string.Empty;
+            if (customHeaders != null)
+            {
+                foreach (var kvp in customHeaders)
+                {
+                    CustomHeaders[kvp.Key] = kvp.Value;
+                }
+            }
 
             var baseDownloads = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
             _saveDirectory = !string.IsNullOrWhiteSpace(defaultDownloadDir)
@@ -607,6 +627,20 @@ namespace PRRX.IDM.ViewModels
                 return Task.CompletedTask;
             }
 
+            if (url.StartsWith("blob:", StringComparison.OrdinalIgnoreCase) || url.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+            {
+                DispatchToUi(() =>
+                {
+                    FileSizeFormatted = "Blob Stream (Browser Only)";
+                    IsProbing = false;
+                    if (string.IsNullOrWhiteSpace(_description))
+                    {
+                        Description = "Notice: Blob URLs are ephemeral browser memory objects and cannot be directly downloaded via external HTTP engines.";
+                    }
+                });
+                return Task.CompletedTask;
+            }
+
             lock (_probeLock)
             {
                 if (_activeProbeTask != null && !_activeProbeTask.IsCompleted && _activeProbeUrl == url)
@@ -648,8 +682,7 @@ namespace PRRX.IDM.ViewModels
                 headCts.CancelAfter(TimeSpan.FromSeconds(1.5));
 
                 using var headReq = new HttpRequestMessage(HttpMethod.Head, url);
-                headReq.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
-                headReq.Headers.Add("Accept", "*/*");
+                SegmentedDownloadEngine.ApplyStandardHeaders(headReq, url, Referer, UserAgent, Cookies, CustomHeaders);
 
                 using var headResp = await ProbeClient.SendAsync(headReq, HttpCompletionOption.ResponseHeadersRead, headCts.Token).ConfigureAwait(false);
                 if (headResp.IsSuccessStatusCode)
@@ -688,8 +721,7 @@ namespace PRRX.IDM.ViewModels
                     getCts.CancelAfter(TimeSpan.FromSeconds(2.0));
 
                     using var getReq = new HttpRequestMessage(HttpMethod.Get, url);
-                    getReq.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
-                    getReq.Headers.Add("Accept", "*/*");
+                    SegmentedDownloadEngine.ApplyStandardHeaders(getReq, url, Referer, UserAgent, Cookies, CustomHeaders);
                     getReq.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(0, 0);
 
                     using var getResp = await ProbeClient.SendAsync(getReq, HttpCompletionOption.ResponseHeadersRead, getCts.Token).ConfigureAwait(false);

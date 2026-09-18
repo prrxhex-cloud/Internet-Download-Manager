@@ -143,6 +143,55 @@ namespace PRRX.IDM.ViewModels
             }
         }
 
+        private bool _launchOnStartup;
+        public bool LaunchOnStartup
+        {
+            get => _launchOnStartup;
+            set
+            {
+                if (SetProperty(ref _launchOnStartup, value))
+                {
+                    _configService.CurrentConfig.LaunchOnStartup = value;
+                    _configService.SaveConfig();
+                    ApplyStartupRegistration(value);
+                }
+            }
+        }
+
+        private void ApplyStartupRegistration(bool enable)
+        {
+            try
+            {
+                const string runKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
+                const string appName = "PRRX_IDM";
+                using var key = Registry.CurrentUser.OpenSubKey(runKeyPath, true);
+                if (key != null)
+                {
+                    if (enable)
+                    {
+                        var exePath = Environment.ProcessPath;
+                        if (string.IsNullOrWhiteSpace(exePath))
+                        {
+                            exePath = Process.GetCurrentProcess().MainModule?.FileName;
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(exePath))
+                        {
+                            key.SetValue(appName, $"\"{exePath}\" --silent");
+                        }
+                    }
+                    else
+                    {
+                        key.DeleteValue(appName, false);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Failed to update Windows startup registry: {ex.Message}");
+            }
+        }
+
         public ObservableCollection<int> AvailableStreamCounts { get; } = new()
         {
             4,
@@ -291,6 +340,7 @@ namespace PRRX.IDM.ViewModels
             _cookiesFilePath = _configService.CurrentConfig.CookiesFilePath;
             _enableTurboAcceleration = _configService.CurrentConfig.EnableTurboAcceleration;
             _turboConnectionCount = _configService.CurrentConfig.TurboConnectionCount;
+            _launchOnStartup = _configService.CurrentConfig.LaunchOnStartup;
             _isWin11 = _themeService.IsWindows11;
             _appVersion = $"v{CurrentVersionClean} (Official Release)";
 

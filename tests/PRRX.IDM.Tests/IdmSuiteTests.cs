@@ -354,7 +354,15 @@ namespace PRRX.IDM.Tests
             public bool IsPaused { get; set; }
             public SpeedLimiterSettings SpeedLimiter { get; } = new();
 
-            public System.Threading.Tasks.Task<bool> StartDownloadAsync(string url, string destinationFilePath, int threadCount = 16, System.Threading.CancellationToken cancellationToken = default) =>
+            public System.Threading.Tasks.Task<bool> StartDownloadAsync(
+                string url, 
+                string destinationFilePath, 
+                int threadCount = 16, 
+                System.Threading.CancellationToken cancellationToken = default,
+                string? referer = null,
+                string? userAgent = null,
+                string? cookies = null,
+                System.Collections.Generic.Dictionary<string, string>? customHeaders = null) =>
                 System.Threading.Tasks.Task.FromResult(true);
 
             public void Pause() { }

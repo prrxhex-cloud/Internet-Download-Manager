@@ -21,6 +21,37 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
         Icon="/Assets/app_icon.png"
         ResizeMode="CanResizeWithGrip">
 
+    <Window.Resources>
+        <Style x:Key="CaptionCloseButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Width" Value="30"/>
+            <Setter Property="Height" Value="26"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="BtnBorder" Background="{TemplateBinding Background}" CornerRadius="5">
+                            <Path x:Name="IconPath" Data="M 0,0 L 9,9 M 0,9 L 9,0" Stroke="#8FA0B8" StrokeThickness="1.5"
+                                  HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="BtnBorder" Property="Background" Value="#E81123"/>
+                                <Setter TargetName="IconPath" Property="Stroke" Value="#FFFFFF"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="BtnBorder" Property="Background" Value="#C42B1C"/>
+                                <Setter TargetName="IconPath" Property="Stroke" Value="#FFFFFF"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
     <Border Background="#1C202B" 
             BorderBrush="#25FFFFFF" 
             BorderThickness="1" 
@@ -49,9 +80,8 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
                                MaxWidth="400" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="6,0,0,0"/>
                 </StackPanel>
 
-                <Button Content="✕" Width="28" Height="28" HorizontalAlignment="Right"
-                        Background="Transparent" Foreground="#8FA0B8" BorderThickness="0"
-                        FontSize="12" Cursor="Hand" Click="Close_Click"/>
+                <Button Style="{StaticResource CaptionCloseButtonStyle}" HorizontalAlignment="Right"
+                        ToolTip="Close" Click="Close_Click"/>
             </Grid>
 
             <!-- 2. Filter & Selection Bar -->
