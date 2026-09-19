@@ -6,7 +6,7 @@
  * Confidential and Proprietary - Licensed under PRRX Open Source Initiative
  * ============================================================================
  */
-// PRRX IDM Content Script - Floating Video Grabber & Link Scraper
+// PRRX IDM Content Script - Universal Floating Video & Telegram Media Grabber
 
 (function () {
   let activePanel = null;
@@ -33,7 +33,7 @@
     }
   }
 
-  // 1. Scan for Video Elements
+  // 1. Scan for Video & Media Elements (YouTube, Telegram Web, SPAs)
   function scanAndAttachVideoPanels() {
     if (!isExtensionValid()) {
       stopPeriodicScanners();
@@ -48,10 +48,10 @@
             return;
           }
           if (!items || !items.enableFloatingPanel) return;
-          attachToVideos();
+          attachToMediaElements();
         });
       } else {
-        attachToVideos();
+        attachToMediaElements();
       }
     } catch (err) {
       // Context invalidated or detached
@@ -59,8 +59,11 @@
     }
   }
 
-  function attachToVideos() {
+  function attachToMediaElements() {
     if (!isExtensionValid()) return;
+    const isTelegram = window.location.hostname.includes("telegram.org");
+
+    // A. Standard Video Elements (YouTube, Twitter, general web)
     const videos = document.querySelectorAll("video");
     videos.forEach((video) => {
       if (video.dataset.prrxAttached) return;
@@ -69,17 +72,45 @@
       const container = video.parentElement;
       if (!container) return;
 
-      // Ensure parent has position relative/absolute for overlay
       const computedPos = window.getComputedStyle(container).position;
       if (computedPos === "static") {
         container.style.position = "relative";
       }
 
-      attachFloatingPanel(container, video);
+      attachFloatingPanel(container, video, "video");
     });
+
+    // B. Telegram Web Media Elements (WebK & WebA)
+    if (isTelegram) {
+      // Telegram Audio / Voice messages
+      const audios = document.querySelectorAll("audio, .audio-player, .voice-message, .bubble-content-voice");
+      audios.forEach((audioEl) => {
+        if (audioEl.dataset.prrxAttached) return;
+        audioEl.dataset.prrxAttached = "true";
+
+        const container = audioEl.closest(".message-content") || audioEl.closest(".bubble-content") || audioEl.parentElement;
+        if (!container) return;
+        if (window.getComputedStyle(container).position === "static") {
+          container.style.position = "relative";
+        }
+        attachFloatingPanel(container, audioEl, "audio");
+      });
+
+      // Telegram Document Files
+      const docs = document.querySelectorAll(".document-container, .media-document, .bubble-content-document, .file-container");
+      docs.forEach((docEl) => {
+        if (docEl.dataset.prrxAttached) return;
+        docEl.dataset.prrxAttached = "true";
+
+        if (window.getComputedStyle(docEl).position === "static") {
+          docEl.style.position = "relative";
+        }
+        attachFloatingPanel(docEl, docEl, "document");
+      });
+    }
   }
 
-  function attachFloatingPanel(container, video) {
+  function attachFloatingPanel(container, mediaElement, mediaType = "video") {
     const panel = document.createElement("div");
     panel.className = "prrx-video-panel-container";
     
@@ -92,34 +123,52 @@
       // Fallback if context is invalid
     }
 
+    const typeLabel = mediaType === "audio" ? "Download Audio" : mediaType === "document" ? "Download File" : "Download with PRRX";
+
     panel.innerHTML = `
       <div class="prrx-video-btn" title="Download with PRRX Internet Download Manager">
         ${logoUrl ? `<img src="${logoUrl}" width="16" height="16" alt="PRRX" style="vertical-align: middle; border-radius: 2px;">` : `<span class="prrx-video-icon">⚡</span>`}
-        <span>Download with PRRX</span>
+        <span>${typeLabel}</span>
         <span style="font-size: 9px; opacity: 0.8;">▼</span>
       </div>
       <div class="prrx-video-dropdown">
-        <div class="prrx-dropdown-header">Select Download Quality</div>
-        <div class="prrx-dropdown-item" data-quality="1080p">
-          <span>1080p Full HD</span>
-          <span class="prrx-item-badge">MP4</span>
-        </div>
-        <div class="prrx-dropdown-item" data-quality="720p">
-          <span>720p HD</span>
-          <span class="prrx-item-badge">MP4</span>
-        </div>
-        <div class="prrx-dropdown-item" data-quality="480p">
-          <span>480p</span>
-          <span class="prrx-item-badge">MP4</span>
-        </div>
-        <div class="prrx-dropdown-item" data-quality="360p">
-          <span>360p</span>
-          <span class="prrx-item-badge">MP4</span>
-        </div>
-        <div class="prrx-dropdown-item" data-quality="mp3">
-          <span>Extract MP3 Audio</span>
-          <span class="prrx-item-badge" style="color: #00FF88; background: rgba(0,255,136,0.15)">320K</span>
-        </div>
+        <div class="prrx-dropdown-header">${mediaType === "audio" ? "Audio Extraction" : mediaType === "document" ? "Document Options" : "Select Download Quality"}</div>
+        ${mediaType === "audio" ? `
+          <div class="prrx-dropdown-item" data-quality="mp3">
+            <span>Extract MP3 Audio</span>
+            <span class="prrx-item-badge" style="color: #00FF88; background: rgba(0,255,136,0.15)">320K</span>
+          </div>
+          <div class="prrx-dropdown-item" data-quality="original">
+            <span>Original Audio</span>
+            <span class="prrx-item-badge">OGG/M4A</span>
+          </div>
+        ` : mediaType === "document" ? `
+          <div class="prrx-dropdown-item" data-quality="original">
+            <span>Download Original File</span>
+            <span class="prrx-item-badge" style="color: #00FF88; background: rgba(0,255,136,0.15)">Fiber</span>
+          </div>
+        ` : `
+          <div class="prrx-dropdown-item" data-quality="1080p">
+            <span>1080p Full HD</span>
+            <span class="prrx-item-badge">MP4</span>
+          </div>
+          <div class="prrx-dropdown-item" data-quality="720p">
+            <span>720p HD</span>
+            <span class="prrx-item-badge">MP4</span>
+          </div>
+          <div class="prrx-dropdown-item" data-quality="480p">
+            <span>480p</span>
+            <span class="prrx-item-badge">MP4</span>
+          </div>
+          <div class="prrx-dropdown-item" data-quality="360p">
+            <span>360p</span>
+            <span class="prrx-item-badge">MP4</span>
+          </div>
+          <div class="prrx-dropdown-item" data-quality="mp3">
+            <span>Extract MP3 Audio</span>
+            <span class="prrx-item-badge" style="color: #00FF88; background: rgba(0,255,136,0.15)">320K</span>
+          </div>
+        `}
       </div>
     `;
 
@@ -141,13 +190,25 @@
           return;
         }
 
-        const targetUrl = video.currentSrc || video.src || window.location.href;
+        let targetUrl = mediaElement.currentSrc || mediaElement.src;
+        if (!targetUrl && mediaElement.querySelector) {
+          const innerMedia = mediaElement.querySelector("video, audio, source, a[href]");
+          if (innerMedia) targetUrl = innerMedia.currentSrc || innerMedia.src || innerMedia.href;
+        }
+        if (!targetUrl) targetUrl = window.location.href;
+
+        let detectedTitle = document.title || "media_file";
+        const titleEl = container.querySelector(".document-title, .audio-title, .title, .name");
+        if (titleEl && titleEl.textContent) {
+          detectedTitle = titleEl.textContent.trim();
+        }
+
         try {
           chrome.runtime.sendMessage({
             action: "download_video",
             url: targetUrl,
             quality: item.dataset.quality,
-            fileName: document.title || "video.mp4"
+            fileName: detectedTitle
           }, () => {
             if (chrome.runtime && chrome.runtime.lastError) {
               // Ignore or handle cleanly
@@ -166,7 +227,7 @@
     container.appendChild(panel);
   }
 
-  // Periodic scanner for dynamically loaded videos (YouTube, SPAs)
+  // Periodic scanner for dynamically loaded videos and Telegram messages
   scanIntervalId = setInterval(scanAndAttachVideoPanels, 2000);
   scanAndAttachVideoPanels();
 

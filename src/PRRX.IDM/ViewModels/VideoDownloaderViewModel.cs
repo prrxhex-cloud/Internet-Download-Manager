@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // Copyright (c) 2026 PRRX Cooperation. All Rights Reserved.
 // PRRX IDM (TM) - Intelligent Download Manager Engine
 // Watermark: PRRX-IDM-CORE-WATERMARK-SECURE-VAULT-2026
@@ -34,6 +34,9 @@ namespace PRRX.IDM.ViewModels
         private MediaProbeResult? _currentProbeResult;
         private MediaFormat? _selectedFormat;
         private CancellationTokenSource? _downloadCts;
+        private readonly ITelegramLinkResolver _telegramResolver = new TelegramLinkResolver();
+
+        public bool IsTelegramUrl => _telegramResolver.IsTelegramUrl(InputUrl);
 
         public string InputUrl
         {
@@ -43,6 +46,7 @@ namespace PRRX.IDM.ViewModels
                 if (SetProperty(ref _inputUrl, value))
                 {
                     HasError = false;
+                    OnPropertyChanged(nameof(IsTelegramUrl));
                 }
             }
         }

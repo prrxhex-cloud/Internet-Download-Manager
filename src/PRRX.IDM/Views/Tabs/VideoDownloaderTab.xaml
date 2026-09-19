@@ -54,6 +54,17 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
                     CornerRadius="10" Padding="16" Margin="0,0,0,14"
                     BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1">
                 <StackPanel>
+                    <!-- Telegram Auto-Detection Badge -->
+                    <Border Visibility="{Binding IsTelegramUrl, Converter={StaticResource BoolToVis}}"
+                            Background="#200088CC" BorderBrush="#0088CC" BorderThickness="1"
+                            CornerRadius="6" Padding="10,6" Margin="0,0,0,10" HorizontalAlignment="Left">
+                        <StackPanel Orientation="Horizontal">
+                            <ui:SymbolIcon Symbol="Send24" Foreground="#0088CC" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                            <TextBlock Text="Telegram Media Detected: High-Speed Direct CDN Stream Extraction Enabled" 
+                                       FontSize="12" FontWeight="SemiBold" Foreground="#0088CC" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Border>
+
                     <Grid Margin="0,0,0,12">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
@@ -62,8 +73,8 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
                         </Grid.ColumnDefinitions>
 
                         <ui:TextBox Text="{Binding InputUrl, UpdateSourceTrigger=PropertyChanged}" 
-                                    PlaceholderText="Paste any video link here (YouTube, TikTok, Twitter, Vimeo, etc.)" 
-                                    FontSize="14" Height="42" Margin="0,0,10,0"/>
+                                     PlaceholderText="Paste any link here (YouTube, Telegram t.me/..., TikTok, X/Twitter, Direct Bot Link)" 
+                                     FontSize="14" Height="42" Margin="0,0,10,0"/>
 
                         <ui:Button Grid.Column="1" Content="Paste" Icon="{ui:SymbolIcon Symbol=ClipboardPaste24}" 
                                    Command="{Binding PasteClipboardCommand}" Margin="0,0,10,0" Height="42"/>
@@ -98,6 +109,24 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
                                        Height="38" Padding="14,0"/>
                         </StackPanel>
                     </Grid>
+
+                    <!-- Telegram All-Methods Helper Tip -->
+                    <Border Background="#100088CC" BorderBrush="#250088CC" BorderThickness="1"
+                            CornerRadius="6" Padding="10,8" Margin="0,12,0,0">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <ui:SymbolIcon Symbol="ChatHelp24" Foreground="#0088CC" Margin="0,1,10,0" VerticalAlignment="Top"/>
+                            <StackPanel Grid.Column="1">
+                                <TextBlock Text="Telegram Download Support (All Methods Supported)" FontWeight="SemiBold" FontSize="11" Foreground="#0088CC"/>
+                                <TextBlock Text="• Public Posts: Paste any t.me/channel/id post link to extract &amp; download videos/audio directly." FontSize="11" Opacity="0.8" Margin="0,2,0,0"/>
+                                <TextBlock Text="• Telegram Web: Click 'Download with PRRX' floating grabber in web.telegram.org (K &amp; A)." FontSize="11" Opacity="0.8" Margin="0,1,0,0"/>
+                                <TextBlock Text="• Private Media: Forward files to @PublicURLBot or @FileToLinkBot on Telegram and paste link here." FontSize="11" Opacity="0.8" Margin="0,1,0,0"/>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
                 </StackPanel>
             </Border>
 

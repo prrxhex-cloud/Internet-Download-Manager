@@ -164,6 +164,7 @@ namespace PRRX.IDM.Models
         public bool HasVideo { get; set; }
         public bool HasAudio { get; set; }
         public int Fps { get; set; }
+        public string? DirectDownloadUrl { get; set; }
 
         public string DisplayLabel
         {

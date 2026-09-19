@@ -187,8 +187,14 @@ chrome.downloads.onDeterminingFilename.addListener((downloadItem, suggest) => {
     if (items.enableInterception && downloadItem.url) {
       let targetUrl = downloadItem.finalUrl || downloadItem.url;
 
-      // Safeguard against in-browser blob memory streams (e.g. YouTube media buffer)
+      // Safeguard against in-browser blob memory streams (e.g. YouTube media buffer, Telegram Web decrypted files)
       if (targetUrl.startsWith("blob:") || targetUrl.startsWith("data:")) {
+        // Telegram Web decrypts files directly in browser memory - allow seamless saving
+        if (downloadItem.referrer && downloadItem.referrer.includes("telegram.org")) {
+          suggest();
+          return;
+        }
+
         if (downloadItem.referrer && (downloadItem.referrer.startsWith("http://") || downloadItem.referrer.startsWith("https://"))) {
           targetUrl = downloadItem.referrer;
         } else {

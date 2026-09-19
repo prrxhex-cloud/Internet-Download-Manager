@@ -72,6 +72,7 @@ namespace PRRX.IDM.Services
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
         private readonly IConfigurationService? _configService;
+        private readonly ITelegramLinkResolver _telegramResolver = new TelegramLinkResolver();
         private string _lastNonZeroSpeed = "Calculating...";
 
         public string EngineExecutablePath { get; private set; }
@@ -232,6 +233,46 @@ namespace PRRX.IDM.Services
             if (!SecurityGuard.ValidateUrl(url, out var safeUrl, out var error))
             {
                 return (null, error);
+            }
+
+            // Fast zero-latency Telegram resolver (direct CDN extraction)
+            if (_telegramResolver.IsTelegramUrl(safeUrl))
+            {
+                try
+                {
+                    var tgMedia = await _telegramResolver.ResolveTelegramMediaAsync(safeUrl, cancellationToken);
+                    if (tgMedia != null && tgMedia.IsDirectDownloadable)
+                    {
+                        var ext = System.IO.Path.GetExtension(tgMedia.FileName).TrimStart('.').ToLowerInvariant();
+                        if (string.IsNullOrWhiteSpace(ext)) ext = tgMedia.MediaType == "video" ? "mp4" : "bin";
+
+                        var probe = new MediaProbeResult
+                        {
+                            Id = safeUrl,
+                            Title = tgMedia.Title,
+                            ThumbnailUrl = tgMedia.ThumbnailUrl,
+                            PublisherName = !string.IsNullOrWhiteSpace(tgMedia.ChannelName) ? $"Telegram @{tgMedia.ChannelName}" : "Telegram",
+                            Formats = new List<MediaFormat>
+                            {
+                                new MediaFormat
+                                {
+                                    FormatId = "telegram_cdn_stream",
+                                    Resolution = !string.IsNullOrWhiteSpace(tgMedia.FormattedSize) ? $"{tgMedia.FormattedSize} (Direct CDN)" : "Direct Telegram Stream",
+                                    Extension = ext,
+                                    Note = "High-Speed Parallel Fiber Stream",
+                                    HasVideo = tgMedia.MediaType == "video",
+                                    HasAudio = true,
+                                    DirectDownloadUrl = tgMedia.DirectStreamUrl
+                                }
+                            }
+                        };
+                        return (probe, null);
+                    }
+                }
+                catch
+                {
+                    // Fall back to yt-dlp native Telegram extractor
+                }
             }
 
             var startInfo = new ProcessStartInfo
@@ -405,7 +446,12 @@ namespace PRRX.IDM.Services
             };
 
             startInfo.ArgumentList.Add("-f");
-            startInfo.ArgumentList.Add(string.IsNullOrWhiteSpace(formatId) ? "bestvideo+bestaudio/best" : formatId);
+            var effectiveFormat = formatId;
+            if (string.IsNullOrWhiteSpace(effectiveFormat) || effectiveFormat == "telegram_cdn_stream")
+            {
+                effectiveFormat = "best";
+            }
+            startInfo.ArgumentList.Add(effectiveFormat);
             startInfo.ArgumentList.Add("--newline");
             startInfo.ArgumentList.Add("--no-playlist");
 
