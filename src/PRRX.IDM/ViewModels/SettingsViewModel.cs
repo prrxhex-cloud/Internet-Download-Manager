@@ -237,7 +237,7 @@ namespace PRRX.IDM.ViewModels
             set => SetProperty(ref _appVersion, value);
         }
 
-        public string CurrentVersionClean => _updateService?.CurrentVersionClean ?? "1.5.0";
+        public string CurrentVersionClean => _updateService?.CurrentVersionClean ?? "1.6.0";
 
         public PriorityItem SelectedPriority
         {
@@ -753,15 +753,35 @@ namespace PRRX.IDM.ViewModels
         {
             ChangelogHistory.Clear();
 
-            // v1.5.0 (Current Release)
+            // v1.6.0 (Current Release)
+            var rel160 = new ChangelogRelease
+            {
+                Version = "v1.6.0",
+                ReleaseDate = "September 2026",
+                IsCurrentRelease = true,
+                StatusBadge = "Current Release",
+                Summary = "Comprehensive multi-channel Telegram download ecosystem: Automated remote downloading via official Telegram Bot (@PRRX_IDM_Bot) with live Cloudflare Worker webhook edge gateway, zero-latency public post scraper (t.me/channel/id) with direct CDN extraction, Telegram Web (WebK & WebA) floating media grabber, extension context lifecycle protection, and dedicated Telegram pairing settings UI.",
+                IsExpanded = true,
+                Items = new System.Collections.Generic.List<ChangelogItem>
+                {
+                    new() { Category = "Features", Description = "Automated Telegram Bot Remote Downloader: Link your PC with official bot @PRRX_IDM_Bot to forward any video, movie, audio, or document from your phone/desktop directly to PRRX IDM.", CategoryBadgeColor = "#0078D4", CategoryBgColor = "#200078D4" },
+                    new() { Category = "Features", Description = "Telegram Public Post Scraper: Paste any public t.me/channel/id post link to immediately extract and download direct Telegram CDN streams without login or account credentials.", CategoryBadgeColor = "#0078D4", CategoryBgColor = "#200078D4" },
+                    new() { Category = "Features", Description = "Telegram Web Floating Media Grabber: Full floating download button support for Telegram Web (WebK & WebA) with decrypted blob memory protection.", CategoryBadgeColor = "#0078D4", CategoryBgColor = "#200078D4" },
+                    new() { Category = "Features", Description = "Dedicated Telegram Bot Settings Card: Generate unique PC pairing codes, open the bot in 1 click, and toggle background synchronization.", CategoryBadgeColor = "#0078D4", CategoryBgColor = "#200078D4" },
+                    new() { Category = "Performance", Description = "Ultra-Fast Edge Routing: Low-latency Cloudflare Worker webhook gateway automatically resolves high-speed Telegram CDN file streams.", CategoryBadgeColor = "#8764B8", CategoryBgColor = "#208764B8" },
+                    new() { Category = "Fixes", Description = "Eliminated Chrome extension context invalidation errors with graceful lifecycle detection and automated scanner disposal.", CategoryBadgeColor = "#D83B01", CategoryBgColor = "#20D83B01" }
+                }
+            };
+
+            // v1.5.0
             var rel150 = new ChangelogRelease
             {
                 Version = "v1.5.0",
                 ReleaseDate = "September 2026",
-                IsCurrentRelease = true,
-                StatusBadge = "Current Release",
+                IsCurrentRelease = false,
+                StatusBadge = "Previous Release",
                 Summary = "Cloud Install vs. Default Direct Download Mode toggle with automatic server congestion circuit-breaker failover, highest process & network priority by default with settings configurator, official EULA & Agreement embedded into Inno Setup wizards, 1MB high-speed fiber chunk buffers, and full platform stability.",
-                IsExpanded = true,
+                IsExpanded = false,
                 Items = new System.Collections.Generic.List<ChangelogItem>
                 {
                     new() { Category = "Features", Description = "Cloud Install vs. Default Direct Toggle: Toggle between ultra-fast Cloud Acceleration (routed via PRRX Cloudflare Edge server & CDN with zero traffic congestion) and Default Direct mode.", CategoryBadgeColor = "#0078D4", CategoryBgColor = "#200078D4" },
@@ -872,6 +892,7 @@ namespace PRRX.IDM.ViewModels
                 }
             };
 
+            ChangelogHistory.Add(rel160);
             ChangelogHistory.Add(rel150);
             ChangelogHistory.Add(rel140);
             ChangelogHistory.Add(rel130);

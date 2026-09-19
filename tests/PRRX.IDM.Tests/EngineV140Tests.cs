@@ -82,21 +82,21 @@ namespace PRRX.IDM.Tests
         }
 
         [Fact]
-        public void UpdateService_Version150_IsLatestReleaseAndProperlyNormalized()
+        public void UpdateService_Version160_IsLatestReleaseAndProperlyNormalized()
         {
             var update = new UpdateService();
-            Assert.Equal("1.5.0", update.CurrentVersionClean);
+            Assert.Equal("1.6.0", update.CurrentVersionClean);
 
-            // Remote v1.5.0 is not newer than local v1.5.0
+            // Remote v1.6.0 is not newer than local v1.6.0
+            Assert.False(UpdateService.IsVersionNewer("1.6.0", update.CurrentVersionClean));
+            Assert.False(UpdateService.IsVersionNewer("v1.6.0", update.CurrentVersionClean));
+
+            // Remote v1.6.1 or v1.7.0 IS newer
+            Assert.True(UpdateService.IsVersionNewer("1.6.1", update.CurrentVersionClean));
+            Assert.True(UpdateService.IsVersionNewer("v1.7.0", update.CurrentVersionClean));
+
+            // Remote v1.5.0 is NOT newer
             Assert.False(UpdateService.IsVersionNewer("1.5.0", update.CurrentVersionClean));
-            Assert.False(UpdateService.IsVersionNewer("v1.5.0", update.CurrentVersionClean));
-
-            // Remote v1.5.1 or v1.6.0 IS newer
-            Assert.True(UpdateService.IsVersionNewer("1.5.1", update.CurrentVersionClean));
-            Assert.True(UpdateService.IsVersionNewer("v1.6.0", update.CurrentVersionClean));
-
-            // Remote v1.4.0 is NOT newer
-            Assert.False(UpdateService.IsVersionNewer("1.4.0", update.CurrentVersionClean));
         }
 
         [Fact]

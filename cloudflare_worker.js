@@ -47,7 +47,7 @@ export default {
         return new Response(JSON.stringify({
           status: "online",
           service: "PRRX IDM Cloud Intelligence Gateway",
-          version: "1.5.0",
+          version: "1.6.0",
           edge_node: clientColo,
           client_ip: clientPublicIp,
           telegram_bot: "@PRRX_IDM_Bot",
@@ -73,11 +73,11 @@ export default {
       // ----------------------------------------------------------------------
       if (path === "/api/manifest" && method === "GET") {
         return new Response(JSON.stringify({
-          version: "1.5.0",
+          version: "1.6.0",
           releaseDate: "2026-09-19",
-          downloadUrl: "https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.5.0/PRRX_Internet_Download_Manager_v1.5.0_Portable.zip",
-          sha256Hash: "5A3F8C09A5E1E45B69CBEDE30AC8B4A928DEACA4A142198DA19EC7BA9A034A34",
-          releaseNotes: "PRRX IDM v1.5.0: Native Multi-Channel Telegram Download Integration, 1MB Buffers, Process Priority, and Embedded EULA.",
+          downloadUrl: "https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.6.0/PRRX_Internet_Download_Manager_v1.6.0_Portable.zip",
+          sha256Hash: "5034EA38177CFF8AC5922B4E0EBFE601B5000C274F968E99371E373652B2FA32",
+          releaseNotes: "PRRX IDM v1.6.0: Automated Remote Telegram Bot Downloader (@PRRX_IDM_Bot), Zero-Latency Public Post Scraper, and Telegram Web Floating Media Interceptor.",
           isMandatory: false
         }), { status: 200, headers: corsHeaders });
       }

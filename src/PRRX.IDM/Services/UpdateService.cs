@@ -109,7 +109,7 @@ namespace PRRX.IDM.Services
                 }
                 catch { }
 
-                return new Version(1, 5, 0);
+                return new Version(1, 6, 0);
             }
         }
 

@@ -111,22 +111,30 @@ namespace PRRX.IDM.Tests
             var vm = new SettingsViewModel(config, theme, update, media);
 
             Assert.NotNull(vm.ChangelogHistory);
-            Assert.Equal(6, vm.ChangelogHistory.Count);
+            Assert.Equal(7, vm.ChangelogHistory.Count);
 
-            // 1. v1.5.0 Current Release
-            var v150 = vm.ChangelogHistory[0];
+            // 1. v1.6.0 Current Release
+            var v160 = vm.ChangelogHistory[0];
+            Assert.Equal("v1.6.0", v160.Version);
+            Assert.True(v160.IsCurrentRelease);
+            Assert.True(v160.IsExpanded);
+            Assert.Equal("Current Release", v160.StatusBadge);
+            Assert.Contains("Telegram", v160.Summary);
+            Assert.Contains(v160.Items, i => i.Category == "Features" && i.Description.Contains("Telegram Bot"));
+
+            // 2. v1.5.0
+            var v150 = vm.ChangelogHistory[1];
             Assert.Equal("v1.5.0", v150.Version);
-            Assert.True(v150.IsCurrentRelease);
-            Assert.True(v150.IsExpanded);
-            Assert.Equal("Current Release", v150.StatusBadge);
+            Assert.False(v150.IsCurrentRelease);
+            Assert.Equal("Previous Release", v150.StatusBadge);
             Assert.Contains("Cloud Install vs. Default Direct", v150.Summary);
             Assert.Contains(v150.Items, i => i.Category == "Features" && i.Description.Contains("Cloud Install vs. Default Direct"));
             Assert.Contains(v150.Items, i => i.Category == "Features" && i.Description.Contains("Circuit Breaker"));
             Assert.Contains(v150.Items, i => i.Category == "Performance" && i.Description.Contains("Highest Process & Network Priority"));
             Assert.Contains(v150.Items, i => i.Category == "Performance" && i.Description.Contains("1 MB High-Speed Fiber"));
 
-            // 2. v1.4.0
-            var v140 = vm.ChangelogHistory[1];
+            // 3. v1.4.0
+            var v140 = vm.ChangelogHistory[2];
             Assert.Equal("v1.4.0", v140.Version);
             Assert.False(v140.IsCurrentRelease);
             Assert.Equal("Previous Release", v140.StatusBadge);
@@ -136,34 +144,34 @@ namespace PRRX.IDM.Tests
             Assert.Contains(v140.Items, i => i.Category == "Features" && i.Description.Contains("Cloudflare D1"));
             Assert.Contains(v140.Items, i => i.Category == "Security" && i.Description.Contains("End-to-End Encryption"));
 
-            // 3. v1.3.0
-            var v130 = vm.ChangelogHistory[2];
+            // 4. v1.3.0
+            var v130 = vm.ChangelogHistory[3];
             Assert.Equal("v1.3.0", v130.Version);
             Assert.False(v130.IsCurrentRelease);
             Assert.Contains("In-App Seamless", v130.Summary);
 
-            // 4. v1.2.0
-            var v120 = vm.ChangelogHistory[3];
+            // 5. v1.2.0
+            var v120 = vm.ChangelogHistory[4];
             Assert.Equal("v1.2.0", v120.Version);
             Assert.False(v120.IsCurrentRelease);
 
-            // 5. v1.1.0
-            var v110 = vm.ChangelogHistory[4];
+            // 6. v1.1.0
+            var v110 = vm.ChangelogHistory[5];
             Assert.Equal("v1.1.0", v110.Version);
             Assert.False(v110.IsCurrentRelease);
 
-            // 6. v1.0.0
-            var v100 = vm.ChangelogHistory[5];
+            // 7. v1.0.0
+            var v100 = vm.ChangelogHistory[6];
             Assert.Equal("v1.0.0", v100.Version);
             Assert.False(v100.IsCurrentRelease);
         }
 
         [Fact]
-        public void UpdateService_CurrentVersion_ReflectsV1_5_0()
+        public void UpdateService_CurrentVersion_ReflectsV1_6_0()
         {
             var service = new UpdateService();
             Assert.NotNull(service.CurrentVersion);
-            Assert.Equal("1.5.0", service.CurrentVersionClean);
+            Assert.Equal("1.6.0", service.CurrentVersionClean);
         }
 
         [Theory]
@@ -284,17 +292,17 @@ namespace PRRX.IDM.Tests
 
             var fakeUpdate = new FakeUpdateService
             {
-                CurrentVersion = new Version(1, 5, 0)
+                CurrentVersion = new Version(1, 6, 0)
             };
 
             var vm = new SettingsViewModel(config, theme, fakeUpdate, media);
             Assert.NotNull(vm.ChangelogHistory);
-            Assert.True(vm.ChangelogHistory.Count >= 5);
-            Assert.Equal("v1.5.0", vm.ChangelogHistory[0].Version);
+            Assert.True(vm.ChangelogHistory.Count >= 6);
+            Assert.Equal("v1.6.0", vm.ChangelogHistory[0].Version);
             Assert.True(vm.ChangelogHistory[0].IsCurrentRelease);
             Assert.Equal("Current Release", vm.ChangelogHistory[0].StatusBadge);
 
-            // Previous release v1.4.0 is no longer current release
+            // Previous release v1.5.0 is no longer current release
             Assert.False(vm.ChangelogHistory[1].IsCurrentRelease);
         }
 
