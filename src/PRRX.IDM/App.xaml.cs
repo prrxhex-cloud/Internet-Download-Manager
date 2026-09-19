@@ -32,6 +32,7 @@ namespace PRRX.IDM
         private IUpdateService? _updateService;
         private IHistoryService? _historyService;
         private IBrowserIntegrationService? _browserService;
+        private ITelegramBotSyncService? _telegramBotSyncService;
 
         static App()
         {
@@ -85,6 +86,43 @@ namespace PRRX.IDM
                 _updateService = new UpdateService();
                 _historyService = new HistoryService();
                 _browserService = new BrowserIntegrationService(_configService);
+                _telegramBotSyncService = new TelegramBotSyncService(_configService);
+
+                _telegramBotSyncService.TaskReceived += (s, task) =>
+                {
+                    Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        try
+                        {
+                            var payload = new BrowserDownloadPayload
+                            {
+                                Action = "download",
+                                Url = task.Url,
+                                FileName = task.FileName,
+                                PageTitle = $"Telegram File ({task.Source})",
+                                TotalBytes = task.FileSize
+                            };
+                            _browserService?.HandleIncomingPayload(payload);
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.WriteLine($"[Telegram Bot Sync] Task processing error: {ex.Message}");
+                        }
+                    }), DispatcherPriority.Send);
+                };
+
+                _ = System.Threading.Tasks.Task.Run(async () =>
+                {
+                    try
+                    {
+                        await _telegramBotSyncService.InitializeAsync();
+                        if (_configService.CurrentConfig.IsTelegramBotSyncEnabled)
+                        {
+                            _telegramBotSyncService.Start();
+                        }
+                    }
+                    catch { }
+                });
 
                 // Auto-register Chrome and Edge Native Messaging in background to prevent startup I/O lag
                 _ = System.Threading.Tasks.Task.Run(() =>
@@ -559,6 +597,7 @@ namespace PRRX.IDM
 
         protected override void OnExit(ExitEventArgs e)
         {
+            _telegramBotSyncService?.Stop();
             _browserService?.StopIpcServer();
             base.OnExit(e);
         }

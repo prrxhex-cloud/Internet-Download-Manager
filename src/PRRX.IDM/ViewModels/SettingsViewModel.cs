@@ -314,6 +314,40 @@ namespace PRRX.IDM.ViewModels
             set => SetProperty(ref _serverTrafficBadgeColor, value);
         }
 
+        private string _telegramPairingCode = "PRRX-INIT";
+        private bool _isTelegramBotEnabled = true;
+
+        public bool IsTelegramBotEnabled
+        {
+            get => _isTelegramBotEnabled;
+            set
+            {
+                if (SetProperty(ref _isTelegramBotEnabled, value))
+                {
+                    _configService.CurrentConfig.IsTelegramBotSyncEnabled = value;
+                    _configService.SaveConfig();
+                    if (TelegramBotSyncService.Current != null)
+                    {
+                        TelegramBotSyncService.Current.IsEnabled = value;
+                        if (value) TelegramBotSyncService.Current.Start();
+                        else TelegramBotSyncService.Current.Stop();
+                    }
+                }
+            }
+        }
+
+        public string TelegramPairingCode
+        {
+            get => _telegramPairingCode;
+            set => SetProperty(ref _telegramPairingCode, value);
+        }
+
+        public string TelegramBotUsername => "PRRX_IDM_Bot";
+        public string TelegramBotUrl => $"https://t.me/{TelegramBotUsername}?start={TelegramPairingCode}";
+
+        public ICommand OpenTelegramBotCommand { get; }
+        public ICommand RefreshTelegramPairingCommand { get; }
+
         public string UpdateStatusMessage
         {
             get => _updateStatusMessage;
@@ -456,6 +490,51 @@ namespace PRRX.IDM.ViewModels
             CheckServerTrafficCommand = new RelayCommand(async () => await CheckServerTrafficAsync());
             ToggleCloudInstallCommand = new RelayCommand(() => IsCloudAccelerated = true);
             ToggleDefaultInstallCommand = new RelayCommand(() => IsDefaultDirect = true);
+
+            _isTelegramBotEnabled = _configService.CurrentConfig.IsTelegramBotSyncEnabled;
+            if (TelegramBotSyncService.Current != null)
+            {
+                _telegramPairingCode = TelegramBotSyncService.Current.PairingCode;
+                TelegramBotSyncService.Current.PairingCodeChanged += (s, code) =>
+                {
+                    App.Current?.Dispatcher?.BeginInvoke(new Action(() =>
+                    {
+                        TelegramPairingCode = code;
+                        OnPropertyChanged(nameof(TelegramBotUrl));
+                    }));
+                };
+            }
+            else
+            {
+                _telegramPairingCode = "PRRX-" + Guid.NewGuid().ToString("N").Substring(0, 4).ToUpperInvariant();
+            }
+
+            OpenTelegramBotCommand = new RelayCommand(() =>
+            {
+                try
+                {
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = TelegramBotUrl,
+                        UseShellExecute = true
+                    });
+                }
+                catch { }
+            });
+
+            RefreshTelegramPairingCommand = new AsyncRelayCommand(async () =>
+            {
+                if (TelegramBotSyncService.Current != null)
+                {
+                    await TelegramBotSyncService.Current.InitializeAsync();
+                    TelegramPairingCode = TelegramBotSyncService.Current.PairingCode;
+                }
+                else
+                {
+                    TelegramPairingCode = "PRRX-" + Guid.NewGuid().ToString("N").Substring(0, 4).ToUpperInvariant();
+                }
+                OnPropertyChanged(nameof(TelegramBotUrl));
+            });
 
             // Initial server traffic check
             _ = System.Threading.Tasks.Task.Run(async () =>
