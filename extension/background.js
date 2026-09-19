@@ -6,7 +6,7 @@
  * Confidential and Proprietary - Licensed under PRRX Open Source Initiative
  * ============================================================================
  */
-// PRRX IDM Integration Module v1.4.0 - High-Reliability Dual-Channel Background Worker
+// PRRX IDM Integration Module v1.5.0 - High-Reliability Dual-Channel Background Worker
 const HOST_NAME = "com.prrx.idm";
 const HTTP_BRIDGE_URL = "http://127.0.0.1:46543/api/download";
 const HTTP_PING_URL = "http://127.0.0.1:46543/api/ping";

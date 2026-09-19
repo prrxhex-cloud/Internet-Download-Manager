@@ -47,7 +47,7 @@ document.addEventListener("DOMContentLoaded", () => {
       clearTimeout(timeoutId);
       if (res.ok) {
         const data = await res.json();
-        return { status: "online", version: data.version || "1.4.0" };
+        return { status: "online", version: data.version || "1.5.0" };
       }
     } catch (e) {
       // Direct fetch failed, try background service worker fallback
@@ -149,7 +149,7 @@ document.addEventListener("DOMContentLoaded", () => {
   queryDesktopStatus().then((res) => {
     if (res.status === "online") {
       dotDesktop.className = "status-dot online";
-      txtDesktopStatus.textContent = `Online (v${res.version || "1.4.0"})`;
+      txtDesktopStatus.textContent = `Online (v${res.version || "1.5.0"})`;
       syncWithDesktop();
     } else {
       dotDesktop.className = "status-dot offline";
