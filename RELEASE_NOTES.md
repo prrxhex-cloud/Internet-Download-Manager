@@ -1,10 +1,36 @@
-# 🚀 PRRX Internet Download Manager — Release Notes v1.4.0
+# 🚀 PRRX Internet Download Manager — Release Notes v1.5.0
 
-**Release Tag**: `v1.4.0`  
+**Release Tag**: `v1.5.0`  
 **Target Branch**: `main`  
-**Date**: September 14, 2026  
+**Date**: September 19, 2026  
 **Target Platform**: Windows 10 / Windows 11 (x64)  
 **Publisher**: PRRX Cooperation  
+
+---
+
+## 🌟 What's New in Version 1.5.0
+
+### ☁️ 1. Cloud Install vs. Default Direct Download Mode
+- **Cloud Install (Accelerated Routing)**: Fast media and multi-part downloads routed through PRRX Cloudflare Edge servers and CDN nodes with zero traffic congestion or ISP speed throttling.
+- **Default Install (Direct Connection)**: Standard direct socket connection to origin servers.
+- **In-App Toggle & Traffic Badge**: Easy toggle in Settings tab with live server condition badge (`⚡ Cloud Server: Normal (Fast)`).
+
+### ⚡ 2. Automatic Server Congestion Circuit Breaker
+- **Real-Time Latency & Health Evaluation**: Continuously measures server round-trip latency and edge status.
+- **Zero-Friction Auto-Failover**: If the cloud edge encounters congestion (>2500ms latency), server errors, or instability, downloads automatically fall over to Default Direct mode without throwing download errors.
+- **Instant Restore**: Once edge traffic normalizes, users can seamlessly switch back to Cloud Install.
+
+### 🎯 3. Highest Process & Network Scheduling Priority by Default
+- **High Priority Allocation**: Automatically elevates PRRX IDM process and network I/O threads to `ProcessPriorityClass.High` on startup, preventing network buffer starvation and packet loss.
+- **Graceful Fallback**: Silently falls back to `AboveNormal` if running in restricted environments without elevation.
+- **In-App Settings Selector**: Users can customize process priority anytime (`High`, `Above Normal`, `Normal`).
+
+### 📜 4. Official EULA & Agreement in Setup Installers
+- **Embedded EULA**: Official 2026 PRRX Cooperation End User License Agreement & Terms of Service (`LICENSE.txt`) integrated directly into the Inno Setup offline wizard and web installer.
+
+### 🚀 5. 1 MB High-Speed Fiber Chunk Buffering
+- **Expanded Buffers**: Chunk buffer size increased to **1048576 bytes (1 MB)** paired with **8 MB HTTP/2 initial stream windows** and up to 64 parallel sockets for gigabit bandwidth saturation.
+- **Turbo Media Extraction**: Video, audio, and thumbnail extractors employ 16–32 parallel fragment pipelines in Cloud mode.
 
 ---
 

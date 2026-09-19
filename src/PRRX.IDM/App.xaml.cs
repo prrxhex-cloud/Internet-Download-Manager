@@ -78,6 +78,7 @@ namespace PRRX.IDM
             try
             {
                 _configService = new ConfigurationService();
+                ApplyProcessPriority(_configService.CurrentConfig.ProcessPriority);
                 _themeService = new ThemeService(_configService);
                 _mediaEngine = new MediaDownloaderService(_configService);
                 _thumbnailService = new ThumbnailService();
@@ -513,6 +514,46 @@ namespace PRRX.IDM
             catch
             {
                 return false;
+            }
+        }
+
+        /// <summary>
+        /// Automatically configures Windows process and network thread scheduling priority.
+        /// Defaults to High for optimal multi-socket throughput, falling back gracefully if restricted.
+        /// </summary>
+        public static void ApplyProcessPriority(ProcessPrioritySetting setting)
+        {
+            try
+            {
+                var process = Process.GetCurrentProcess();
+                var targetClass = setting switch
+                {
+                    ProcessPrioritySetting.High => ProcessPriorityClass.High,
+                    ProcessPrioritySetting.AboveNormal => ProcessPriorityClass.AboveNormal,
+                    ProcessPrioritySetting.Normal => ProcessPriorityClass.Normal,
+                    _ => ProcessPriorityClass.High
+                };
+
+                try
+                {
+                    process.PriorityClass = targetClass;
+                }
+                catch (System.ComponentModel.Win32Exception)
+                {
+                    // If running in a restricted or non-elevated user token, fallback gracefully to AboveNormal
+                    if (targetClass == ProcessPriorityClass.High)
+                    {
+                        try
+                        {
+                            process.PriorityClass = ProcessPriorityClass.AboveNormal;
+                        }
+                        catch { }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[App] Priority allocation warning: {ex.Message}");
             }
         }
 

@@ -15,7 +15,7 @@ namespace PRRX.IDM.Services
     public class MultiSegmentDownloader : SegmentedDownloadEngine
     {
         public const int MaxSupportedConcurrency = 64;
-        public const int DefaultBufferSize = 524288; // 512 KB
+        public const int DefaultBufferSize = 1048576; // 1 MB Turbo High-Speed Buffer
 
         /// <summary>
         /// Calculates adaptive multi-socket concurrency based on byte size, ensuring

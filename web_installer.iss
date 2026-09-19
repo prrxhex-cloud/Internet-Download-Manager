@@ -8,14 +8,14 @@
 ; Uses Inno Setup 6 Native Download Engine & PowerShell Automatic Extraction
 
 #define MyAppName "PRRX Internet Download Manager"
-#define MyAppVersion "1.4.0"
+#define MyAppVersion "1.5.0"
 #define MyAppPublisher "PRRX Cooperation"
 #define MyAppURL "https://github.com/prrxhex-cloud/Internet-Download-Manager"
 #define MyAppExeName "PRRX.InternetDownloadManager.exe"
 #define MyAppExtId "mjcomdjfgmiphnekplhmgdepbhafbjal"
 #define LegacyExtId "jpnkdblibibkbnllncikdeijkbdnmpem"
 #define SecondaryExtId "mjcomdjfgmiphnekplhmgdepbhafbjal"
-#define PackageUrl "https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.4.0/PRRX_Internet_Download_Manager_v1.4.0_Portable.zip"
+#define PackageUrl "https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.5.0/PRRX_Internet_Download_Manager_v1.5.0_Portable.zip"
 
 [Setup]
 AppId={{D8146F25-8A11-47A1-8E2E-73E9623D7091}
@@ -40,6 +40,7 @@ OutputDir=D:\Internet Download Manager\dist
 OutputBaseFilename=PRRX_IDM_Setup_Online
 SetupIconFile=D:\Internet Download Manager\src\PRRX.IDM\Assets\app_icon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
+LicenseFile=D:\Internet Download Manager\LICENSE.txt
 
 WizardStyle=modern
 Compression=lzma2/ultra64

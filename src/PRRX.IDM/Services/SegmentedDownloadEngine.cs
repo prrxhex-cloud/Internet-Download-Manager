@@ -57,13 +57,15 @@ namespace PRRX.IDM.Services
 
     public class SegmentedDownloadEngine : ISegmentedDownloadEngine
     {
+        public const int HighSpeedBufferSize = 1048576; // 1 MB Turbo High-Speed Buffer
+
         private static readonly HttpClient HttpClient = new(new SocketsHttpHandler
         {
             PooledConnectionLifetime = TimeSpan.FromMinutes(15),
             PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2),
             MaxConnectionsPerServer = 128,
             EnableMultipleHttp2Connections = true,
-            InitialHttp2StreamWindowSize = 4 * 1024 * 1024,
+            InitialHttp2StreamWindowSize = 8 * 1024 * 1024,
             AutomaticDecompression = System.Net.DecompressionMethods.None,
             KeepAlivePingPolicy = HttpKeepAlivePingPolicy.Always,
             KeepAlivePingDelay = TimeSpan.FromSeconds(30),
@@ -288,7 +290,7 @@ namespace PRRX.IDM.Services
 
                 // All segments completed - Assemble parts into final target file with fast Win32 pre-allocation
                 ReportProgress("Assembling segments into final file...");
-                using (var outputStream = new FileStream(destinationFilePath, FileMode.Create, FileAccess.Write, FileShare.None, 524288, FileOptions.Asynchronous | FileOptions.SequentialScan))
+                using (var outputStream = new FileStream(destinationFilePath, FileMode.Create, FileAccess.Write, FileShare.None, HighSpeedBufferSize, FileOptions.Asynchronous | FileOptions.SequentialScan))
                 {
                     if (_totalBytes > 0)
                     {
@@ -296,7 +298,7 @@ namespace PRRX.IDM.Services
                         NativeFileHelper.FastPreallocate(outputStream, _totalBytes);
                     }
 
-                    var copyBuffer = System.Buffers.ArrayPool<byte>.Shared.Rent(524288); // 512 KB high-throughput pooled buffer
+                    var copyBuffer = System.Buffers.ArrayPool<byte>.Shared.Rent(HighSpeedBufferSize); // 1 MB high-throughput pooled buffer
                     try
                     {
                         for (int i = 0; i < threadCount; i++)
@@ -304,10 +306,10 @@ namespace PRRX.IDM.Services
                             var partPath = Path.Combine(tempDir, $"part_{i}.tmp");
                             if (File.Exists(partPath))
                             {
-                                using (var partStream = new FileStream(partPath, FileMode.Open, FileAccess.Read, FileShare.Read, 524288, FileOptions.Asynchronous | FileOptions.SequentialScan))
+                                using (var partStream = new FileStream(partPath, FileMode.Open, FileAccess.Read, FileShare.Read, HighSpeedBufferSize, FileOptions.Asynchronous | FileOptions.SequentialScan))
                                 {
                                     int read;
-                                    while ((read = await partStream.ReadAsync(copyBuffer.AsMemory(0, 524288), _cts.Token)) > 0)
+                                    while ((read = await partStream.ReadAsync(copyBuffer.AsMemory(0, HighSpeedBufferSize), _cts.Token)) > 0)
                                     {
                                         await outputStream.WriteAsync(copyBuffer.AsMemory(0, read), _cts.Token);
                                     }
@@ -400,14 +402,14 @@ namespace PRRX.IDM.Services
 
                 thread.StatusInfo = "Receiving data...";
                 using var contentStream = await response.Content.ReadAsStreamAsync(token);
-                using var fileStream = new FileStream(tempPartPath, FileMode.Create, FileAccess.Write, FileShare.None, 524288, FileOptions.Asynchronous | FileOptions.SequentialScan);
+                using var fileStream = new FileStream(tempPartPath, FileMode.Create, FileAccess.Write, FileShare.None, HighSpeedBufferSize, FileOptions.Asynchronous | FileOptions.SequentialScan);
 
-                var buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(524288);
+                var buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(HighSpeedBufferSize);
                 try
                 {
                     int bytesRead;
 
-                    while ((bytesRead = await contentStream.ReadAsync(buffer.AsMemory(0, 524288), token)) > 0)
+                    while ((bytesRead = await contentStream.ReadAsync(buffer.AsMemory(0, HighSpeedBufferSize), token)) > 0)
                     {
                         _pauseEvent.Wait(token);
 

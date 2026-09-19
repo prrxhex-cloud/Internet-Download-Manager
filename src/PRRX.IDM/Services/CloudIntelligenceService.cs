@@ -28,6 +28,9 @@ namespace PRRX.IDM.Services
     public interface ICloudIntelligenceService
     {
         string BaseUrl { get; }
+        ServerTrafficReport CurrentTrafficReport { get; }
+        event EventHandler<ServerTrafficReport>? ServerTrafficChanged;
+        Task<ServerTrafficReport> EvaluateServerTrafficAsync(CancellationToken cancellationToken = default);
         Task<CloudHealthResult?> CheckHealthAsync(CancellationToken cancellationToken = default);
         Task<FileReputationResult> GetFileReputationAsync(string sha256Hash, CancellationToken cancellationToken = default);
         Task<bool> ReportReputationAsync(string sha256Hash, string fileName, long fileSizeBytes, string vote = "safe", CancellationToken cancellationToken = default);
@@ -59,6 +62,8 @@ namespace PRRX.IDM.Services
         private readonly string _baseUrl;
 
         public string BaseUrl => _baseUrl;
+        public ServerTrafficReport CurrentTrafficReport { get; private set; } = new();
+        public event EventHandler<ServerTrafficReport>? ServerTrafficChanged;
 
         public CloudIntelligenceService(string? baseUrl = null, HttpClient? httpClient = null)
         {
@@ -83,11 +88,89 @@ namespace PRRX.IDM.Services
             };
 
             client.DefaultRequestHeaders.UserAgent.Clear();
-            client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("PRRX-IDM", "1.4.0"));
+            client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("PRRX-IDM", "1.5.0"));
             client.DefaultRequestHeaders.Accept.Clear();
             client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
             return client;
+        }
+
+        public async Task<ServerTrafficReport> EvaluateServerTrafficAsync(CancellationToken cancellationToken = default)
+        {
+            var sw = Stopwatch.StartNew();
+            using var timeoutCts = CreateLinkedTimeout(cancellationToken);
+            ServerTrafficReport report;
+
+            try
+            {
+                var uri = $"{_baseUrl}/api/health";
+                using var response = await _httpClient.GetAsync(uri, timeoutCts.Token).ConfigureAwait(false);
+                sw.Stop();
+                var latency = sw.ElapsedMilliseconds;
+
+                if (response.IsSuccessStatusCode)
+                {
+                    var stream = await response.Content.ReadAsStreamAsync(timeoutCts.Token).ConfigureAwait(false);
+                    var health = await JsonSerializer.DeserializeAsync<CloudHealthResult>(stream, JsonOptions, timeoutCts.Token).ConfigureAwait(false);
+
+                    if (health != null && health.IsOnline)
+                    {
+                        if (latency > 2500)
+                        {
+                            report = new ServerTrafficReport
+                            {
+                                Status = ServerTrafficStatus.Congested,
+                                LatencyMs = latency,
+                                EdgeNode = health.EdgeNode,
+                                StatusMessage = $"High server latency ({latency}ms) detected. Cloud auto-failover to Default Install active."
+                            };
+                        }
+                        else
+                        {
+                            report = new ServerTrafficReport
+                            {
+                                Status = ServerTrafficStatus.Normal,
+                                LatencyMs = latency,
+                                EdgeNode = health.EdgeNode,
+                                StatusMessage = $"Server healthy and operating under normal traffic ({latency}ms). Cloud acceleration available."
+                            };
+                        }
+                    }
+                    else
+                    {
+                        report = new ServerTrafficReport
+                        {
+                            Status = ServerTrafficStatus.Unstable,
+                            LatencyMs = latency,
+                            StatusMessage = "Server returned degraded status. Auto-switched to Default Install."
+                        };
+                    }
+                }
+                else
+                {
+                    sw.Stop();
+                    report = new ServerTrafficReport
+                    {
+                        Status = ServerTrafficStatus.Unstable,
+                        LatencyMs = sw.ElapsedMilliseconds,
+                        StatusMessage = $"Server returned HTTP {(int)response.StatusCode}. Auto-switched to Default Install."
+                    };
+                }
+            }
+            catch (Exception ex)
+            {
+                sw.Stop();
+                report = new ServerTrafficReport
+                {
+                    Status = ServerTrafficStatus.Offline,
+                    LatencyMs = sw.ElapsedMilliseconds,
+                    StatusMessage = $"Cloud server unreachable ({ex.Message}). Direct download active."
+                };
+            }
+
+            CurrentTrafficReport = report;
+            ServerTrafficChanged?.Invoke(this, report);
+            return report;
         }
 
         public async Task<CloudHealthResult?> CheckHealthAsync(CancellationToken cancellationToken = default)

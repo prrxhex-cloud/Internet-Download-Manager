@@ -486,6 +486,76 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
                 </StackPanel>
             </Border>
 
+            <!-- Cloud Install vs Default Direct Download Acceleration Mode Card -->
+            <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" 
+                    CornerRadius="12" Padding="20" Margin="0,0,0,18"
+                    BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+                <StackPanel>
+                    <Grid Margin="0,0,0,10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <ui:SymbolIcon Symbol="CloudFlow24" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" Margin="0,0,8,0"/>
+                                <TextBlock Text="Download Mode: Cloud Install vs. Default Direct" FontSize="16" FontWeight="SemiBold"/>
+                            </StackPanel>
+                            <TextBlock Text="Accelerate video, audio, thumbnails, and multi-stream downloads through PRRX Cloudflare Edge servers with automated congestion protection." 
+                                       Opacity="0.7" FontSize="12" Margin="0,3,0,0"/>
+                        </StackPanel>
+
+                        <Border Grid.Column="1" Background="#20107C41" BorderBrush="#40107C41" BorderThickness="1"
+                                CornerRadius="8" Padding="10,4" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding ServerTrafficStatusBadge}" FontWeight="Bold" FontSize="11" Foreground="{Binding ServerTrafficBadgeColor}"/>
+                        </Border>
+                    </Grid>
+
+                    <!-- Real-Time Server Health & Circuit Breaker Status Banner -->
+                    <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="14,10" Margin="0,0,0,14">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+
+                            <ui:SymbolIcon Symbol="Pulse24" Margin="0,0,10,0" VerticalAlignment="Center" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"/>
+                            <TextBlock Grid.Column="1" Text="{Binding ServerTrafficStatusBadge}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" FontWeight="Medium"/>
+                            <ui:Button Grid.Column="2" Content="Check Server Status" Icon="{ui:SymbolIcon Symbol=ArrowSync24}"
+                                       Appearance="Secondary" Command="{Binding CheckServerTrafficCommand}" Padding="12,4" Height="32"/>
+                        </Grid>
+                    </Border>
+
+                    <!-- Mode Options -->
+                    <StackPanel Margin="0,0,0,14">
+                        <RadioButton Content="Cloud Install (Accelerated - PRRX Edge Server Routing)" 
+                                     IsChecked="{Binding IsCloudAccelerated, Mode=TwoWay}" 
+                                     FontWeight="SemiBold" FontSize="13" Margin="0,0,0,4"/>
+                        <TextBlock Text="Fastest download speeds for videos, audios, thumbnails, and files via PRRX Cloudflare edge servers without traffic jams or ISP throttling." 
+                                   Opacity="0.65" FontSize="11" Margin="22,0,0,12"/>
+
+                        <RadioButton Content="Default Install (Direct Origin Connection)" 
+                                     IsChecked="{Binding IsDefaultDirect, Mode=TwoWay}" 
+                                     FontWeight="SemiBold" FontSize="13" Margin="0,0,0,4"/>
+                        <TextBlock Text="Direct standard download connection straight to destination content hosts without server routing." 
+                                   Opacity="0.65" FontSize="11" Margin="22,0,0,0"/>
+                    </StackPanel>
+
+                    <!-- Automatic Failover Checkbox -->
+                    <Border Background="{DynamicResource SubtleFillColorTertiaryBrush}" CornerRadius="8" Padding="14,10">
+                        <StackPanel>
+                            <CheckBox Content="Automatic Circuit-Breaker: Failover to Default Install on high server traffic or instability" 
+                                      IsChecked="{Binding AutoFailoverToDefaultOnTraffic, Mode=TwoWay}" 
+                                      FontWeight="Medium" Margin="0,0,0,4"/>
+                            <TextBlock Text="When enabled, if PRRX Cloud servers experience heavy congestion (>2500ms latency) or downtime, downloads automatically switch to Default Direct mode without failing. When server conditions normalize, users can instantly toggle Cloud Install back." 
+                                       FontSize="11" Opacity="0.6" Margin="22,0,0,0"/>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </Border>
+
             <!-- Turbo Multi-Connection Chunk Acceleration Card -->
             <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" 
                     CornerRadius="12" Padding="20" Margin="0,0,0,18"
@@ -541,9 +611,28 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
                     CornerRadius="12" Padding="20" Margin="0,0,0,18"
                     BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1">
                 <StackPanel>
-                    <TextBlock Text="System Integration &amp; Startup" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                    <TextBlock Text="Preload configuration on PC startup and run silently in background so downloads start instantly without opening the application window." 
+                    <TextBlock Text="System Integration &amp; Priority" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                    <TextBlock Text="Configure Windows process scheduling priority and silent background startup." 
                                Opacity="0.7" FontSize="12" Margin="0,0,0,14"/>
+
+                    <!-- Process & Network Priority Dropdown -->
+                    <Grid Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Margin="0,0,16,0" VerticalAlignment="Center">
+                            <TextBlock Text="Process &amp; Network Priority:" FontWeight="SemiBold"/>
+                            <TextBlock Text="Windows I/O thread priority allocation" FontSize="11" Opacity="0.6"/>
+                        </StackPanel>
+
+                        <ComboBox Grid.Column="1" ItemsSource="{Binding AvailablePriorities}" 
+                                  SelectedItem="{Binding SelectedPriority, Mode=TwoWay}" 
+                                  Height="38"/>
+                    </Grid>
+                    <TextBlock Text="* Default is 'High' to prioritize network packets and prevent multi-connection download stalls during heavy gaming or browser multitasking." 
+                               FontSize="11" Opacity="0.65" Margin="0,0,0,16"/>
 
                     <CheckBox Content="Start PRRX IDM silently on Windows startup (Background Preload)" 
                               IsChecked="{Binding LaunchOnStartup, Mode=TwoWay}" 

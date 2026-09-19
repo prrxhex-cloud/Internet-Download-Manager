@@ -27,6 +27,28 @@ namespace PRRX.IDM.ViewModels
         private readonly IUpdateService _updateService;
         private readonly IMediaEngineService _mediaEngine;
         private readonly ISecurityService _securityService;
+        private readonly ICloudIntelligenceService _cloudService;
+
+        public class PriorityItem
+        {
+            public ProcessPrioritySetting Setting { get; set; }
+            public string DisplayName { get; set; } = string.Empty;
+            public override string ToString() => DisplayName;
+        }
+
+        public ObservableCollection<PriorityItem> AvailablePriorities { get; } = new()
+        {
+            new PriorityItem { Setting = ProcessPrioritySetting.High, DisplayName = "High (Default - Maximum Performance)" },
+            new PriorityItem { Setting = ProcessPrioritySetting.AboveNormal, DisplayName = "Above Normal (Balanced Performance)" },
+            new PriorityItem { Setting = ProcessPrioritySetting.Normal, DisplayName = "Normal (Standard Scheduling)" }
+        };
+
+        private PriorityItem _selectedPriority;
+        private bool _isCloudAccelerated = true;
+        private bool _isDefaultDirect = false;
+        private bool _autoFailoverToDefaultOnTraffic = true;
+        private string _serverTrafficStatusBadge = "⚡ Cloud Server: Normal (Checking...)";
+        private string _serverTrafficBadgeColor = "#107C41";
 
         private AppThemeMode _selectedTheme;
         private double _transparencyFactor;
@@ -215,7 +237,82 @@ namespace PRRX.IDM.ViewModels
             set => SetProperty(ref _appVersion, value);
         }
 
-        public string CurrentVersionClean => _updateService?.CurrentVersionClean ?? "1.4.0";
+        public string CurrentVersionClean => _updateService?.CurrentVersionClean ?? "1.5.0";
+
+        public PriorityItem SelectedPriority
+        {
+            get => _selectedPriority;
+            set
+            {
+                if (SetProperty(ref _selectedPriority, value) && value != null)
+                {
+                    _configService.CurrentConfig.ProcessPriority = value.Setting;
+                    _configService.SaveConfig();
+                    App.ApplyProcessPriority(value.Setting);
+                }
+            }
+        }
+
+        public bool IsCloudAccelerated
+        {
+            get => _isCloudAccelerated;
+            set
+            {
+                if (SetProperty(ref _isCloudAccelerated, value))
+                {
+                    if (value)
+                    {
+                        _isDefaultDirect = false;
+                        OnPropertyChanged(nameof(IsDefaultDirect));
+                        _configService.CurrentConfig.AccelerationMode = DownloadAccelerationMode.CloudAccelerated;
+                        _configService.SaveConfig();
+                    }
+                }
+            }
+        }
+
+        public bool IsDefaultDirect
+        {
+            get => _isDefaultDirect;
+            set
+            {
+                if (SetProperty(ref _isDefaultDirect, value))
+                {
+                    if (value)
+                    {
+                        _isCloudAccelerated = false;
+                        OnPropertyChanged(nameof(IsCloudAccelerated));
+                        _configService.CurrentConfig.AccelerationMode = DownloadAccelerationMode.DefaultDirect;
+                        _configService.SaveConfig();
+                    }
+                }
+            }
+        }
+
+        public bool AutoFailoverToDefaultOnTraffic
+        {
+            get => _autoFailoverToDefaultOnTraffic;
+            set
+            {
+                if (SetProperty(ref _autoFailoverToDefaultOnTraffic, value))
+                {
+                    _configService.CurrentConfig.AutoFailoverToDefaultOnTraffic = value;
+                    _configService.SaveConfig();
+                }
+            }
+        }
+
+        public string ServerTrafficStatusBadge
+        {
+            get => _serverTrafficStatusBadge;
+            set => SetProperty(ref _serverTrafficStatusBadge, value);
+        }
+
+        public string ServerTrafficBadgeColor
+        {
+            get => _serverTrafficBadgeColor;
+            set => SetProperty(ref _serverTrafficBadgeColor, value);
+        }
 
         public string UpdateStatusMessage
         {
@@ -320,19 +417,24 @@ namespace PRRX.IDM.ViewModels
         public ICommand InstallBrowserExtensionCommand { get; }
         public ICommand OpenExtensionFolderCommand { get; }
         public ICommand CleanupCacheCommand { get; }
+        public ICommand CheckServerTrafficCommand { get; }
+        public ICommand ToggleCloudInstallCommand { get; }
+        public ICommand ToggleDefaultInstallCommand { get; }
 
         public SettingsViewModel(
             IConfigurationService configService,
             IThemeService themeService,
             IUpdateService updateService,
             IMediaEngineService mediaEngine,
-            ISecurityService? securityService = null)
+            ISecurityService? securityService = null,
+            ICloudIntelligenceService? cloudService = null)
         {
             _configService = configService;
             _themeService = themeService;
             _updateService = updateService;
             _mediaEngine = mediaEngine;
             _securityService = securityService ?? new SecurityService();
+            _cloudService = cloudService ?? new CloudIntelligenceService();
 
             _selectedTheme = _configService.CurrentConfig.ThemeMode;
             _transparencyFactor = _configService.CurrentConfig.TransparencyFactor;
@@ -343,6 +445,24 @@ namespace PRRX.IDM.ViewModels
             _launchOnStartup = _configService.CurrentConfig.LaunchOnStartup;
             _isWin11 = _themeService.IsWindows11;
             _appVersion = $"v{CurrentVersionClean} (Official Release)";
+
+            _isCloudAccelerated = _configService.CurrentConfig.AccelerationMode == DownloadAccelerationMode.CloudAccelerated;
+            _isDefaultDirect = _configService.CurrentConfig.AccelerationMode == DownloadAccelerationMode.DefaultDirect;
+            _autoFailoverToDefaultOnTraffic = _configService.CurrentConfig.AutoFailoverToDefaultOnTraffic;
+
+            var targetPriority = _configService.CurrentConfig.ProcessPriority;
+            _selectedPriority = AvailablePriorities.FirstOrDefault(p => p.Setting == targetPriority) ?? AvailablePriorities[0];
+
+            CheckServerTrafficCommand = new RelayCommand(async () => await CheckServerTrafficAsync());
+            ToggleCloudInstallCommand = new RelayCommand(() => IsCloudAccelerated = true);
+            ToggleDefaultInstallCommand = new RelayCommand(() => IsDefaultDirect = true);
+
+            // Initial server traffic check
+            _ = System.Threading.Tasks.Task.Run(async () =>
+            {
+                await System.Threading.Tasks.Task.Delay(500);
+                await CheckServerTrafficAsync();
+            });
 
             UpdateCookiesStatus();
             InitializeChangelog();
@@ -526,19 +646,63 @@ namespace PRRX.IDM.ViewModels
             }, () => !IsCleaningCache);
         }
 
+        private async Task CheckServerTrafficAsync()
+        {
+            try
+            {
+                ServerTrafficStatusBadge = "⚡ Cloud Server: Testing latency & traffic...";
+                var report = await _cloudService.EvaluateServerTrafficAsync();
+                ServerTrafficStatusBadge = report.BadgeText;
+                ServerTrafficBadgeColor = report.BadgeColor;
+
+                if (report.ShouldFailoverToDefault && AutoFailoverToDefaultOnTraffic)
+                {
+                    if (IsCloudAccelerated)
+                    {
+                        IsDefaultDirect = true;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                ServerTrafficStatusBadge = $"🔴 Cloud Server: Offline ({ex.Message})";
+                ServerTrafficBadgeColor = "#A80000";
+            }
+        }
+
         private void InitializeChangelog()
         {
             ChangelogHistory.Clear();
 
-            // v1.4.0 (Current Release)
+            // v1.5.0 (Current Release)
+            var rel150 = new ChangelogRelease
+            {
+                Version = "v1.5.0",
+                ReleaseDate = "September 2026",
+                IsCurrentRelease = true,
+                StatusBadge = "Current Release",
+                Summary = "Cloud Install vs. Default Direct Download Mode toggle with automatic server congestion circuit-breaker failover, highest process & network priority by default with settings configurator, official EULA & Agreement embedded into Inno Setup wizards, 1MB high-speed fiber chunk buffers, and full platform stability.",
+                IsExpanded = true,
+                Items = new System.Collections.Generic.List<ChangelogItem>
+                {
+                    new() { Category = "Features", Description = "Cloud Install vs. Default Direct Toggle: Toggle between ultra-fast Cloud Acceleration (routed via PRRX Cloudflare Edge server & CDN with zero traffic congestion) and Default Direct mode.", CategoryBadgeColor = "#0078D4", CategoryBgColor = "#200078D4" },
+                    new() { Category = "Features", Description = "Automatic Server Congestion Circuit Breaker: Real-time latency and health monitoring detects server traffic and instability, seamlessly failing over to Default Direct mode and enabling one-click restore when traffic clears.", CategoryBadgeColor = "#0078D4", CategoryBgColor = "#200078D4" },
+                    new() { Category = "Features", Description = "Inno Setup License & Agreement Integration: Official 2026 EULA and Terms of Service embedded directly into both offline and online setup installer wizards.", CategoryBadgeColor = "#0078D4", CategoryBgColor = "#200078D4" },
+                    new() { Category = "Performance", Description = "Highest Process & Network Priority by Default: PRRX IDM automatically requests Windows High priority scheduling on startup, preventing packet drops and socket starvation during heavy multitasking.", CategoryBadgeColor = "#8764B8", CategoryBgColor = "#208764B8" },
+                    new() { Category = "Performance", Description = "1 MB High-Speed Fiber Buffering: Expanded segmented stream chunk buffers to 1048576 bytes with 8MB HTTP/2 window sizes, maximizing gigabit throughput and reducing CPU interrupts.", CategoryBadgeColor = "#8764B8", CategoryBgColor = "#208764B8" },
+                    new() { Category = "Performance", Description = "Enhanced Cloud Media Streaming: Video, audio, and thumbnail extractors leverage 16–32 parallel fragment pipelines in Cloud mode for ultra-fast downloads.", CategoryBadgeColor = "#8764B8", CategoryBgColor = "#208764B8" }
+                }
+            };
+
+            // v1.4.0
             var rel140 = new ChangelogRelease
             {
                 Version = "v1.4.0",
                 ReleaseDate = "September 2026",
-                IsCurrentRelease = true,
-                StatusBadge = "Current Release",
+                IsCurrentRelease = false,
+                StatusBadge = "Previous Release",
                 Summary = "High-speed multi-socket download engine with adaptive 64 parallel threads and Win32 direct cluster pre-allocation, tokenless YouTube media extraction bypassing bot detection without cookies, complete browser extension connectivity with live Cloudflare Edge & D1 database, upgraded SHA-256 update pipeline, and end-to-end data security vault.",
-                IsExpanded = true,
+                IsExpanded = false,
                 Items = new System.Collections.Generic.List<ChangelogItem>
                 {
                     new() { Category = "Performance", Description = "Adaptive Multi-Socket Concurrency: Upgraded download engine to support up to 64 parallel stream sockets for gigabit fiber connections.", CategoryBadgeColor = "#8764B8", CategoryBgColor = "#208764B8" },
@@ -629,6 +793,7 @@ namespace PRRX.IDM.ViewModels
                 }
             };
 
+            ChangelogHistory.Add(rel150);
             ChangelogHistory.Add(rel140);
             ChangelogHistory.Add(rel130);
             ChangelogHistory.Add(rel120);
@@ -657,7 +822,7 @@ namespace PRRX.IDM.ViewModels
                 }
             }
 
-            if (!currentFound && UpdateService.IsVersionNewer(CurrentVersionClean, "1.4.0"))
+            if (!currentFound && UpdateService.IsVersionNewer(CurrentVersionClean, "1.5.0"))
             {
                 ChangelogHistory.Insert(0, new ChangelogRelease
                 {

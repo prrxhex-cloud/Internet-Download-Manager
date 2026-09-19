@@ -17,6 +17,43 @@ namespace PRRX.IDM.Models
         Dark = 2
     }
 
+    /// <summary>
+    /// Download acceleration infrastructure mode
+    /// </summary>
+    public enum DownloadAccelerationMode
+    {
+        /// <summary>
+        /// Cloud Install: Faster media & file downloads routed via PRRX Cloudflare edge servers without traffic jams
+        /// </summary>
+        CloudAccelerated = 0,
+
+        /// <summary>
+        /// Default Install: Direct native connections to content origin servers
+        /// </summary>
+        DefaultDirect = 1
+    }
+
+    /// <summary>
+    /// Process and network I/O scheduling priority
+    /// </summary>
+    public enum ProcessPrioritySetting
+    {
+        /// <summary>
+        /// High priority (Default): Allocates maximum CPU and socket I/O slices to prevent download stalling
+        /// </summary>
+        High = 0,
+
+        /// <summary>
+        /// Above normal priority: Balanced performance
+        /// </summary>
+        AboveNormal = 1,
+
+        /// <summary>
+        /// Normal priority: Standard Windows scheduling
+        /// </summary>
+        Normal = 2
+    }
+
     public class AppConfig
     {
         public bool IsOnboardingCompleted { get; set; } = false;
@@ -56,6 +93,21 @@ namespace PRRX.IDM.Models
         /// Launch on Windows PC startup silently in background / system tray
         /// </summary>
         public bool LaunchOnStartup { get; set; } = false;
+
+        /// <summary>
+        /// Download mode: Cloud Install (Server-Accelerated) or Default Install (Direct)
+        /// </summary>
+        public DownloadAccelerationMode AccelerationMode { get; set; } = DownloadAccelerationMode.CloudAccelerated;
+
+        /// <summary>
+        /// Automatically failover to Default Direct mode if Cloud server experiences high traffic or instability
+        /// </summary>
+        public bool AutoFailoverToDefaultOnTraffic { get; set; } = true;
+
+        /// <summary>
+        /// PRRX IDM Process and Network scheduling priority (Defaults to High)
+        /// </summary>
+        public ProcessPrioritySetting ProcessPriority { get; set; } = ProcessPrioritySetting.High;
     }
 
     public enum DownloadStatus

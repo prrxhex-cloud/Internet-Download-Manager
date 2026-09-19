@@ -8,7 +8,7 @@
 ; Professional Inno Setup Script
 
 #define MyAppName "PRRX Internet Download Manager"
-#define MyAppVersion "1.4.0"
+#define MyAppVersion "1.5.0"
 #define MyAppPublisher "PRRX Cooperation"
 #define MyAppURL "https://github.com/prrxhex-cloud/Internet-Download-Manager"
 #define MyAppExeName "PRRX.InternetDownloadManager.exe"
@@ -38,9 +38,10 @@ PrivilegesRequiredOverridesAllowed=dialog
 
 ; Output Configuration
 OutputDir=D:\Internet Download Manager\dist
-OutputBaseFilename=PRRX_Internet_Download_Manager_v1.4.0_Setup
+OutputBaseFilename=PRRX_Internet_Download_Manager_v1.5.0_Setup
 SetupIconFile=D:\Internet Download Manager\src\PRRX.IDM\Assets\app_icon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
+LicenseFile=D:\Internet Download Manager\LICENSE.txt
 
 ; Modern Wizard Styling & Ultra Compression
 WizardStyle=modern

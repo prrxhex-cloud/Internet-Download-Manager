@@ -470,7 +470,7 @@ namespace PRRX.IDM.Services
 
                     if (method == "GET" && path.StartsWith("/api/ping", StringComparison.OrdinalIgnoreCase))
                     {
-                        var body = "{\"status\":\"online\",\"version\":\"1.4.0\",\"app\":\"PRRX IDM\",\"vault\":\"sealed\"}";
+                        var body = "{\"status\":\"online\",\"version\":\"1.5.0\",\"app\":\"PRRX IDM\",\"vault\":\"sealed\"}";
                         var bodyBytes = Encoding.UTF8.GetBytes(body);
                         var response = $"HTTP/1.1 200 OK\r\n" +
                                        $"Access-Control-Allow-Origin: {allowedOrigin}\r\n" +
@@ -492,9 +492,10 @@ namespace PRRX.IDM.Services
                         {
                             status = "ok",
                             app = "PRRX IDM",
-                            version = "1.4.0",
+                            version = "1.5.0",
                             turboStreams = _configService.CurrentConfig.TurboConnectionCount,
                             enableTurbo = _configService.CurrentConfig.EnableTurboAcceleration,
+                            accelerationMode = _configService.CurrentConfig.AccelerationMode.ToString(),
                             downloadDir = _configService.CurrentConfig.DownloadDirectory,
                             timestamp = DateTime.UtcNow.ToString("o")
                         });

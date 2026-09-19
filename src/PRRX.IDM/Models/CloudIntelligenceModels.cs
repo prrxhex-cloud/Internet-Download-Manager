@@ -19,6 +19,42 @@ namespace PRRX.IDM.Models
         Neutral
     }
 
+    public enum ServerTrafficStatus
+    {
+        Normal,      // Healthy, low latency, cloud acceleration available
+        Congested,   // High latency (> 2500ms) or heavy server load; failover active
+        Unstable,    // Packet drops / intermittent server errors; failover active
+        Offline      // Server unreachable
+    }
+
+    public class ServerTrafficReport
+    {
+        public ServerTrafficStatus Status { get; set; } = ServerTrafficStatus.Normal;
+        public long LatencyMs { get; set; }
+        public string EdgeNode { get; set; } = string.Empty;
+        public string StatusMessage { get; set; } = "Server operating under normal conditions.";
+        public bool IsAcceleratedAvailable => Status == ServerTrafficStatus.Normal;
+        public bool ShouldFailoverToDefault => Status == ServerTrafficStatus.Congested || 
+                                               Status == ServerTrafficStatus.Unstable || 
+                                               Status == ServerTrafficStatus.Offline;
+
+        public string BadgeText => Status switch
+        {
+            ServerTrafficStatus.Normal => $"⚡ Cloud Server: Normal ({LatencyMs}ms - Fast)",
+            ServerTrafficStatus.Congested => $"⚠️ Cloud Server: High Traffic ({LatencyMs}ms - Auto Failover)",
+            ServerTrafficStatus.Unstable => "⚠️ Cloud Server: Unstable (Auto Failover)",
+            _ => "🔴 Cloud Server: Offline (Default Direct Active)"
+        };
+
+        public string BadgeColor => Status switch
+        {
+            ServerTrafficStatus.Normal => "#107C41",
+            ServerTrafficStatus.Congested => "#D83B01",
+            ServerTrafficStatus.Unstable => "#D83B01",
+            _ => "#A80000"
+        };
+    }
+
     public class CloudHealthResult
     {
         [JsonPropertyName("status")]

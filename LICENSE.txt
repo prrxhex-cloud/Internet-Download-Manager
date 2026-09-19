@@ -1,0 +1,43 @@
+﻿PRRX INTERNET DOWNLOAD MANAGER (PRRX IDM)
+END USER LICENSE AGREEMENT & TERMS OF SERVICE
+Version 1.5.0 (2026 Edition)
+
+Copyright (c) 2026 PRRX Cooperation. All rights reserved.
+
+IMPORTANT - READ CAREFULLY BEFORE INSTALLING OR USING THIS SOFTWARE:
+This End User License Agreement ("EULA") is a legal agreement between you (either an individual or a single entity, hereinafter "User" or "You") and PRRX Cooperation ("PRRX") for the software product PRRX Internet Download Manager ("Software"), including any associated media, documentation, browser extensions, and cloud intelligence services.
+
+BY INSTALLING, COPYING, OR OTHERWISE USING THIS SOFTWARE, YOU AGREE TO BE BOUND BY THE TERMS OF THIS AGREEMENT. IF YOU DO NOT AGREE TO THE TERMS OF THIS AGREEMENT, DO NOT INSTALL OR USE THE SOFTWARE.
+
+1. GRANT OF LICENSE
+PRRX Cooperation grants you a personal, non-exclusive, royalty-free, worldwide license to install, execute, and use the Software on your personal or workstation devices, subject to the terms and conditions outlined herein.
+
+2. CLOUD INTELLIGENCE & ACCELERATION SERVICES
+The Software includes optional features to connect to PRRX Cloud Intelligence Gateway and Edge Servers to deliver accelerated downloading, file reputation checks, and domain health routing.
+- The Cloud Acceleration network is provided to enhance throughput and bypass ISP throttling.
+- PRRX Cooperation reserves the right to throttle, reroute, or failover connections to direct local download modes during peak congestion or maintenance without prior notice.
+
+3. PRIVACY AND DATA SECURITY
+PRRX Cooperation is committed to zero data leakage:
+- The Software does NOT harvest, monetize, or transmit your private credentials, personal identity, or sensitive browser data to third parties.
+- Local configuration vaults, tokens, and download histories are protected by Windows DPAPI hardware-backed encryption and AES-256-GCM.
+
+4. RESTRICTIONS
+You may not:
+- Reverse engineer, decompile, or disassemble the Software, except to the extent that such activity is expressly permitted by applicable law.
+- Use the Software to download or distribute copyrighted material without authorization from the copyright holder.
+- Rent, lease, or lend the Software for commercial software resale without express written authorization from PRRX Cooperation.
+
+5. INTELLECTUAL PROPERTY RIGHTS
+All title, copyrights, and intellectual property rights in and to the Software (including but not limited to code, images, animations, audio, video, UI layouts, and documentation) are owned by PRRX Cooperation.
+
+6. DISCLAIMER OF WARRANTIES
+THE SOFTWARE IS PROVIDED "AS IS" AND "AS AVAILABLE", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL PRRX COOPERATION BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM THE USE OF THE SOFTWARE.
+
+7. TERMINATION
+This license is effective until terminated. Your rights under this license will terminate automatically without notice if you fail to comply with any of its terms. Upon termination, you must cease all use and uninstall all copies of the Software.
+
+For inquiries, support, or open-source documentation, visit:
+https://github.com/prrxhex-cloud/Internet-Download-Manager
+
+PRRX Cooperation - Intelligent Download Acceleration Systems

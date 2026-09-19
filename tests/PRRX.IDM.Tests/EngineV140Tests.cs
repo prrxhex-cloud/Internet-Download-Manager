@@ -68,7 +68,7 @@ namespace PRRX.IDM.Tests
             var downloader = new MultiSegmentDownloader();
             Assert.IsAssignableFrom<SegmentedDownloadEngine>(downloader);
             Assert.Equal(64, MultiSegmentDownloader.MaxSupportedConcurrency);
-            Assert.Equal(524288, MultiSegmentDownloader.DefaultBufferSize);
+            Assert.Equal(1048576, MultiSegmentDownloader.DefaultBufferSize);
             Assert.False(downloader.IsRunning);
         }
 
@@ -82,21 +82,21 @@ namespace PRRX.IDM.Tests
         }
 
         [Fact]
-        public void UpdateService_Version140_IsLatestReleaseAndProperlyNormalized()
+        public void UpdateService_Version150_IsLatestReleaseAndProperlyNormalized()
         {
             var update = new UpdateService();
-            Assert.Equal("1.4.0", update.CurrentVersionClean);
+            Assert.Equal("1.5.0", update.CurrentVersionClean);
 
-            // Remote v1.4.0 is not newer than local v1.4.0
+            // Remote v1.5.0 is not newer than local v1.5.0
+            Assert.False(UpdateService.IsVersionNewer("1.5.0", update.CurrentVersionClean));
+            Assert.False(UpdateService.IsVersionNewer("v1.5.0", update.CurrentVersionClean));
+
+            // Remote v1.5.1 or v1.6.0 IS newer
+            Assert.True(UpdateService.IsVersionNewer("1.5.1", update.CurrentVersionClean));
+            Assert.True(UpdateService.IsVersionNewer("v1.6.0", update.CurrentVersionClean));
+
+            // Remote v1.4.0 is NOT newer
             Assert.False(UpdateService.IsVersionNewer("1.4.0", update.CurrentVersionClean));
-            Assert.False(UpdateService.IsVersionNewer("v1.4.0", update.CurrentVersionClean));
-
-            // Remote v1.4.1 or v1.5.0 IS newer
-            Assert.True(UpdateService.IsVersionNewer("1.4.1", update.CurrentVersionClean));
-            Assert.True(UpdateService.IsVersionNewer("v1.5.0", update.CurrentVersionClean));
-
-            // Remote v1.3.0 is NOT newer
-            Assert.False(UpdateService.IsVersionNewer("1.3.0", update.CurrentVersionClean));
         }
 
         [Fact]

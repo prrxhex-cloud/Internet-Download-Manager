@@ -11,14 +11,23 @@
 <p align="center">
   <a href="#"><img src="https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011%20(x64)-0078D4?logo=windows" alt="Windows"/></a>
   <a href="#"><img src="https://img.shields.io/badge/.NET-8.0%20WPF-512BD4?logo=dotnet" alt=".NET 8"/></a>
-  <a href="https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/tag/v1.4.0"><img src="https://img.shields.io/badge/Version-1.4.0-107C41" alt="Version"/></a>
+  <a href="https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/tag/v1.5.0"><img src="https://img.shields.io/badge/Version-1.5.0-107C41" alt="Version"/></a>
   <a href="#"><img src="https://img.shields.io/badge/RAM%20Footprint-~20%20MB%20Idle-brightgreen" alt="Memory"/></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue" alt="License"/></a>
+  <a href="LICENSE.txt"><img src="https://img.shields.io/badge/License-PRRX%20EULA-blue" alt="License"/></a>
 </p>
 
 ---
 
-## 🌟 What's New in Version 1.4.0
+## 🌟 What's New in Version 1.5.0
+
+- ☁️ **Cloud Install vs. Default Direct Download Mode Toggle**: Users can toggle between **Cloud Install** (ultra-fast video, audio, thumbnail, and file downloading routed through PRRX Cloudflare Edge servers with zero traffic congestion) and **Default Install** (direct native origin connection).
+- ⚡ **Automatic Server Congestion Circuit Breaker**: Continuous real-time server health and latency monitoring automatically fails over active downloads to Default Direct mode if the Cloud server encounters heavy traffic (>2500ms latency) or instability. When conditions return to normal, users can toggle back to Cloud mode with one click.
+- 🎯 **Highest Process & Network Scheduling Priority by Default**: PRRX IDM automatically requests Windows `High` process and thread scheduling priority on startup, preventing network socket starvation and packet drops during intense gaming or multitasking. Includes an in-app selector in Settings (`High`, `Above Normal`, `Normal`).
+- 📜 **Official EULA & License Integration in Setup Installers**: Official PRRX Cooperation End User License Agreement & Terms of Service (`LICENSE.txt`) are now embedded directly into both the full offline Inno Setup installer and the web installer wizard.
+- 🚀 **1 MB High-Throughput Buffering Engine**: Expanded segmented download chunk buffers to **1048576 bytes (1 MB)** paired with **8 MB HTTP/2 initial stream windows**, dramatically increasing fiber network saturation and reducing system interrupt latency.
+- 🎬 **Accelerated Media Streaming**: Enhanced fragment extraction pipelines with 16–32 parallel streams in Cloud mode for lightning-fast YouTube, audio, and thumbnail saving.
+
+---
 
 - ⚡ **"More Faster Up Download Speed" — Turbo 64-Stream Concurrency Engine**: Upgraded download engine concurrency with dynamic connection pooling (clamped up to 64 parallel threads), expanded 512 KB pooled stream buffers (`ArrayPool<byte>.Shared`), and `SocketsHttpHandler.MaxConnectionsPerServer = 128` with HTTP/2 stream multiplexing.
 - 💾 **Win32 Direct Cluster Pre-allocation (Zero Disk Allocation Stalls)**: Integrated Win32 `SetFileInformationByHandle` (`FileAllocationInfo = 5`) for pre-allocating sparse contiguous disk space ahead of high-speed multi-part downloads, eliminating file fragmentation and disk write bottlenecks.
