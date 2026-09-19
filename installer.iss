@@ -60,6 +60,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 [Files]
 ; Main Executable
 Source: "D:\Internet Download Manager\publish\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "D:\Internet Download Manager\publish\*cor3.dll"; DestDir: "{app}"; Flags: ignoreversion
 
 ; Bundled Media Engines and Tools
 Source: "D:\Internet Download Manager\publish\bin\*"; DestDir: "{app}\bin"; Flags: ignoreversion recursesubdirs createallsubdirs
