@@ -65,6 +65,7 @@ namespace PRRX.IDM.ViewModels
         private string _voteFeedbackText = string.Empty;
         private string _voteFeedbackFgColor = "#4ADE80";
         private long? _detectedBytes = null;
+        public long? DetectedBytes => _detectedBytes;
 
         public string Referer { get; set; } = string.Empty;
         public string UserAgent { get; set; } = string.Empty;
@@ -339,6 +340,27 @@ namespace PRRX.IDM.ViewModels
             _saveDirectory = !string.IsNullOrWhiteSpace(defaultDownloadDir)
                 ? defaultDownloadDir
                 : baseDownloads;
+
+            if (precalculatedSize.HasValue && precalculatedSize.Value > 0)
+            {
+                _detectedBytes = precalculatedSize.Value;
+                _fileSizeFormatted = FormatBytes(precalculatedSize.Value);
+            }
+
+            if (initialUrl.StartsWith("tg://", StringComparison.OrdinalIgnoreCase))
+            {
+                var tgMetadata = TelegramDownloadProvider.Current.ParseTelegramUrlOrTask(initialUrl, _fileName, precalculatedSize);
+                if (tgMetadata != null)
+                {
+                    if (!string.IsNullOrWhiteSpace(tgMetadata.FileName)) _fileName = SanitizeFileName(tgMetadata.FileName);
+                    if (tgMetadata.FileSize > 0)
+                    {
+                        _detectedBytes = tgMetadata.FileSize;
+                        _fileSizeFormatted = FormatBytes(tgMetadata.FileSize);
+                    }
+                    _selectedCategory = FileCategoryHelper.DetectCategory(_fileName);
+                }
+            }
 
             AutoPopulateDescription(pageTitle);
 
@@ -641,6 +663,86 @@ namespace PRRX.IDM.ViewModels
                 return Task.CompletedTask;
             }
 
+            if (url.StartsWith("tg://", StringComparison.OrdinalIgnoreCase))
+            {
+                var tgMetadata = TelegramDownloadProvider.Current.ParseTelegramUrlOrTask(url, FileName, _detectedBytes);
+                DispatchToUi(() =>
+                {
+                    if (tgMetadata != null)
+                    {
+                        if (!string.IsNullOrWhiteSpace(tgMetadata.FileName))
+                        {
+                            FileName = tgMetadata.FileName;
+                            SelectedCategory = FileCategoryHelper.DetectCategory(FileName);
+                        }
+                        if (tgMetadata.FileSize > 0)
+                        {
+                            _detectedBytes = tgMetadata.FileSize;
+                            FileSizeFormatted = FormatBytes(tgMetadata.FileSize);
+                        }
+                        AutoPopulateDescription(_cachedPageTitle, tgMetadata.MimeType);
+                    }
+                    IsProbing = false;
+                });
+                return Task.CompletedTask;
+            }
+
+            if (TelegramLinkResolver.ParsePostUrl(url, out var channel, out var messageId))
+            {
+                lock (_probeLock)
+                {
+                    if (_activeProbeTask != null && !_activeProbeTask.IsCompleted && _activeProbeUrl == url)
+                    {
+                        return _activeProbeTask;
+                    }
+
+                    _probeCts?.Cancel();
+                    var cts = new CancellationTokenSource();
+                    _probeCts = cts;
+                    _activeProbeUrl = url;
+
+                    _activeProbeTask = Task.Run(async () =>
+                    {
+                        var resolver = new TelegramLinkResolver();
+                        var media = await resolver.ResolveTelegramMediaAsync(url, cts.Token);
+                        if (media != null && !cts.IsCancellationRequested)
+                        {
+                            DispatchToUi(() =>
+                            {
+                                if (!string.IsNullOrWhiteSpace(media.FileName) &&
+                                    (FileName.StartsWith("download_") || FileName == "download.bin" || FileName.EndsWith(".bin") || FileName == $"{channel}_{messageId}.mp4"))
+                                {
+                                    FileName = media.FileName;
+                                    SelectedCategory = FileCategoryHelper.DetectCategory(FileName);
+                                }
+                                if (!string.IsNullOrWhiteSpace(media.FormattedSize))
+                                {
+                                    FileSizeFormatted = media.FormattedSize;
+                                }
+                                if (media.EstimatedSizeBytes > 0)
+                                {
+                                    _detectedBytes = media.EstimatedSizeBytes;
+                                    FileSizeFormatted = FormatBytes(media.EstimatedSizeBytes);
+                                }
+                                if (!string.IsNullOrWhiteSpace(media.DirectStreamUrl) && media.DirectStreamUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    _url = media.DirectStreamUrl;
+                                    OnPropertyChanged(nameof(Url));
+                                }
+                                AutoPopulateDescription(media.Title);
+                                IsProbing = false;
+                            });
+                        }
+                        else
+                        {
+                            await DoProbeFileSizeAsync(url, cts);
+                        }
+                    }, cts.Token);
+
+                    return _activeProbeTask;
+                }
+            }
+
             lock (_probeLock)
             {
                 if (_activeProbeTask != null && !_activeProbeTask.IsCompleted && _activeProbeUrl == url)
@@ -792,6 +894,10 @@ namespace PRRX.IDM.ViewModels
                     _detectedBytes = detectedBytes.Value;
                     FileSizeFormatted = FormatBytes(detectedBytes.Value);
                 }
+                else if (_detectedBytes.HasValue && _detectedBytes.Value > 0)
+                {
+                    FileSizeFormatted = FormatBytes(_detectedBytes.Value);
+                }
                 else
                 {
                     FileSizeFormatted = "Unknown size";
@@ -810,6 +916,17 @@ namespace PRRX.IDM.ViewModels
 
         public static string ExtractFileNameFromUrl(string url)
         {
+            if (string.IsNullOrWhiteSpace(url)) return "download_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".bin";
+
+            if (url.StartsWith("tg://", StringComparison.OrdinalIgnoreCase))
+            {
+                var req = TelegramDownloadProvider.Current.ParseTelegramUrlOrTask(url);
+                if (req != null && !string.IsNullOrWhiteSpace(req.FileName))
+                {
+                    return SanitizeFileName(req.FileName);
+                }
+            }
+
             try
             {
                 var uri = new Uri(url);
@@ -830,10 +947,10 @@ namespace PRRX.IDM.ViewModels
                         if (kv.Length == 2)
                         {
                             var k = kv[0].ToLowerInvariant();
-                            if (k is "filename" or "file" or "name" or "fn" or "attachment")
+                            if (k is "filename" or "file_name" or "file-name" or "file" or "name" or "fn" or "attachment")
                             {
                                 var val = Uri.UnescapeDataString(kv[1]);
-                                if (!string.IsNullOrWhiteSpace(val) && val.Contains('.'))
+                                if (!string.IsNullOrWhiteSpace(val))
                                 {
                                     return SanitizeFileName(Path.GetFileName(val));
                                 }

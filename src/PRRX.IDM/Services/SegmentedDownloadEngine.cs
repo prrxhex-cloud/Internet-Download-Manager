@@ -149,6 +149,42 @@ namespace PRRX.IDM.Services
                 IsPaused = false;
                 _pauseEvent.Set();
                 _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+                // Telegram Provider Integration (Handle Telegram files of ANY size up to 4GB)
+                if (TelegramDownloadProvider.Current.CanHandle(url))
+                {
+                    var tgReq = TelegramDownloadProvider.Current.ParseTelegramUrlOrTask(url, Path.GetFileName(destinationFilePath));
+                    if (tgReq != null)
+                    {
+                        tgReq.DestinationFilePath = destinationFilePath;
+                        var resolvedStream = await TelegramDownloadProvider.Current.ResolveDirectStreamUrlAsync(url, _cts.Token);
+                        if (!string.IsNullOrWhiteSpace(resolvedStream) && resolvedStream.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                        {
+                            url = resolvedStream;
+                        }
+                        else if (url.StartsWith("tg://", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var progressReporter = new Progress<SegmentProgressEventArgs>(args =>
+                            {
+                                ProgressChanged?.Invoke(this, args);
+                            });
+
+                            bool success = await TelegramDownloadProvider.Current.DownloadAsync(tgReq, progressReporter, _cts.Token);
+                            IsRunning = false;
+                            if (success)
+                            {
+                                DownloadCompleted?.Invoke(this, destinationFilePath);
+                                return true;
+                            }
+                            else
+                            {
+                                DownloadFailed?.Invoke(this, "Telegram stream download cancelled or failed.");
+                                return false;
+                            }
+                        }
+                    }
+                }
+
                 _threads.Clear();
                 _totalDownloadedBytes = 0;
                 _speedStopwatch.Restart();

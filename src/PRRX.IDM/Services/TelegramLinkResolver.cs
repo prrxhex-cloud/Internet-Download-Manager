@@ -5,6 +5,7 @@
 // Confidential and Proprietary - Licensed under PRRX Open Source Initiative
 // ============================================================================
 using System;
+using System.IO;
 using System.Net.Http;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -47,36 +48,54 @@ namespace PRRX.IDM.Services
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
         private static readonly Regex GeneralTelegramRegex = new(
-            @"^https?:\/\/(?:www\.)?(?:t|telegram)\.me\/",
+            @"^(?:tg:\/\/|https?:\/\/(?:www\.)?(?:t|telegram)\.me\/)",
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
+        // Modern OpenGraph & Meta Tag extractors (Clean & stable standard tags)
+        private static readonly Regex OgVideoRegex = new(
+            @"<meta[^>]+(?:property|name)=[""'](?:og:video(?::url|:secure_url)?|twitter:player:stream)[""'][^>]+content=[""']([^""']+)[""']",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+        private static readonly Regex OgAudioRegex = new(
+            @"<meta[^>]+(?:property|name)=[""'](?:og:audio(?::url|:secure_url)?)[""'][^>]+content=[""']([^""']+)[""']",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+        private static readonly Regex OgTitleRegex = new(
+            @"<meta[^>]+(?:property|name)=[""']og:title[""'][^>]+content=[""']([^""']+)[""']",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+        private static readonly Regex OgImageRegex = new(
+            @"<meta[^>]+(?:property|name)=[""']og:image[""'][^>]+content=[""']([^""']+)[""']",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+        // HTML5 Media element extractors (robust for single quotes, double quotes, and arbitrary attribute ordering)
         private static readonly Regex VideoSrcRegex = new(
-            @"<video[^>]+src=""([^""]+)""",
+            @"<video\b[^>]*?\bsrc=[""']?([^""'>\s]+)[""']?",
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
         private static readonly Regex AudioSrcRegex = new(
-            @"<audio[^>]+src=""([^""]+)""",
+            @"<audio\b[^>]*?\bsrc=[""']?([^""'>\s]+)[""']?",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+        private static readonly Regex SourceTagRegex = new(
+            @"<source\b[^>]*?\bsrc=[""']?([^""'>\s]+)[""']?",
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
         private static readonly Regex DocumentWrapRegex = new(
-            @"<a[^>]+class=""[^""]*tgme_widget_message_document_wrap[^""]*""[^>]+href=""([^""]+)""",
+            @"<a\b[^>]*?\bclass=[""'][^""']*tgme_widget_message_document_wrap[^""']*[""'][^>]*?\bhref=[""']?([^""'>\s]+)[""']?",
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
         private static readonly Regex DocumentTitleRegex = new(
-            @"<div[^>]+class=""[^""]*tgme_widget_message_document_title[^""]*""[^>]*>([^<]+)<\/div>",
+            @"<div\b[^>]*?\bclass=[""'][^""']*tgme_widget_message_document_title[^""']*[""'][^>]*>([^<]+)<\/div>",
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
         private static readonly Regex DocumentExtraRegex = new(
-            @"<div[^>]+class=""[^""]*tgme_widget_message_document_extra[^""]*""[^>]*>([^<]+)<\/div>",
+            @"<div\b[^>]*?\bclass=[""'][^""']*tgme_widget_message_document_extra[^""']*[""'][^>]*>([^<]+)<\/div>",
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
         private static readonly Regex MessageTextRegex = new(
-            @"<div[^>]+class=""[^""]*tgme_widget_message_text[^""]*""[^>]*>(.*?)<\/div>",
+            @"<div\b[^>]*?\bclass=[""'][^""']*tgme_widget_message_text[^""']*[""'][^>]*>(.*?)<\/div>",
             RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline);
-
-        private static readonly Regex AuthorNameRegex = new(
-            @"<span[^>]+dir=""auto""[^>]*>([^<]+)<\/span>",
-            RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
         private static readonly HttpClient SharedHttpClient = new(new SocketsHttpHandler
         {
@@ -92,7 +111,7 @@ namespace PRRX.IDM.Services
             if (!SharedHttpClient.DefaultRequestHeaders.Contains("User-Agent"))
             {
                 SharedHttpClient.DefaultRequestHeaders.Add("User-Agent", 
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 PRRX-IDM/1.5.0");
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 PRRX-IDM/1.6.0");
             }
         }
 
@@ -100,10 +119,12 @@ namespace PRRX.IDM.Services
         {
             if (string.IsNullOrWhiteSpace(url)) return false;
             var trimmed = url.Trim();
-            return GeneralTelegramRegex.IsMatch(trimmed) || TelegramBotFileRegex.IsMatch(trimmed);
+            return GeneralTelegramRegex.IsMatch(trimmed) || 
+                   TelegramBotFileRegex.IsMatch(trimmed) ||
+                   TelegramDownloadProvider.Current.CanHandle(trimmed);
         }
 
-        public bool IsTelegramPostUrl(string? url, out string channel, out string messageId)
+        public static bool ParsePostUrl(string? url, out string channel, out string messageId)
         {
             channel = string.Empty;
             messageId = string.Empty;
@@ -117,6 +138,11 @@ namespace PRRX.IDM.Services
                 return true;
             }
             return false;
+        }
+
+        public bool IsTelegramPostUrl(string? url, out string channel, out string messageId)
+        {
+            return ParsePostUrl(url, out channel, out messageId);
         }
 
         public bool IsTelegramBotFileUrl(string? url, out string botToken, out string filePath)
@@ -140,10 +166,30 @@ namespace PRRX.IDM.Services
             if (string.IsNullOrWhiteSpace(url)) return null;
             var cleanUrl = url.Trim();
 
-            // 1. Check if it is a Telegram Bot File link
+            // 1. Check if it is a tg://file URI (remote task of any size)
+            if (cleanUrl.StartsWith("tg://", StringComparison.OrdinalIgnoreCase))
+            {
+                var req = TelegramDownloadProvider.Current.ParseTelegramUrlOrTask(cleanUrl);
+                if (req != null)
+                {
+                    return new TelegramResolvedMedia
+                    {
+                        SourceUrl = cleanUrl,
+                        DirectStreamUrl = cleanUrl,
+                        FileName = req.FileName,
+                        Title = req.FileName,
+                        MediaType = req.MediaType,
+                        FormattedSize = req.FormattedSize,
+                        EstimatedSizeBytes = req.FileSize,
+                        ChannelName = req.ChatId
+                    };
+                }
+            }
+
+            // 2. Check if it is a Telegram Bot File link
             if (IsTelegramBotFileUrl(cleanUrl, out _, out var botPath))
             {
-                var fileName = System.IO.Path.GetFileName(botPath);
+                var fileName = Path.GetFileName(botPath);
                 if (string.IsNullOrWhiteSpace(fileName)) fileName = "telegram_file.bin";
 
                 return new TelegramResolvedMedia
@@ -157,7 +203,7 @@ namespace PRRX.IDM.Services
                 };
             }
 
-            // 2. Check if it is a Telegram Post URL (t.me/channel/id)
+            // 3. Check if it is a Telegram Post URL (t.me/channel/id)
             if (!IsTelegramPostUrl(cleanUrl, out var channel, out var messageId))
             {
                 return null;
@@ -195,7 +241,7 @@ namespace PRRX.IDM.Services
                 ChannelName = channel
             };
 
-            // Look for Video
+            // 1. Look for Video: HTML5 video tag, source tag, or OpenGraph video
             var videoMatch = VideoSrcRegex.Match(html);
             if (videoMatch.Success)
             {
@@ -203,8 +249,18 @@ namespace PRRX.IDM.Services
                 resolved.MediaType = "video";
                 resolved.FileName = $"{channel}_{messageId}.mp4";
             }
+            else
+            {
+                var ogVideo = OgVideoRegex.Match(html);
+                if (ogVideo.Success)
+                {
+                    resolved.DirectStreamUrl = HttpUtility.HtmlDecode(ogVideo.Groups[1].Value);
+                    resolved.MediaType = "video";
+                    resolved.FileName = $"{channel}_{messageId}.mp4";
+                }
+            }
 
-            // Look for Audio
+            // 2. Look for Audio: HTML5 audio tag or OpenGraph audio
             if (string.IsNullOrEmpty(resolved.DirectStreamUrl))
             {
                 var audioMatch = AudioSrcRegex.Match(html);
@@ -214,9 +270,31 @@ namespace PRRX.IDM.Services
                     resolved.MediaType = "audio";
                     resolved.FileName = $"{channel}_{messageId}.mp3";
                 }
+                else
+                {
+                    var ogAudio = OgAudioRegex.Match(html);
+                    if (ogAudio.Success)
+                    {
+                        resolved.DirectStreamUrl = HttpUtility.HtmlDecode(ogAudio.Groups[1].Value);
+                        resolved.MediaType = "audio";
+                        resolved.FileName = $"{channel}_{messageId}.mp3";
+                    }
+                }
             }
 
-            // Look for Document Wrap
+            // 3. Look for Source Tag
+            if (string.IsNullOrEmpty(resolved.DirectStreamUrl))
+            {
+                var srcMatch = SourceTagRegex.Match(html);
+                if (srcMatch.Success)
+                {
+                    resolved.DirectStreamUrl = HttpUtility.HtmlDecode(srcMatch.Groups[1].Value);
+                    resolved.MediaType = "video";
+                    resolved.FileName = $"{channel}_{messageId}.mp4";
+                }
+            }
+
+            // 4. Look for Document Wrap
             if (string.IsNullOrEmpty(resolved.DirectStreamUrl))
             {
                 var docMatch = DocumentWrapRegex.Match(html);
@@ -227,7 +305,7 @@ namespace PRRX.IDM.Services
                 }
             }
 
-            // Extract Document Title
+            // 5. Extract Document Title or OpenGraph Title
             var titleMatch = DocumentTitleRegex.Match(html);
             if (titleMatch.Success)
             {
@@ -238,8 +316,36 @@ namespace PRRX.IDM.Services
                     resolved.FileName = title;
                 }
             }
+            else
+            {
+                var ogTitle = OgTitleRegex.Match(html);
+                if (ogTitle.Success)
+                {
+                    var title = HttpUtility.HtmlDecode(ogTitle.Groups[1].Value).Trim();
+                    if (!string.IsNullOrWhiteSpace(title))
+                    {
+                        resolved.Title = title;
+                        if (string.IsNullOrWhiteSpace(resolved.FileName) || resolved.FileName.StartsWith($"{channel}_{messageId}"))
+                        {
+                            var safeName = Security.SecurityGuard.SanitizeFileName(title);
+                            if (!string.IsNullOrWhiteSpace(safeName))
+                            {
+                                var defaultExt = resolved.MediaType switch
+                                {
+                                    "video" => ".mp4",
+                                    "audio" => ".mp3",
+                                    "photo" => ".jpg",
+                                    _ => ".bin"
+                                };
+                                if (!Path.HasExtension(safeName)) safeName += defaultExt;
+                                resolved.FileName = safeName;
+                            }
+                        }
+                    }
+                }
+            }
 
-            // Extract Document Extra / Size
+            // 6. Extract Document Extra / Size
             var extraMatch = DocumentExtraRegex.Match(html);
             if (extraMatch.Success)
             {
@@ -247,7 +353,14 @@ namespace PRRX.IDM.Services
                 resolved.FormattedSize = extra;
             }
 
-            // Extract Message Text caption if title not yet set
+            // 7. Extract Thumbnail from OpenGraph image
+            var ogImg = OgImageRegex.Match(html);
+            if (ogImg.Success)
+            {
+                resolved.ThumbnailUrl = HttpUtility.HtmlDecode(ogImg.Groups[1].Value);
+            }
+
+            // 8. Extract Message Text caption if title not yet set
             if (string.IsNullOrWhiteSpace(resolved.Title))
             {
                 var textMatch = MessageTextRegex.Match(html);
@@ -278,7 +391,7 @@ namespace PRRX.IDM.Services
 
         private static string GuessMediaTypeFromExtension(string fileName)
         {
-            var ext = System.IO.Path.GetExtension(fileName).ToLowerInvariant();
+            var ext = Path.GetExtension(fileName).ToLowerInvariant();
             return ext switch
             {
                 ".mp4" or ".mkv" or ".mov" or ".webm" or ".avi" => "video",

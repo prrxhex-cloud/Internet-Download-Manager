@@ -34,6 +34,12 @@ namespace PRRX.IDM
         private IBrowserIntegrationService? _browserService;
         private ITelegramBotSyncService? _telegramBotSyncService;
 
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool BringWindowToTop(IntPtr hWnd);
+
         static App()
         {
             // Enable hardware acceleration and high-refresh-rate animation rendering
@@ -94,15 +100,100 @@ namespace PRRX.IDM
                     {
                         try
                         {
-                            var payload = new BrowserDownloadPayload
+                            var defaultDir = _configService?.CurrentConfig.DownloadDirectory;
+                            if (string.IsNullOrWhiteSpace(defaultDir))
                             {
-                                Action = "download",
-                                Url = task.Url,
-                                FileName = task.FileName,
-                                PageTitle = $"Telegram File ({task.Source})",
-                                TotalBytes = task.FileSize
+                                defaultDir = Path.Combine(
+                                    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                                    "Downloads");
+                            }
+
+                            var pageTitle = !string.IsNullOrWhiteSpace(task.Source)
+                                ? $"Telegram File ({task.Source})"
+                                : "Telegram File (@PRRX_IDM_Bot)";
+
+                            var vm = new DownloadFileInfoViewModel(
+                                task.Url,
+                                defaultDir,
+                                pageTitle,
+                                task.FileSize > 0 ? task.FileSize : null,
+                                task.FileName,
+                                null,
+                                task.Source);
+
+                            if (!string.IsNullOrWhiteSpace(task.FileName))
+                            {
+                                vm.FileName = task.FileName;
+                            }
+
+                            if (task.FileSize > 0)
+                            {
+                                vm.FileSizeFormatted = !string.IsNullOrWhiteSpace(task.FormattedSize)
+                                    ? task.FormattedSize
+                                    : TelegramDownloadProvider.FormatBytes(task.FileSize);
+                            }
+
+                            var dlg = new DownloadFileInfoDialog(vm);
+                            dlg.Topmost = true;
+                            dlg.Show();
+                            dlg.Activate();
+                            dlg.Focus();
+
+                            try
+                            {
+                                var helper = new WindowInteropHelper(dlg);
+                                helper.EnsureHandle();
+                                SetForegroundWindow(helper.Handle);
+                                BringWindowToTop(helper.Handle);
+                            }
+                            catch { }
+
+                            dlg.Loaded += (_, _) =>
+                            {
+                                _ = System.Threading.Tasks.Task.Delay(150).ContinueWith(_ =>
+                                    dlg.Dispatcher.BeginInvoke(new Action(() => dlg.Topmost = false)));
                             };
-                            _browserService?.HandleIncomingPayload(payload);
+
+                            dlg.Closed += (_, _) =>
+                            {
+                                vm.CancelProbe();
+                                if (vm.DialogResult == DownloadDialogResult.StartNow)
+                                {
+                                    var activeVm = new ActiveDownloadViewModel(
+                                        vm.Url,
+                                        vm.SaveAsFullPath,
+                                        null,
+                                        null,
+                                        null,
+                                        vm.Referer,
+                                        vm.UserAgent,
+                                        vm.Cookies,
+                                        vm.CustomHeaders);
+
+                                    var activeWin = new ActiveDownloadWindow(activeVm);
+                                    activeWin.Closed += (_, _) => MemoryOptimizer.TrimMemory();
+                                    activeWin.Show();
+                                    activeWin.Activate();
+                                }
+                                else if (vm.DialogResult == DownloadDialogResult.DownloadLater)
+                                {
+                                    _historyService?.AddItem(new DownloadItem
+                                    {
+                                        Title = vm.FileName,
+                                        Url = vm.Url,
+                                        TargetFilePath = vm.SaveAsFullPath,
+                                        FileSizeFormatted = vm.FileSizeFormatted,
+                                        Status = DownloadStatus.Queued,
+                                        Type = vm.SelectedCategory == FileCategory.Music ? MediaType.Audio : MediaType.Video,
+                                        CreatedAt = DateTime.UtcNow
+                                    });
+                                    MemoryOptimizer.TrimMemory();
+                                }
+                                else
+                                {
+                                    MemoryOptimizer.TrimMemory();
+                                }
+                            };
                         }
                         catch (Exception ex)
                         {

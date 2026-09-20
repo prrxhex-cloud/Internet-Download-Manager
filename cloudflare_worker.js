@@ -354,7 +354,9 @@ export default {
             const rows = await env.DB.prepare(`
               SELECT id, url, file_name AS fileName, file_size AS fileSize,
                      formatted_size AS formattedSize, media_type AS mediaType,
-                     source, created_at AS createdAt
+                     source, file_id AS fileId, mime_type AS mimeType,
+                     chat_id AS chatId, message_id AS messageId,
+                     created_at AS createdAt
               FROM telegram_tasks
               WHERE client_id = ?1 AND status = 'pending'
               ORDER BY created_at ASC
@@ -451,6 +453,10 @@ async function ensureTelegramTables(db) {
           formatted_size TEXT,
           media_type TEXT DEFAULT 'document',
           source TEXT,
+          file_id TEXT,
+          mime_type TEXT,
+          chat_id TEXT,
+          message_id INTEGER,
           status TEXT DEFAULT 'pending',
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           delivered_at DATETIME
@@ -460,6 +466,13 @@ async function ensureTelegramTables(db) {
         CREATE INDEX IF NOT EXISTS idx_telegram_tasks_client ON telegram_tasks(client_id, status)
       `)
     ]);
+
+    // Non-destructive schema migrations for existing D1 databases
+    try { await db.prepare("ALTER TABLE telegram_tasks ADD COLUMN file_id TEXT").run(); } catch (_) {}
+    try { await db.prepare("ALTER TABLE telegram_tasks ADD COLUMN mime_type TEXT").run(); } catch (_) {}
+    try { await db.prepare("ALTER TABLE telegram_tasks ADD COLUMN chat_id TEXT").run(); } catch (_) {}
+    try { await db.prepare("ALTER TABLE telegram_tasks ADD COLUMN message_id INTEGER").run(); } catch (_) {}
+
     telegramTablesInitialized = true;
   } catch (err) {
     console.error("Failed to initialize telegram tables in D1:", err);
@@ -738,128 +751,207 @@ async function handleTelegramUpdate(update, env, ctx) {
     return;
   }
 
-  // 3. Check for Media Files (Video, Document, Audio, Voice, Photo)
+  // 3. Check for Forwarded Source Information (Public Channel / Post)
+  let forwardChannel = null;
+  let forwardMsgId = null;
+  let publicPostUrl = null;
+
+  if (msg.forward_from_chat && msg.forward_from_chat.username) {
+    forwardChannel = msg.forward_from_chat.username;
+    forwardMsgId = msg.forward_from_message_id || 0;
+  } else if (msg.forward_origin && msg.forward_origin.type === "channel" && msg.forward_origin.chat && msg.forward_origin.chat.username) {
+    forwardChannel = msg.forward_origin.chat.username;
+    forwardMsgId = msg.forward_origin.message_id || 0;
+  }
+
+  if (forwardChannel && forwardMsgId) {
+    publicPostUrl = `https://t.me/${forwardChannel}/${forwardMsgId}`;
+  }
+
+  // 4. Check for Media Files (Video, Document, Audio, Voice, Photo, Animation, Video Note)
   let fileId = null;
   let fileName = "telegram_download.bin";
   let fileSize = 0;
   let mediaType = "document";
+  let mimeType = "";
 
   if (msg.video) {
     fileId = msg.video.file_id;
     fileName = msg.video.file_name || `video_${Date.now()}.mp4`;
     fileSize = msg.video.file_size || 0;
     mediaType = "video";
+    mimeType = msg.video.mime_type || "video/mp4";
   } else if (msg.document) {
     fileId = msg.document.file_id;
     fileName = msg.document.file_name || `file_${Date.now()}.bin`;
     fileSize = msg.document.file_size || 0;
     mediaType = "document";
+    mimeType = msg.document.mime_type || "application/octet-stream";
   } else if (msg.audio) {
     fileId = msg.audio.file_id;
     fileName = msg.audio.file_name || `audio_${Date.now()}.mp3`;
     fileSize = msg.audio.file_size || 0;
     mediaType = "audio";
+    mimeType = msg.audio.mime_type || "audio/mpeg";
   } else if (msg.voice) {
     fileId = msg.voice.file_id;
     fileName = `voice_${Date.now()}.ogg`;
     fileSize = msg.voice.file_size || 0;
     mediaType = "audio";
+    mimeType = msg.voice.mime_type || "audio/ogg";
   } else if (msg.photo && msg.photo.length > 0) {
     const largest = msg.photo[msg.photo.length - 1];
     fileId = largest.file_id;
     fileName = `photo_${Date.now()}.jpg`;
     fileSize = largest.file_size || 0;
     mediaType = "photo";
+    mimeType = "image/jpeg";
+  } else if (msg.animation) {
+    fileId = msg.animation.file_id;
+    fileName = msg.animation.file_name || `animation_${Date.now()}.mp4`;
+    fileSize = msg.animation.file_size || 0;
+    mediaType = "video";
+    mimeType = msg.animation.mime_type || "video/mp4";
+  } else if (msg.video_note) {
+    fileId = msg.video_note.file_id;
+    fileName = `video_note_${Date.now()}.mp4`;
+    fileSize = msg.video_note.file_size || 0;
+    mediaType = "video";
+    mimeType = "video/mp4";
   }
 
-  // 4. Resolve File Download URL if media detected
+  // 5. Resolve File Download URL if media detected (Supports ANY size up to 2GB/4GB without 20MB limit)
   if (fileId) {
-    const MAX_TELEGRAM_BOT_FILE_SIZE = 20 * 1024 * 1024; // 20 MB Telegram Bot API limit
-    if (fileSize > MAX_TELEGRAM_BOT_FILE_SIZE) {
-      const formattedSize = formatBytes(fileSize);
-      await sendTelegramMessage(chatId,
-        `⚠️ <b>File Exceeds Telegram Bot Limit (${formattedSize})</b>\n\n` +
-        `Telegram Bot API imposes a strict <b>20 MB</b> file limit for bots.\n\n` +
-        `💡 <b>How to download large files with PRRX IDM:</b>\n` +
-        `• <b>Telegram Web:</b> Open <a href="https://web.telegram.org">web.telegram.org</a> in Chrome or Edge. Use PRRX IDM's floating media grabber to download files of any size (up to 4 GB+).\n` +
-        `• <b>Direct Link Bots:</b> Forward this file to @FileToLinkBot or @PublicURLBot on Telegram, then send the generated direct download link here!`
-      );
-      return;
-    }
+    let downloadUrl = "";
+    const MAX_BOT_API_DIRECT_FILE = 20 * 1024 * 1024; // 20 MB Telegram Bot getFile limit
 
-    const fileInfo = await getTelegramFileInfo(fileId);
-    if (fileInfo && fileInfo.file_path) {
-      const resolvedSize = fileSize > 0 ? fileSize : (fileInfo.file_size || 0);
-      if (resolvedSize > MAX_TELEGRAM_BOT_FILE_SIZE) {
-        const formattedSize = formatBytes(resolvedSize);
-        await sendTelegramMessage(chatId,
-          `⚠️ <b>File Exceeds Telegram Bot Limit (${formattedSize})</b>\n\n` +
-          `Telegram Bot API imposes a strict <b>20 MB</b> file limit for bots.\n\n` +
-          `💡 <b>How to download large files with PRRX IDM:</b>\n` +
-          `• <b>Telegram Web:</b> Open <a href="https://web.telegram.org">web.telegram.org</a> in Chrome or Edge. Use PRRX IDM's floating media grabber to download files of any size (up to 4 GB+).\n` +
-          `• <b>Direct Link Bots:</b> Forward this file to @FileToLinkBot or @PublicURLBot on Telegram, then send the generated direct download link here!`
-        );
-        return;
+    // For files <= 20MB, try to get direct Bot API download path
+    if (fileSize > 0 && fileSize <= MAX_BOT_API_DIRECT_FILE) {
+      const fileInfo = await getTelegramFileInfo(fileId);
+      if (fileInfo && fileInfo.file_path) {
+        downloadUrl = `${TELEGRAM_FILE_BASE}/${fileInfo.file_path}`;
+        if (!fileSize && fileInfo.file_size) {
+          fileSize = fileInfo.file_size;
+        }
       }
-
-      const downloadUrl = `${TELEGRAM_FILE_BASE}/${fileInfo.file_path}`;
-      const formattedSize = formatBytes(resolvedSize);
-
-      const task = {
-        id: `tg_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
-        url: downloadUrl,
-        fileName: fileName,
-        fileSize: resolvedSize,
-        formattedSize: formattedSize,
-        mediaType: mediaType,
-        source: "Telegram @PRRX_IDM_Bot",
-        createdAt: new Date().toISOString()
-      };
-
-      await enqueueTask(clientId, task, env);
-
-      await sendTelegramMessage(chatId,
-        `🚀 <b>Download Sent to Your PC!</b>\n\n` +
-        `📁 <b>File:</b> <code>${escapeHtml(fileName)}</code>\n` +
-        `📦 <b>Size:</b> ${formattedSize}\n` +
-        `⚡ <b>Engine:</b> PRRX 32-Stream Multi-Segment\n\n` +
-        `<i>PRRX IDM has queued and started this download on your PC.</i>`
-      );
-      return;
-    } else {
-      await sendTelegramMessage(chatId,
-        `❌ <b>Unable to retrieve file from Telegram</b>\n\n` +
-        `Telegram was unable to prepare this file for download. It may have expired or exceeded server limits.\n` +
-        `You can also paste a direct HTTP/HTTPS link or download directly via Telegram Web.`
-      );
-      return;
     }
-  }
 
-  // 5. Check if plain text URL was sent
-  if (text.startsWith("http://") || text.startsWith("https://")) {
+    // For files > 20MB forwarded from a public channel: prefer direct public post URL for scraper
+    if (!downloadUrl && publicPostUrl) {
+      downloadUrl = publicPostUrl;
+    }
+
+    // For files > 20MB (up to 2GB/4GB) or when direct getFile is unavailable:
+    // Encode full remote task metadata into a modern tg:// file URI
+    if (!downloadUrl) {
+      const channelParam = forwardChannel ? `&channel=${encodeURIComponent(forwardChannel)}&channel_msg_id=${forwardMsgId || 0}` : "";
+      downloadUrl = `tg://file?file_id=${fileId}&file_name=${encodeURIComponent(fileName)}&file_size=${fileSize}&mime_type=${encodeURIComponent(mimeType || "")}&chat_id=${chatId}&message_id=${msg.message_id || 0}${channelParam}`;
+    }
+
+    const formattedSize = formatBytes(fileSize);
+    const taskSource = forwardChannel
+      ? `Telegram @PRRX_IDM_Bot (via @${forwardChannel})`
+      : "Telegram @PRRX_IDM_Bot";
+
     const task = {
-      id: `tg_url_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
-      url: text,
-      fileName: "web_download.bin",
-      fileSize: 0,
-      formattedSize: "Streaming...",
-      mediaType: "url",
-      source: "Telegram @PRRX_IDM_Bot",
+      id: `tg_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+      url: downloadUrl,
+      fileName: fileName,
+      fileSize: fileSize,
+      formattedSize: formattedSize,
+      mediaType: mediaType,
+      source: taskSource,
+      fileId: fileId,
+      mimeType: mimeType,
+      chatId: chatId.toString(),
+      messageId: msg.message_id || 0,
       createdAt: new Date().toISOString()
     };
 
     await enqueueTask(clientId, task, env);
 
     await sendTelegramMessage(chatId,
-      `🔗 <b>Link Sent to Your PC!</b>\n\n` +
-      `🌐 <b>URL:</b> <code>${escapeHtml(text.length > 70 ? text.substring(0, 67) + "..." : text)}</code>\n\n` +
-      `⚡ PRRX IDM on your PC is analyzing and downloading this link.`
+      `🚀 <b>Sent to PRRX IDM on your PC! File: ${escapeHtml(fileName)} (${formattedSize})</b>\n\n` +
+      `📁 <b>Name:</b> <code>${escapeHtml(fileName)}</code>\n` +
+      `📦 <b>Size:</b> ${formattedSize}\n` +
+      `⚡ <b>Engine:</b> PRRX Unlimited Turbo Downloader\n\n` +
+      `<i>PRRX IDM has detected this task and popped up the download dialog on your PC screen!</i>`
     );
     return;
   }
 
-  // 6. Generic help reply for unknown text
+  // 6. Check if plain text or entity URL was sent
+  let extractedUrl = null;
+  if (text.startsWith("http://") || text.startsWith("https://")) {
+    extractedUrl = text.split(/\s+/)[0];
+  } else {
+    // Check message entities or caption entities
+    const entities = msg.entities || msg.caption_entities || [];
+    for (const ent of entities) {
+      if (ent.type === "text_link" && ent.url) {
+        extractedUrl = ent.url;
+        break;
+      } else if (ent.type === "url" && text) {
+        extractedUrl = text.substring(ent.offset, ent.offset + ent.length);
+        break;
+      }
+    }
+    // Fallback: regex search for URL in text
+    if (!extractedUrl) {
+      const match = text.match(/(https?:\/\/[^\s]+)/i);
+      if (match) {
+        extractedUrl = match[1];
+      }
+    }
+  }
+
+  if (extractedUrl) {
+    let urlFileName = "web_download.bin";
+    let urlMediaType = "url";
+    let urlSource = "Telegram @PRRX_IDM_Bot";
+
+    // Check if it is a Telegram post URL (e.g. https://t.me/channel/123)
+    const tgPostMatch = extractedUrl.match(/^https?:\/\/(?:www\.)?(?:t|telegram)\.me\/([a-zA-Z0-9_+]+)\/(\d+)/i);
+    if (tgPostMatch) {
+      const ch = tgPostMatch[1];
+      const mid = tgPostMatch[2];
+      urlFileName = `${ch}_${mid}.mp4`;
+      urlMediaType = "video";
+      urlSource = `Telegram @PRRX_IDM_Bot (t.me/${ch}/${mid})`;
+    } else {
+      try {
+        const parsed = new URL(extractedUrl);
+        const seg = parsed.pathname.split("/").filter(Boolean).pop();
+        if (seg && seg.includes(".")) urlFileName = decodeURIComponent(seg);
+      } catch {}
+    }
+
+    const task = {
+      id: `tg_url_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+      url: extractedUrl,
+      fileName: urlFileName,
+      fileSize: 0,
+      formattedSize: "Web Stream",
+      mediaType: urlMediaType,
+      source: urlSource,
+      fileId: "",
+      mimeType: "",
+      chatId: chatId.toString(),
+      messageId: msg.message_id || 0,
+      createdAt: new Date().toISOString()
+    };
+
+    await enqueueTask(clientId, task, env);
+
+    await sendTelegramMessage(chatId,
+      `🚀 <b>Sent to PRRX IDM on your PC! File: ${escapeHtml(urlFileName)} (Web Link)</b>\n\n` +
+      `🌐 <b>URL:</b> <code>${escapeHtml(extractedUrl.length > 70 ? extractedUrl.substring(0, 67) + "..." : extractedUrl)}</code>\n\n` +
+      `⚡ <i>PRRX IDM on your PC is analyzing and downloading this link.</i>`
+    );
+    return;
+  }
+
+  // 7. Generic help reply for unknown text
   await sendTelegramMessage(chatId,
     `💡 <b>PRRX IDM Bot Controls:</b>\n\n` +
     `• <b>Forward any media or file</b> here to download directly to your PC.\n` +
@@ -875,8 +967,8 @@ async function enqueueTask(clientId, task, env) {
     try {
       await ensureTelegramTables(env.DB);
       await env.DB.prepare(`
-        INSERT INTO telegram_tasks (id, client_id, url, file_name, file_size, formatted_size, media_type, source, status, created_at)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', CURRENT_TIMESTAMP)
+        INSERT INTO telegram_tasks (id, client_id, url, file_name, file_size, formatted_size, media_type, source, file_id, mime_type, chat_id, message_id, status, created_at)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 'pending', CURRENT_TIMESTAMP)
       `).bind(
         task.id,
         clientId,
@@ -885,7 +977,11 @@ async function enqueueTask(clientId, task, env) {
         task.fileSize || 0,
         task.formattedSize || "",
         task.mediaType || "document",
-        task.source || "Telegram @PRRX_IDM_Bot"
+        task.source || "Telegram @PRRX_IDM_Bot",
+        task.fileId || "",
+        task.mimeType || "",
+        task.chatId || "",
+        task.messageId || 0
       ).run();
       savedToDb = true;
     } catch (e) {

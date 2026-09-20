@@ -24,6 +24,10 @@ namespace PRRX.IDM.Services
         public string FormattedSize { get; set; } = string.Empty;
         public string MediaType { get; set; } = "document";
         public string Source { get; set; } = "Telegram @PRRX_IDM_Bot";
+        public string FileId { get; set; } = string.Empty;
+        public string MimeType { get; set; } = string.Empty;
+        public string ChatId { get; set; } = string.Empty;
+        public long MessageId { get; set; } = 0;
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     }
 
@@ -237,8 +241,22 @@ namespace PRRX.IDM.Services
                         FileSize = taskElem.TryGetProperty("fileSize", out var fsElem) && fsElem.TryGetInt64(out var fsVal) ? fsVal : 0,
                         FormattedSize = taskElem.TryGetProperty("formattedSize", out var fszElem) ? fszElem.GetString() ?? "" : "",
                         MediaType = taskElem.TryGetProperty("mediaType", out var mtElem) ? mtElem.GetString() ?? "document" : "document",
-                        Source = taskElem.TryGetProperty("source", out var srcElem) ? srcElem.GetString() ?? "@PRRX_IDM_Bot" : "@PRRX_IDM_Bot"
+                        Source = taskElem.TryGetProperty("source", out var srcElem) ? srcElem.GetString() ?? "@PRRX_IDM_Bot" : "@PRRX_IDM_Bot",
+                        FileId = taskElem.TryGetProperty("fileId", out var fidElem) ? fidElem.GetString() ?? "" : "",
+                        MimeType = taskElem.TryGetProperty("mimeType", out var mtpElem) ? mtpElem.GetString() ?? "" : "",
+                        ChatId = taskElem.TryGetProperty("chatId", out var cidElem) ? cidElem.GetString() ?? "" : "",
+                        MessageId = taskElem.TryGetProperty("messageId", out var midElem) && midElem.TryGetInt64(out var midVal) ? midVal : 0
                     };
+
+                    if (string.IsNullOrWhiteSpace(task.Url) && !string.IsNullOrWhiteSpace(task.FileId))
+                    {
+                        task.Url = $"tg://file?file_id={task.FileId}&file_name={Uri.EscapeDataString(task.FileName)}&file_size={task.FileSize}&mime_type={Uri.EscapeDataString(task.MimeType)}&chat_id={task.ChatId}&message_id={task.MessageId}";
+                    }
+
+                    if (task.FileSize > 0 && string.IsNullOrWhiteSpace(task.FormattedSize))
+                    {
+                        task.FormattedSize = TelegramDownloadProvider.FormatBytes(task.FileSize);
+                    }
 
                     if (!string.IsNullOrWhiteSpace(task.Url))
                     {

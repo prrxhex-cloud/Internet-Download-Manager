@@ -127,5 +127,76 @@ namespace PRRX.IDM.Tests
             Assert.NotNull(changedCode);
             Assert.Equal(syncService.PairingCode, changedCode);
         }
+
+        [Fact]
+        public void TelegramRemoteTask_RetainsAllMetadataProperties()
+        {
+            var task = new TelegramRemoteTask
+            {
+                Id = "tg_12345",
+                Url = "tg://file?file_id=TEST_ID",
+                FileName = "4k_video.mp4",
+                FileSize = 3500000000,
+                FormattedSize = "3.26 GB",
+                MediaType = "video",
+                Source = "Telegram @PRRX_IDM_Bot",
+                FileId = "BAACAgIAAxkBAAIB789",
+                MimeType = "video/mp4",
+                ChatId = "12345678",
+                MessageId = 555
+            };
+
+            Assert.Equal("tg_12345", task.Id);
+            Assert.Equal("4k_video.mp4", task.FileName);
+            Assert.Equal(3500000000, task.FileSize);
+            Assert.Equal("3.26 GB", task.FormattedSize);
+            Assert.Equal("video", task.MediaType);
+            Assert.Equal("Telegram @PRRX_IDM_Bot", task.Source);
+            Assert.Equal("BAACAgIAAxkBAAIB789", task.FileId);
+            Assert.Equal("video/mp4", task.MimeType);
+            Assert.Equal("12345678", task.ChatId);
+            Assert.Equal(555, task.MessageId);
+        }
+
+        [Fact]
+        public void DownloadFileInfoViewModel_RetainsPrecalculatedSize_ForLargeTelegramTasks()
+        {
+            long largeSize = 2500000000; // 2.5 GB
+            var tgUrl = $"tg://file?file_id=LARGE_TG_FILE&file_name=Archive_2026.zip&file_size={largeSize}&mime_type=application%2Fzip&chat_id=123&message_id=456";
+
+            var vm = new PRRX.IDM.ViewModels.DownloadFileInfoViewModel(
+                tgUrl,
+                @"C:\Downloads",
+                "Telegram File (Telegram @PRRX_IDM_Bot)",
+                largeSize,
+                "Archive_2026.zip",
+                null,
+                "Telegram @PRRX_IDM_Bot");
+
+            Assert.Equal("Archive_2026.zip", vm.FileName);
+            Assert.Contains("2.33 GB", vm.FileSizeFormatted);
+            Assert.Contains("Archive_2026.zip", vm.SaveAsFullPath);
+            Assert.Equal(largeSize, vm.DetectedBytes);
+        }
+
+        [Fact]
+        public async Task DownloadFileInfoViewModel_PreservesPrecalculatedSize_WhenProbeReturnsNull()
+        {
+            long precalculated = 1800000000; // ~1.68 GB
+            // Using non-tg URL that cannot be probed (offline/invalid)
+            var vm = new PRRX.IDM.ViewModels.DownloadFileInfoViewModel(
+                "https://127.0.0.1:59999/large_file.iso",
+                @"C:\Downloads",
+                "Web Download",
+                precalculated,
+                "large_file.iso");
+
+            // Wait briefly for the non-blocking background probe to fail/finish
+            await Task.Delay(500);
+
+            // Verify that the precalculated size was NOT wiped out or overwritten with "Unknown size"
+            Assert.Equal(precalculated, vm.DetectedBytes);
+            Assert.Contains("1.68 GB", vm.FileSizeFormatted);
+        }
     }
 }
