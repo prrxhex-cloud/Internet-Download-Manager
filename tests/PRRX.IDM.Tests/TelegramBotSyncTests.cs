@@ -45,5 +45,87 @@ namespace PRRX.IDM.Tests
             syncService.IsEnabled = true;
             Assert.True(syncService.IsEnabled);
         }
+
+        private class TestConfigService : IConfigurationService
+        {
+            public Models.AppConfig CurrentConfig { get; set; } = new();
+            public bool Saved { get; set; } = false;
+
+            public void SaveConfig()
+            {
+                Saved = true;
+            }
+
+            public void LoadConfig()
+            {
+            }
+        }
+
+        [Fact]
+        public void TelegramBotSyncService_GeneratesAndPersistsClientId_WhenConfigEmpty()
+        {
+            var configService = new TestConfigService();
+            configService.CurrentConfig.TelegramClientId = string.Empty;
+
+            var syncService = new TelegramBotSyncService(configService);
+
+            Assert.NotEmpty(syncService.ClientId);
+            Assert.Equal(configService.CurrentConfig.TelegramClientId, syncService.ClientId);
+            Assert.True(configService.Saved);
+        }
+
+        [Fact]
+        public void TelegramBotSyncService_LoadsExistingClientId_FromConfig()
+        {
+            var configService = new TestConfigService();
+            var existingId = "client-fixed-guid-12345";
+            configService.CurrentConfig.TelegramClientId = existingId;
+            configService.CurrentConfig.IsTelegramBotSyncEnabled = false;
+
+            var syncService = new TelegramBotSyncService(configService);
+
+            Assert.Equal(existingId, syncService.ClientId);
+            Assert.False(syncService.IsEnabled);
+        }
+
+        [Fact]
+        public void TelegramBotSyncService_SyncsIsEnabled_WithConfig()
+        {
+            var configService = new TestConfigService();
+            var syncService = new TelegramBotSyncService(configService);
+
+            syncService.IsEnabled = false;
+            Assert.False(configService.CurrentConfig.IsTelegramBotSyncEnabled);
+            Assert.True(configService.Saved);
+
+            syncService.IsEnabled = true;
+            Assert.True(configService.CurrentConfig.IsTelegramBotSyncEnabled);
+        }
+
+        [Fact]
+        public async Task TelegramBotSyncService_FallbackWithShortClientId_DoesNotThrow()
+        {
+            var configService = new TestConfigService();
+            configService.CurrentConfig.TelegramClientId = "ab";
+
+            var syncService = new TelegramBotSyncService(configService, baseUrl: "https://127.0.0.1:59999");
+            await syncService.InitializeAsync();
+
+            Assert.NotNull(syncService.PairingCode);
+            Assert.StartsWith("PRRX-AB", syncService.PairingCode);
+        }
+
+        [Fact]
+        public async Task TelegramBotSyncService_InitializeFiresPairingCodeChangedEvent()
+        {
+            var syncService = new TelegramBotSyncService(baseUrl: "https://127.0.0.1:59999");
+            string? changedCode = null;
+            syncService.PairingCodeChanged += (s, code) => changedCode = code;
+
+            await syncService.InitializeAsync();
+
+            Assert.NotNull(changedCode);
+            Assert.Equal(syncService.PairingCode, changedCode);
+        }
     }
 }

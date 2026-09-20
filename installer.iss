@@ -9,6 +9,7 @@
 
 #define MyAppName "PRRX Internet Download Manager"
 #define MyAppVersion "1.6.0"
+; Version Lineage: 1.5.0 -> 1.6.0
 #define MyAppPublisher "PRRX Cooperation"
 #define MyAppURL "https://github.com/prrxhex-cloud/Internet-Download-Manager"
 #define MyAppExeName "PRRX.InternetDownloadManager.exe"

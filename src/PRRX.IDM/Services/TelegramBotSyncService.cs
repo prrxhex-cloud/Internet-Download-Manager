@@ -61,7 +61,21 @@ namespace PRRX.IDM.Services
         private CancellationTokenSource? _syncCts;
         private bool _isStarted;
 
-        public bool IsEnabled { get; set; } = true;
+        private bool _isEnabled = true;
+        public bool IsEnabled
+        {
+            get => _isEnabled;
+            set
+            {
+                _isEnabled = value;
+                if (_configService != null && _configService.CurrentConfig.IsTelegramBotSyncEnabled != value)
+                {
+                    _configService.CurrentConfig.IsTelegramBotSyncEnabled = value;
+                    _configService.SaveConfig();
+                }
+            }
+        }
+
         public bool IsConnected { get; private set; }
         public string ClientId { get; private set; } = string.Empty;
         public string PairingCode { get; private set; } = "PRRX-INIT";
@@ -75,17 +89,32 @@ namespace PRRX.IDM.Services
         {
             if (!SharedHttpClient.DefaultRequestHeaders.Contains("User-Agent"))
             {
-                SharedHttpClient.DefaultRequestHeaders.Add("User-Agent", "PRRX-IDM-TelegramSync/1.5.0");
+                SharedHttpClient.DefaultRequestHeaders.Add("User-Agent", "PRRX-IDM-TelegramSync/1.6.0");
             }
         }
+
+        private DateTime _lastPairRegistered = DateTime.MinValue;
 
         public TelegramBotSyncService(IConfigurationService? configService = null, string? baseUrl = null)
         {
             _configService = configService;
             _baseUrl = !string.IsNullOrWhiteSpace(baseUrl) ? baseUrl.TrimEnd('/') : DefaultBaseUrl;
 
-            // Generate or load unique ClientId
-            ClientId = Guid.NewGuid().ToString("N");
+            if (_configService != null)
+            {
+                _isEnabled = _configService.CurrentConfig.IsTelegramBotSyncEnabled;
+                if (string.IsNullOrWhiteSpace(_configService.CurrentConfig.TelegramClientId))
+                {
+                    _configService.CurrentConfig.TelegramClientId = Guid.NewGuid().ToString("N");
+                    _configService.SaveConfig();
+                }
+                ClientId = _configService.CurrentConfig.TelegramClientId;
+            }
+            else
+            {
+                ClientId = Guid.NewGuid().ToString("N");
+            }
+
             Current = this;
         }
 
@@ -94,7 +123,12 @@ namespace PRRX.IDM.Services
             try
             {
                 var pairUri = $"{_baseUrl}/api/telegram/pair";
-                var payload = JsonSerializer.Serialize(new { clientId = ClientId });
+                var payloadObj = new
+                {
+                    clientId = ClientId,
+                    pairCode = (PairingCode != "PRRX-INIT" && PairingCode.StartsWith("PRRX-")) ? PairingCode : null
+                };
+                var payload = JsonSerializer.Serialize(payloadObj);
                 using var content = new StringContent(payload, System.Text.Encoding.UTF8, "application/json");
 
                 using var resp = await SharedHttpClient.PostAsync(pairUri, content);
@@ -102,20 +136,30 @@ namespace PRRX.IDM.Services
                 {
                     var json = await resp.Content.ReadAsStringAsync();
                     using var doc = JsonDocument.Parse(json);
-                    if (doc.RootElement.TryGetProperty("pairCode", out var codeElem))
+                    if (doc.RootElement.TryGetProperty("pairCode", out var codeElem) &&
+                        codeElem.GetString() is { } code && !string.IsNullOrWhiteSpace(code))
                     {
-                        PairingCode = codeElem.GetString() ?? "PRRX-FREE";
+                        PairingCode = code;
                         IsConnected = true;
+                        _lastPairRegistered = DateTime.UtcNow;
                         PairingCodeChanged?.Invoke(this, PairingCode);
+                        return;
                     }
                 }
+
+                ApplyFallbackPairingCode();
             }
             catch
             {
-                // Offline fallback pairing code
-                PairingCode = "PRRX-" + ClientId.Substring(0, 4).ToUpperInvariant();
-                PairingCodeChanged?.Invoke(this, PairingCode);
+                ApplyFallbackPairingCode();
             }
+        }
+
+        private void ApplyFallbackPairingCode()
+        {
+            var prefix = (ClientId.Length >= 4 ? ClientId.Substring(0, 4) : ClientId.PadRight(4, '0')).ToUpperInvariant();
+            PairingCode = "PRRX-" + prefix;
+            PairingCodeChanged?.Invoke(this, PairingCode);
         }
 
         public void Start()
@@ -136,10 +180,21 @@ namespace PRRX.IDM.Services
 
         private async Task PollTasksLoopAsync(CancellationToken ct)
         {
+            int cycleCount = 0;
             while (!ct.IsCancellationRequested)
             {
+                cycleCount++;
                 try
                 {
+                    // Auto-retry registration if not yet connected, or renew pair code before 1-hour expiration
+                    if (!IsConnected || (DateTime.UtcNow - _lastPairRegistered).TotalMinutes >= 45)
+                    {
+                        if (!IsConnected || cycleCount % 7 == 0)
+                        {
+                            await InitializeAsync();
+                        }
+                    }
+
                     if (IsEnabled)
                     {
                         await PollRemoteTasksAsync(ct);
@@ -179,7 +234,7 @@ namespace PRRX.IDM.Services
                         Id = taskElem.TryGetProperty("id", out var idElem) ? idElem.GetString() ?? "" : "",
                         Url = taskElem.TryGetProperty("url", out var urlElem) ? urlElem.GetString() ?? "" : "",
                         FileName = taskElem.TryGetProperty("fileName", out var fnElem) ? fnElem.GetString() ?? "" : "telegram_file.bin",
-                        FileSize = taskElem.TryGetProperty("fileSize", out var fsElem) ? fsElem.GetInt64() : 0,
+                        FileSize = taskElem.TryGetProperty("fileSize", out var fsElem) && fsElem.TryGetInt64(out var fsVal) ? fsVal : 0,
                         FormattedSize = taskElem.TryGetProperty("formattedSize", out var fszElem) ? fszElem.GetString() ?? "" : "",
                         MediaType = taskElem.TryGetProperty("mediaType", out var mtElem) ? mtElem.GetString() ?? "document" : "document",
                         Source = taskElem.TryGetProperty("source", out var srcElem) ? srcElem.GetString() ?? "@PRRX_IDM_Bot" : "@PRRX_IDM_Bot"

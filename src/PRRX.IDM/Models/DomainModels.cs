@@ -108,6 +108,16 @@ namespace PRRX.IDM.Models
         /// PRRX IDM Process and Network scheduling priority (Defaults to High)
         /// </summary>
         public ProcessPrioritySetting ProcessPriority { get; set; } = ProcessPrioritySetting.High;
+
+        /// <summary>
+        /// Enable automated remote downloading via Telegram Bot (@PRRX_IDM_Bot)
+        /// </summary>
+        public bool IsTelegramBotSyncEnabled { get; set; } = true;
+
+        /// <summary>
+        /// Persistent unique client ID for Telegram Bot pairing
+        /// </summary>
+        public string TelegramClientId { get; set; } = string.Empty;
     }
 
     public enum DownloadStatus

@@ -215,9 +215,11 @@ export default {
           `).bind(peer_id, sha256.toLowerCase(), clientPublicIp, lan_ip, parseInt(port), completed_chunks || 0, total_chunks || 0).run();
 
           // Background cleanup of stale peers (> 10 mins inactive)
-          ctx.waitUntil(
-            env.DB.prepare("DELETE FROM p2p_peers WHERE datetime(last_heartbeat) < datetime('now', '-10 minutes')").run()
-          );
+          if (ctx && ctx.waitUntil) {
+            ctx.waitUntil(
+              env.DB.prepare("DELETE FROM p2p_peers WHERE datetime(last_heartbeat) < datetime('now', '-10 minutes')").run().catch(() => {})
+            );
+          }
         }
 
         return new Response(JSON.stringify({ success: true, registered: true }), { status: 200, headers: corsHeaders });
@@ -281,7 +283,11 @@ export default {
       if (path === "/api/telegram/webhook" && method === "POST") {
         const update = await request.json().catch(() => null);
         if (update) {
-          ctx.waitUntil(handleTelegramUpdate(update, env));
+          if (ctx && ctx.waitUntil) {
+            ctx.waitUntil(handleTelegramUpdate(update, env, ctx));
+          } else {
+            await handleTelegramUpdate(update, env, ctx);
+          }
         }
         return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
       }
@@ -289,10 +295,38 @@ export default {
       // Register / Generate Desktop Pairing Code (POST)
       if (path === "/api/telegram/pair" && method === "POST") {
         const body = await request.json().catch(() => ({}));
-        const clientId = body.clientId || crypto.randomUUID();
-        const pairCode = generatePairCode();
+        const clientId = (typeof body.clientId === "string" && body.clientId.trim())
+          ? body.clientId.trim()
+          : crypto.randomUUID();
+        const pairCode = (typeof body.pairCode === "string" && /^PRRX-[A-Z0-9]{4,12}$/i.test(body.pairCode.trim()))
+          ? body.pairCode.trim().toUpperCase()
+          : generatePairCode();
 
         pairMap.set(pairCode, clientId);
+
+        if (env.DB) {
+          await ensureTelegramTables(env.DB);
+          try {
+            await env.DB.prepare(`
+              INSERT INTO telegram_pairs (pair_code, client_id, created_at, expires_at)
+              VALUES (?1, ?2, CURRENT_TIMESTAMP, datetime('now', '+1 hour'))
+              ON CONFLICT(pair_code) DO UPDATE SET
+                client_id = excluded.client_id,
+                created_at = CURRENT_TIMESTAMP,
+                expires_at = datetime('now', '+1 hour')
+            `).bind(pairCode, clientId).run();
+
+            // Background cleanup of expired pairs
+            if (ctx && ctx.waitUntil) {
+              ctx.waitUntil(
+                env.DB.prepare("DELETE FROM telegram_pairs WHERE datetime(expires_at) < datetime('now')").run().catch(() => {})
+              );
+            }
+          } catch (e) {
+            console.error("D1 pair insert error:", e);
+          }
+        }
+
         if (env.PRRX_KV) {
           await env.PRRX_KV.put(`pair:${pairCode}`, clientId, { expirationTtl: 3600 });
         }
@@ -313,9 +347,52 @@ export default {
         }
 
         let tasks = [];
-        if (taskQueues.has(clientId)) {
-          tasks = taskQueues.get(clientId) || [];
-          taskQueues.set(clientId, []); // Dequeue tasks
+
+        if (env.DB) {
+          await ensureTelegramTables(env.DB);
+          try {
+            const rows = await env.DB.prepare(`
+              SELECT id, url, file_name AS fileName, file_size AS fileSize,
+                     formatted_size AS formattedSize, media_type AS mediaType,
+                     source, created_at AS createdAt
+              FROM telegram_tasks
+              WHERE client_id = ?1 AND status = 'pending'
+              ORDER BY created_at ASC
+              LIMIT 50
+            `).bind(clientId).all();
+
+            tasks = rows.results || [];
+
+            if (tasks.length > 0) {
+              const ids = tasks.map(t => t.id);
+              const placeholders = ids.map(() => "?").join(",");
+              await env.DB.prepare(`
+                UPDATE telegram_tasks
+                SET status = 'delivered', delivered_at = CURRENT_TIMESTAMP
+                WHERE id IN (${placeholders})
+              `).bind(...ids).run();
+            }
+
+            // Occasional background cleanup of delivered tasks older than 3 days
+            if (ctx && ctx.waitUntil) {
+              ctx.waitUntil(
+                env.DB.prepare(
+                  "DELETE FROM telegram_tasks WHERE status = 'delivered' AND datetime(delivered_at) < datetime('now', '-3 days')"
+                ).run().catch(() => {})
+              );
+            }
+          } catch (e) {
+            console.error("D1 tasks query error:", e);
+          }
+        }
+
+        // Memory and KV fallbacks if D1 returned no tasks or is not configured
+        if (tasks.length === 0 && taskQueues.has(clientId)) {
+          const memTasks = taskQueues.get(clientId) || [];
+          if (memTasks.length > 0) {
+            tasks = memTasks;
+            taskQueues.set(clientId, []); // Dequeue tasks
+          }
         }
 
         if (env.PRRX_KV && tasks.length === 0) {
@@ -339,64 +416,326 @@ export default {
 };
 
 // ============================================================================
-// TELEGRAM UPDATE HANDLER LOGIC
+// TELEGRAM UPDATE HANDLER LOGIC & D1 DATABASE MANAGEMENT
 // ============================================================================
-async function handleTelegramUpdate(update, env) {
-  if (!update || !update.message) return;
-  const msg = update.message;
+
+let telegramTablesInitialized = false;
+
+async function ensureTelegramTables(db) {
+  if (!db || telegramTablesInitialized) return;
+  try {
+    await db.batch([
+      db.prepare(`
+        CREATE TABLE IF NOT EXISTS telegram_pairs (
+          pair_code TEXT PRIMARY KEY,
+          client_id TEXT NOT NULL,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          expires_at DATETIME NOT NULL
+        )
+      `),
+      db.prepare(`
+        CREATE TABLE IF NOT EXISTS telegram_users (
+          chat_id TEXT PRIMARY KEY,
+          client_id TEXT NOT NULL,
+          linked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          last_active DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `),
+      db.prepare(`
+        CREATE TABLE IF NOT EXISTS telegram_tasks (
+          id TEXT PRIMARY KEY,
+          client_id TEXT NOT NULL,
+          url TEXT NOT NULL,
+          file_name TEXT,
+          file_size INTEGER DEFAULT 0,
+          formatted_size TEXT,
+          media_type TEXT DEFAULT 'document',
+          source TEXT,
+          status TEXT DEFAULT 'pending',
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          delivered_at DATETIME
+        )
+      `),
+      db.prepare(`
+        CREATE INDEX IF NOT EXISTS idx_telegram_tasks_client ON telegram_tasks(client_id, status)
+      `)
+    ]);
+    telegramTablesInitialized = true;
+  } catch (err) {
+    console.error("Failed to initialize telegram tables in D1:", err);
+  }
+}
+
+async function handleTelegramUpdate(update, env, ctx) {
+  if (!update) return;
+  const msg = update.message || update.edited_message || update.channel_post;
+  if (!msg || !msg.chat) return;
+
   const chatId = msg.chat.id;
-  const text = (msg.text || "").trim();
+  const text = (msg.text || msg.caption || "").trim();
 
-  // 1. Handle /start or /pair commands
-  if (text.startsWith("/start") || text.startsWith("/pair")) {
-    const parts = text.split(" ");
-    let pairCode = parts.length > 1 ? parts[1].trim().toUpperCase() : null;
+  // 1. Check for pairing commands or codes:
+  // - /pair [CODE], /pair_[CODE], pair [CODE]
+  // - /start [CODE], /start_[CODE], start [CODE]
+  // - Bare code: PRRX-XXXX, PRRX XXXX, PRRX_XXXX, PRRXXXXX
+  // - Bare 4-8 character code: e.g. 986A, RYMF
+  let pairingCodeAttempt = null;
+  let isPairOrStartCommand = false;
 
-    if (pairCode) {
-      let clientId = pairMap.get(pairCode);
-      if (!clientId && env.PRRX_KV) {
-        clientId = await env.PRRX_KV.get(`pair:${pairCode}`);
-      }
+  const pairMatch = text.match(/^(?:\/|!)?pair(?:@\w+)?(?:[\s:=-]+([A-Za-z0-9][A-Za-z0-9_-]*)|_([A-Za-z0-9][A-Za-z0-9_-]*))?$/i);
+  const startMatch = text.match(/^(?:\/|!)?start(?:@\w+)?(?:[\s:=-]+([A-Za-z0-9][A-Za-z0-9_-]*)|_([A-Za-z0-9][A-Za-z0-9_-]*))?$/i);
+  const embeddedCodeMatch = text.match(/\b(PRRX[-\s_]?[A-Za-z0-9]{4,12})\b/i);
 
-      if (clientId) {
-        userClientMap.set(chatId, clientId);
-        if (env.PRRX_KV) {
-          await env.PRRX_KV.put(`user:${chatId}`, clientId, { expirationTtl: 86400 * 30 });
-        }
+  if (pairMatch) {
+    isPairOrStartCommand = true;
+    pairingCodeAttempt = pairMatch[1] || pairMatch[2] || (embeddedCodeMatch ? embeddedCodeMatch[1] : null);
+  } else if (startMatch) {
+    isPairOrStartCommand = true;
+    pairingCodeAttempt = startMatch[1] || startMatch[2] || (embeddedCodeMatch ? embeddedCodeMatch[1] : null);
+  } else if (embeddedCodeMatch) {
+    pairingCodeAttempt = embeddedCodeMatch[1];
+  } else if (/^[A-Za-z0-9]{4,8}$/.test(text)) {
+    // User sent a bare 4-8 alphanumeric code like 986A or RYMF
+    pairingCodeAttempt = text;
+  }
 
-        await sendTelegramMessage(chatId, 
-          `✅ <b>PC Successfully Linked!</b>\n\n` +
-          `💻 Your Telegram is now connected to <b>PRRX Internet Download Manager</b>.\n\n` +
-          `🚀 <b>How to download:</b>\n` +
-          `• Forward any <b>video, audio, document, or movie</b> directly to this chat.\n` +
-          `• Or paste any download link!\n\n` +
-          `Your PC will automatically start downloading at maximum 32-stream speed!`
-        );
-        return;
-      }
-    }
-
-    // Default welcome if no code or invalid code
+  // If user sent bare /start or /pair without code, show friendly welcome instructions
+  if (isPairOrStartCommand && !pairingCodeAttempt) {
     await sendTelegramMessage(chatId,
       `👋 <b>Welcome to PRRX Internet Download Manager Bot!</b>\n\n` +
       `⚡ <b>Automated Telegram-to-PC Downloading:</b>\n` +
       `1. Open PRRX IDM on your PC.\n` +
-      `2. Go to <b>Settings → Telegram Bot</b> and copy your pairing code.\n` +
-      `3. Send your code here (e.g. <code>/pair PRRX-1234</code>).\n\n` +
-      `Once linked, any file you forward here downloads on your PC automatically!`
+      `2. Go to <b>Settings → Telegram Bot</b> to view your pairing code.\n` +
+      `3. Send your code here (e.g. <code>/pair PRRX-1234</code> or simply <code>PRRX-1234</code>).\n\n` +
+      `Once linked, any media, file, or download link forwarded here will automatically download on your PC at maximum 32-stream speed!`
+    );
+    return;
+  }
+
+  // If a pairing code was provided
+  if (pairingCodeAttempt) {
+    const rawCode = pairingCodeAttempt.trim().toUpperCase();
+    let candidateCode = rawCode.replace(/[_\s]+/g, "-");
+    if (/^PRRX[A-Z0-9]{4,}$/.test(candidateCode)) {
+      candidateCode = "PRRX-" + candidateCode.slice(4);
+    } else if (!candidateCode.startsWith("PRRX-") && /^[A-Z0-9]{4,8}$/.test(candidateCode)) {
+      candidateCode = "PRRX-" + candidateCode;
+    }
+
+    let matchedClientId = null;
+
+    if (env.DB) {
+      await ensureTelegramTables(env.DB);
+      try {
+        const pairRow = await env.DB.prepare(`
+          SELECT client_id
+          FROM telegram_pairs
+          WHERE (pair_code = ?1 OR pair_code = ?2 OR pair_code = ?3)
+            AND datetime(expires_at) > datetime('now')
+        `).bind(candidateCode, rawCode, candidateCode.replace(/-/g, "_")).first();
+
+        if (pairRow) {
+          matchedClientId = pairRow.client_id;
+        }
+      } catch (e) {
+        console.error("D1 pair lookup error:", e);
+      }
+    }
+
+    if (!matchedClientId) {
+      matchedClientId = pairMap.get(candidateCode) || pairMap.get(rawCode);
+    }
+
+    if (!matchedClientId && env.PRRX_KV) {
+      matchedClientId = await env.PRRX_KV.get(`pair:${candidateCode}`) || await env.PRRX_KV.get(`pair:${rawCode}`);
+    }
+
+    if (matchedClientId) {
+      // Link chat ID to client ID in D1 and delete used pair code
+      if (env.DB) {
+        try {
+          await env.DB.batch([
+            env.DB.prepare(`
+              INSERT INTO telegram_users (chat_id, client_id, linked_at, last_active)
+              VALUES (?1, ?2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+              ON CONFLICT(chat_id) DO UPDATE SET
+                client_id = excluded.client_id,
+                last_active = CURRENT_TIMESTAMP
+            `).bind(chatId.toString(), matchedClientId),
+
+            env.DB.prepare("DELETE FROM telegram_pairs WHERE pair_code = ?1 OR pair_code = ?2 OR client_id = ?3")
+              .bind(candidateCode, rawCode, matchedClientId)
+          ]);
+        } catch (e) {
+          console.error("D1 link user error:", e);
+        }
+      }
+
+      userClientMap.set(chatId.toString(), matchedClientId);
+      pairMap.delete(candidateCode);
+      pairMap.delete(rawCode);
+
+      if (env.PRRX_KV) {
+        await env.PRRX_KV.put(`user:${chatId}`, matchedClientId, { expirationTtl: 86400 * 30 });
+        await env.PRRX_KV.delete(`pair:${candidateCode}`);
+        await env.PRRX_KV.delete(`pair:${rawCode}`);
+      }
+
+      await sendTelegramMessage(chatId,
+        `✅ <b>PC Successfully Linked!</b>\n\n` +
+        `💻 Your Telegram is now securely connected to <b>PRRX Internet Download Manager</b>.\n\n` +
+        `🚀 <b>How to download:</b>\n` +
+        `• Forward any <b>video, audio, document, or archive</b> directly to this chat.\n` +
+        `• Or paste any download link (e.g. <code>https://...</code>)!\n\n` +
+        `Your PC will automatically receive and start downloading at maximum 32-stream Turbo speed!`
+      );
+      return;
+    }
+
+    // Invalid or expired pairing code - clear error response!
+    await sendTelegramMessage(chatId,
+      `❌ <b>Invalid or Expired Pairing Code</b>\n\n` +
+      `The pairing code <code>${escapeHtml(candidateCode)}</code> could not be found or has expired (pairing codes expire after 1 hour).\n\n` +
+      `💡 <b>To connect your PC:</b>\n` +
+      `1. Open PRRX IDM on your PC.\n` +
+      `2. Go to <b>Settings → Telegram Bot</b> to view or refresh your pairing code.\n` +
+      `3. Send your code here (e.g. <code>/pair ${escapeHtml(candidateCode)}</code>).`
     );
     return;
   }
 
   // 2. Identify target Client ID for this user
-  let clientId = userClientMap.get(chatId);
-  if (!clientId && env.PRRX_KV) {
-    clientId = await env.PRRX_KV.get(`user:${chatId}`);
+  let clientId = userClientMap.get(chatId.toString());
+
+  if (!clientId && env.DB) {
+    await ensureTelegramTables(env.DB);
+    try {
+      const userRow = await env.DB.prepare(
+        "SELECT client_id FROM telegram_users WHERE chat_id = ?"
+      ).bind(chatId.toString()).first();
+
+      if (userRow) {
+        clientId = userRow.client_id;
+        userClientMap.set(chatId.toString(), clientId);
+        if (ctx && ctx.waitUntil) {
+          ctx.waitUntil(
+            env.DB.prepare("UPDATE telegram_users SET last_active = CURRENT_TIMESTAMP WHERE chat_id = ?")
+              .bind(chatId.toString()).run().catch(() => {})
+          );
+        }
+      }
+    } catch (e) {
+      console.error("D1 user lookup error:", e);
+    }
   }
 
-  // If user hasn't paired yet, fallback to default_user queue
+  if (!clientId && env.PRRX_KV) {
+    clientId = await env.PRRX_KV.get(`user:${chatId}`);
+    if (clientId) {
+      userClientMap.set(chatId.toString(), clientId);
+    }
+  }
+
+  // Handle /help, /info, /about
+  const helpMatch = text.match(/^\/(?:help|info|about)(?:@\w+)?$/i);
+  if (helpMatch) {
+    const statusText = clientId
+      ? `✅ <b>Status:</b> Connected to Client <code>${clientId.substring(0, 8)}...</code>`
+      : `⚠️ <b>Status:</b> Not connected to any PC.`;
+    await sendTelegramMessage(chatId,
+      `👋 <b>PRRX Internet Download Manager Bot</b>\n\n` +
+      `${statusText}\n\n` +
+      `⚡ <b>Commands:</b>\n` +
+      `• <code>/pair [CODE]</code> — Connect your PC (e.g. <code>/pair PRRX-1234</code>)\n` +
+      `• <code>/boost</code> — View 32-stream turbo acceleration status\n` +
+      `• <code>/status</code> — Check current connection and queue status\n` +
+      `• <code>/unlink</code> — Disconnect your PC\n` +
+      `• <code>/help</code> — Show this help guide\n\n` +
+      `🚀 <b>How to download:</b> Forward any video, audio, document or paste download links to this chat!`
+    );
+    return;
+  }
+
+  // Handle /boost command
+  const boostMatch = text.match(/^\/boost(?:@\w+)?(?:\s+(.*))?$/i);
+  if (boostMatch) {
+    if (!clientId) {
+      await sendTelegramMessage(chatId,
+        `🚀 <b>PRRX Turbo Download Boost: 32-Stream Enabled</b>\n\n` +
+        `All downloads forwarded through @PRRX_IDM_Bot automatically utilize <b>32 multi-connection parallel streams</b> with 1 MB high-speed chunk buffers.\n\n` +
+        `⚠️ <b>PC Not Linked:</b> Open PRRX IDM on your PC, go to <b>Settings → Telegram Bot</b>, and send your code (e.g. <code>/pair PRRX-1234</code>) to begin receiving boosted downloads on your desktop!`
+      );
+    } else {
+      await sendTelegramMessage(chatId,
+        `🚀 <b>PRRX Turbo Download Boost: ACTIVE</b>\n\n` +
+        `⚡ <b>Multi-Connection:</b> 32 Parallel Streams\n` +
+        `📦 <b>Buffer Size:</b> 1 MB High-Speed Turbo Buffer\n` +
+        `💻 <b>Linked Client:</b> <code>${clientId.substring(0, 8)}...</code>\n\n` +
+        `All incoming downloads are accelerated at maximum network throughput with zero speed limits!`
+      );
+    }
+    return;
+  }
+
+  // Handle /status command
+  const statusMatch = text.match(/^\/status(?:@\w+)?$/i);
+  if (statusMatch) {
+    if (!clientId) {
+      await sendTelegramMessage(chatId,
+        `⚠️ <b>Status: PC Not Linked</b>\n\n` +
+        `Your Telegram account is not yet connected to PRRX IDM.\n` +
+        `Open PRRX IDM on your PC, go to <b>Settings → Telegram Bot</b>, and send your pairing code here.`
+      );
+    } else {
+      let pendingCount = 0;
+      if (env.DB) {
+        try {
+          const countRow = await env.DB.prepare(
+            "SELECT COUNT(*) AS count FROM telegram_tasks WHERE client_id = ? AND status = 'pending'"
+          ).bind(clientId).first();
+          if (countRow) pendingCount = countRow.count || 0;
+        } catch {}
+      }
+      await sendTelegramMessage(chatId,
+        `✅ <b>Status: Connected & Active</b>\n\n` +
+        `💻 <b>Client ID:</b> <code>${clientId.substring(0, 8)}...</code>\n` +
+        `⚡ <b>Turbo Speed:</b> 32-Stream Multi-Connection Enabled\n` +
+        `📥 <b>Pending Tasks:</b> ${pendingCount} in queue\n\n` +
+        `Any media or links forwarded here are sent directly to your PC.`
+      );
+    }
+    return;
+  }
+
+  // Handle /unlink or /unpair command
+  const unlinkMatch = text.match(/^\/(?:unlink|unpair)(?:@\w+)?$/i);
+  if (unlinkMatch) {
+    if (env.DB) {
+      await env.DB.prepare("DELETE FROM telegram_users WHERE chat_id = ?").bind(chatId.toString()).run().catch(() => {});
+    }
+    userClientMap.delete(chatId.toString());
+    if (env.PRRX_KV) {
+      await env.PRRX_KV.delete(`user:${chatId}`).catch(() => {});
+    }
+    await sendTelegramMessage(chatId,
+      `🔌 <b>PC Unlinked</b>\n\n` +
+      `Your Telegram account has been disconnected from PRRX IDM.\n` +
+      `To connect again, send a new pairing code from your PC.`
+    );
+    return;
+  }
+
+  // If user has not linked their PC, warn them to pair first
   if (!clientId) {
-    clientId = "default_user";
+    await sendTelegramMessage(chatId,
+      `⚠️ <b>PC Not Linked!</b>\n\n` +
+      `Please link your Telegram account to PRRX Internet Download Manager before sending files or links.\n\n` +
+      `<b>Quick Setup:</b>\n` +
+      `1. Open PRRX IDM on your PC.\n` +
+      `2. Go to <b>Settings → Telegram Bot</b> to find your pairing code.\n` +
+      `3. Send your code here (e.g. <code>/pair PRRX-1234</code> or simply <code>PRRX-1234</code>).`
+    );
+    return;
   }
 
   // 3. Check for Media Files (Video, Document, Audio, Voice, Photo)
@@ -435,23 +774,49 @@ async function handleTelegramUpdate(update, env) {
 
   // 4. Resolve File Download URL if media detected
   if (fileId) {
+    const MAX_TELEGRAM_BOT_FILE_SIZE = 20 * 1024 * 1024; // 20 MB Telegram Bot API limit
+    if (fileSize > MAX_TELEGRAM_BOT_FILE_SIZE) {
+      const formattedSize = formatBytes(fileSize);
+      await sendTelegramMessage(chatId,
+        `⚠️ <b>File Exceeds Telegram Bot Limit (${formattedSize})</b>\n\n` +
+        `Telegram Bot API imposes a strict <b>20 MB</b> file limit for bots.\n\n` +
+        `💡 <b>How to download large files with PRRX IDM:</b>\n` +
+        `• <b>Telegram Web:</b> Open <a href="https://web.telegram.org">web.telegram.org</a> in Chrome or Edge. Use PRRX IDM's floating media grabber to download files of any size (up to 4 GB+).\n` +
+        `• <b>Direct Link Bots:</b> Forward this file to @FileToLinkBot or @PublicURLBot on Telegram, then send the generated direct download link here!`
+      );
+      return;
+    }
+
     const fileInfo = await getTelegramFileInfo(fileId);
     if (fileInfo && fileInfo.file_path) {
+      const resolvedSize = fileSize > 0 ? fileSize : (fileInfo.file_size || 0);
+      if (resolvedSize > MAX_TELEGRAM_BOT_FILE_SIZE) {
+        const formattedSize = formatBytes(resolvedSize);
+        await sendTelegramMessage(chatId,
+          `⚠️ <b>File Exceeds Telegram Bot Limit (${formattedSize})</b>\n\n` +
+          `Telegram Bot API imposes a strict <b>20 MB</b> file limit for bots.\n\n` +
+          `💡 <b>How to download large files with PRRX IDM:</b>\n` +
+          `• <b>Telegram Web:</b> Open <a href="https://web.telegram.org">web.telegram.org</a> in Chrome or Edge. Use PRRX IDM's floating media grabber to download files of any size (up to 4 GB+).\n` +
+          `• <b>Direct Link Bots:</b> Forward this file to @FileToLinkBot or @PublicURLBot on Telegram, then send the generated direct download link here!`
+        );
+        return;
+      }
+
       const downloadUrl = `${TELEGRAM_FILE_BASE}/${fileInfo.file_path}`;
-      const formattedSize = formatBytes(fileSize);
+      const formattedSize = formatBytes(resolvedSize);
 
       const task = {
         id: `tg_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
         url: downloadUrl,
         fileName: fileName,
-        fileSize: fileSize,
+        fileSize: resolvedSize,
         formattedSize: formattedSize,
         mediaType: mediaType,
         source: "Telegram @PRRX_IDM_Bot",
         createdAt: new Date().toISOString()
       };
 
-      enqueueTask(clientId, task, env);
+      await enqueueTask(clientId, task, env);
 
       await sendTelegramMessage(chatId,
         `🚀 <b>Download Sent to Your PC!</b>\n\n` +
@@ -461,13 +826,20 @@ async function handleTelegramUpdate(update, env) {
         `<i>PRRX IDM has queued and started this download on your PC.</i>`
       );
       return;
+    } else {
+      await sendTelegramMessage(chatId,
+        `❌ <b>Unable to retrieve file from Telegram</b>\n\n` +
+        `Telegram was unable to prepare this file for download. It may have expired or exceeded server limits.\n` +
+        `You can also paste a direct HTTP/HTTPS link or download directly via Telegram Web.`
+      );
+      return;
     }
   }
 
-  // 5. Check if plain text URL was sent (e.g. YouTube link or direct HTTP link)
+  // 5. Check if plain text URL was sent
   if (text.startsWith("http://") || text.startsWith("https://")) {
     const task = {
-      id: `tg_url_${Date.now()}`,
+      id: `tg_url_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
       url: text,
       fileName: "web_download.bin",
       fileSize: 0,
@@ -477,11 +849,11 @@ async function handleTelegramUpdate(update, env) {
       createdAt: new Date().toISOString()
     };
 
-    enqueueTask(clientId, task, env);
+    await enqueueTask(clientId, task, env);
 
     await sendTelegramMessage(chatId,
       `🔗 <b>Link Sent to Your PC!</b>\n\n` +
-      `🌐 <b>URL:</b> <code>${escapeHtml(text.substring(0, 60))}...</code>\n` +
+      `🌐 <b>URL:</b> <code>${escapeHtml(text.length > 70 ? text.substring(0, 67) + "..." : text)}</code>\n\n` +
       `⚡ PRRX IDM on your PC is analyzing and downloading this link.`
     );
     return;
@@ -489,29 +861,50 @@ async function handleTelegramUpdate(update, env) {
 
   // 6. Generic help reply for unknown text
   await sendTelegramMessage(chatId,
-    `💡 <b>How to use:</b>\n\n` +
-    `• <b>Forward any file or video</b> here to download it on your PC.\n` +
-    `• <b>Send any download link</b> here to grab it with PRRX IDM.\n` +
-    `• Pair your PC using <code>/pair YOUR-CODE</code>.`
+    `💡 <b>PRRX IDM Bot Controls:</b>\n\n` +
+    `• <b>Forward any media or file</b> here to download directly to your PC.\n` +
+    `• <b>Send any download link</b> (HTTP/HTTPS) here to grab it with PRRX IDM.\n` +
+    `• <b>Pair your PC:</b> Send <code>/pair YOUR-CODE</code> (e.g. <code>/pair PRRX-1234</code>).\n` +
+    `• <b>Status:</b> Connected to Client <code>${clientId.substring(0, 8)}...</code>`
   );
 }
 
-function enqueueTask(clientId, task, env) {
-  if (!taskQueues.has(clientId)) {
-    taskQueues.set(clientId, []);
-  }
-  taskQueues.get(clientId).push(task);
-
-  // Also push to default queue so any unpaired PC can still receive it
-  if (clientId !== "default_user") {
-    if (!taskQueues.has("default_user")) {
-      taskQueues.set("default_user", []);
+async function enqueueTask(clientId, task, env) {
+  let savedToDb = false;
+  if (env.DB) {
+    try {
+      await ensureTelegramTables(env.DB);
+      await env.DB.prepare(`
+        INSERT INTO telegram_tasks (id, client_id, url, file_name, file_size, formatted_size, media_type, source, status, created_at)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', CURRENT_TIMESTAMP)
+      `).bind(
+        task.id,
+        clientId,
+        task.url,
+        task.fileName || "download.bin",
+        task.fileSize || 0,
+        task.formattedSize || "",
+        task.mediaType || "document",
+        task.source || "Telegram @PRRX_IDM_Bot"
+      ).run();
+      savedToDb = true;
+    } catch (e) {
+      console.error("Failed to insert telegram task into D1:", e);
     }
-    taskQueues.get("default_user").push(task);
   }
 
-  if (env.PRRX_KV) {
-    env.PRRX_KV.put(`tasks:${clientId}`, JSON.stringify(taskQueues.get(clientId)), { expirationTtl: 3600 });
+  // Fall back to in-memory queue and KV if D1 is not configured or failed
+  if (!savedToDb) {
+    if (!taskQueues.has(clientId)) {
+      taskQueues.set(clientId, []);
+    }
+    taskQueues.get(clientId).push(task);
+
+    if (env.PRRX_KV) {
+      try {
+        await env.PRRX_KV.put(`tasks:${clientId}`, JSON.stringify(taskQueues.get(clientId)), { expirationTtl: 3600 });
+      } catch {}
+    }
   }
 }
 
