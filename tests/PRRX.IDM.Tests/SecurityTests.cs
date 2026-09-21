@@ -396,5 +396,88 @@ namespace PRRX.IDM.Tests
                 if (File.Exists(destInvalid)) File.Delete(destInvalid);
             }
         }
+
+        [Fact]
+        public void DpapiVault_ProtectsAndUnprotects_WithPrefixAndPlaintextFallback()
+        {
+            var raw = "prrx_client_id_secret_9988";
+            var protectedVal = DpapiVault.ProtectString(raw);
+
+            Assert.NotEmpty(protectedVal);
+            Assert.StartsWith("dpapi:", protectedVal);
+            Assert.NotEqual(raw, protectedVal);
+
+            var recovered = DpapiVault.UnprotectString(protectedVal);
+            Assert.Equal(raw, recovered);
+
+            // Plaintext backward compatibility test
+            var legacyPlaintext = "legacy_unencrypted_id";
+            var legacyResult = DpapiVault.UnprotectString(legacyPlaintext);
+            Assert.Equal(legacyPlaintext, legacyResult);
+        }
+
+        [Fact]
+        public void AppConfig_ProtectsTelegramClientId_WhenSerializedToJson()
+        {
+            var config = new AppConfig
+            {
+                TelegramClientId = "my_super_secret_client_token_12345"
+            };
+
+            var json = System.Text.Json.JsonSerializer.Serialize(config);
+            Assert.DoesNotContain("my_super_secret_client_token_12345", json);
+            Assert.Contains("dpapi:", json);
+
+            var deserialized = System.Text.Json.JsonSerializer.Deserialize<AppConfig>(json);
+            Assert.NotNull(deserialized);
+            Assert.Equal("my_super_secret_client_token_12345", deserialized.TelegramClientId);
+        }
+
+        [Theory]
+        [InlineData("CON.txt", "_CON.txt")]
+        [InlineData("aux.mp4", "_aux.mp4")]
+        [InlineData("nul.bin", "_nul.bin")]
+        [InlineData("COM1.log", "_COM1.log")]
+        [InlineData("../../windows/system32/cmd.exe", "cmd.exe")]
+        public void SecurityGuard_SanitizesDosDeviceNames_AndPathTraversal(string input, string expected)
+        {
+            var sanitized = SecurityGuard.SanitizeFileName(input);
+            Assert.Equal(expected, sanitized);
+        }
+
+        [Fact]
+        public void SecurityGuard_ApplyMarkOfTheWeb_WritesZoneIdentifier()
+        {
+            var tempFile = Path.GetTempFileName();
+            try
+            {
+                File.WriteAllText(tempFile, "downloaded test content");
+                bool applied = SecurityGuard.ApplyMarkOfTheWeb(tempFile, "https://example.com/file.zip", "https://example.com");
+
+                if (OperatingSystem.IsWindows())
+                {
+                    Assert.True(applied);
+                    var zoneFile = tempFile + ":Zone.Identifier";
+                    if (File.Exists(zoneFile))
+                    {
+                        var content = File.ReadAllText(zoneFile);
+                        Assert.Contains("ZoneId=3", content);
+                        Assert.Contains("HostUrl=https://example.com/file.zip", content);
+                    }
+                }
+            }
+            finally
+            {
+                if (File.Exists(tempFile)) File.Delete(tempFile);
+            }
+        }
+
+        [Fact]
+        public void SecurityGuard_GetIsolatedTempDownloadDirectory_CreatesValidDirectory()
+        {
+            var dir = SecurityGuard.GetIsolatedTempDownloadDirectory();
+            Assert.True(Directory.Exists(dir));
+            Assert.Contains("IsolatedTempDownloads", dir);
+        }
     }
 }

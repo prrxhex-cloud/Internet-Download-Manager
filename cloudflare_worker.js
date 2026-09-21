@@ -17,19 +17,63 @@ const taskQueues = new Map();    // clientId -> Array of task objects
 const pairMap = new Map();       // pairCode -> clientId
 const userClientMap = new Map(); // telegramChatId -> clientId
 
+// Edge Rate Limiter (Anti-Abuse Guard)
+const rateLimitMap = new Map();
+
+function checkRateLimit(key, limit, windowSeconds) {
+  const now = Date.now();
+  if (rateLimitMap.size > 2000) {
+    for (const [k, v] of rateLimitMap.entries()) {
+      if (now > v.resetTime) rateLimitMap.delete(k);
+    }
+  }
+
+  const record = rateLimitMap.get(key);
+  if (!record || now > record.resetTime) {
+    rateLimitMap.set(key, { count: 1, resetTime: now + (windowSeconds * 1000) });
+    return false;
+  }
+
+  if (record.count >= limit) {
+    return true;
+  }
+
+  record.count++;
+  return false;
+}
+
+function isValidSha256(str) {
+  return typeof str === "string" && /^[a-f0-9]{64}$/i.test(str.trim());
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const path = url.pathname;
     const method = request.method.toUpperCase();
 
-    // Global CORS headers for PRRX IDM desktop & browser extensions
+    // Dynamic hardened CORS headers allowing desktop clients, extensions, and PRRX services
+    const origin = request.headers.get("Origin");
+    let allowOrigin = "*";
+    if (origin) {
+      const isAllowed = 
+        /^chrome-extension:\/\/[a-z0-9]+$/i.test(origin) ||
+        /^moz-extension:\/\/[a-z0-9-]+$/i.test(origin) ||
+        /^https?:\/\/localhost(:\d+)?$/i.test(origin) ||
+        /^https?:\/\/127\.0\.0\.1(:\d+)?$/i.test(origin) ||
+        /^https?:\/\/(?:[a-zA-Z0-9-]+\.)*(?:workers\.dev|github\.io|prrx\.cloud)$/i.test(origin);
+      allowOrigin = isAllowed ? origin : "null";
+    }
+
     const corsHeaders = {
-      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Origin": allowOrigin,
       "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, Authorization, X-PRRX-Client, X-Client-Id",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization, X-PRRX-Client, X-Client-Id, X-Telegram-Bot-Api-Secret-Token",
       "Access-Control-Max-Age": "86400",
-      "Content-Type": "application/json; charset=utf-8"
+      "Content-Type": "application/json; charset=utf-8",
+      "X-Content-Type-Options": "nosniff",
+      "X-Frame-Options": "DENY",
+      "Referrer-Policy": "strict-origin-when-cross-origin"
     };
 
     if (method === "OPTIONS") {
@@ -47,7 +91,7 @@ export default {
         return new Response(JSON.stringify({
           status: "online",
           service: "PRRX IDM Cloud Intelligence Gateway",
-          version: "1.6.0",
+          version: "1.7.0",
           edge_node: clientColo,
           client_ip: clientPublicIp,
           telegram_bot: "@PRRX_IDM_Bot",
@@ -73,11 +117,11 @@ export default {
       // ----------------------------------------------------------------------
       if (path === "/api/manifest" && method === "GET") {
         return new Response(JSON.stringify({
-          version: "1.6.0",
-          releaseDate: "2026-09-19",
-          downloadUrl: "https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.6.0/PRRX_Internet_Download_Manager_v1.6.0_Portable.zip",
-          sha256Hash: "5034EA38177CFF8AC5922B4E0EBFE601B5000C274F968E99371E373652B2FA32",
-          releaseNotes: "PRRX IDM v1.6.0: Automated Remote Telegram Bot Downloader (@PRRX_IDM_Bot), Zero-Latency Public Post Scraper, and Telegram Web Floating Media Interceptor.",
+          version: "1.7.0",
+          releaseDate: "2026-09-21",
+          downloadUrl: "https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.7.0/PRRX_Internet_Download_Manager_v1.7.0_Portable.zip",
+          sha256Hash: "7E4E549FD6751037094F7B273EE40730F607B9637A87918133ACDBC06127538E",
+          releaseNotes: "PRRX IDM v1.7.0: Dynamic 32-Stream Telegram Turbo Acceleration, Background Tray Sync, Startup Task Hydration, and Native Direct CDN Stream Resolvers.",
           isMandatory: false
         }), { status: 200, headers: corsHeaders });
       }
@@ -88,8 +132,8 @@ export default {
       // ----------------------------------------------------------------------
       if (path === "/api/reputation" && method === "GET") {
         const hash = url.searchParams.get("hash")?.trim().toLowerCase();
-        if (!hash) {
-          return new Response(JSON.stringify({ error: "Missing hash parameter" }), { status: 400, headers: corsHeaders });
+        if (!hash || !isValidSha256(hash)) {
+          return new Response(JSON.stringify({ error: "Invalid or missing SHA-256 hash parameter" }), { status: 400, headers: corsHeaders });
         }
 
         if (env.DB) {
@@ -132,16 +176,24 @@ export default {
       // POST /api/reputation/report
       // ----------------------------------------------------------------------
       if (path === "/api/reputation/report" && method === "POST") {
+        if (checkRateLimit(`rep:${clientPublicIp}`, 30, 60)) {
+          return new Response(JSON.stringify({ error: "Rate limit exceeded for file reporting. Please wait 60 seconds." }), {
+            status: 429,
+            headers: { ...corsHeaders, "Retry-After": "60" }
+          });
+        }
+
         const body = await request.json().catch(() => ({}));
         const hash = body.sha256?.trim().toLowerCase();
-        if (!hash) {
-          return new Response(JSON.stringify({ error: "Missing sha256" }), { status: 400, headers: corsHeaders });
+        if (!hash || !isValidSha256(hash)) {
+          return new Response(JSON.stringify({ error: "Invalid or missing SHA-256 hash parameter" }), { status: 400, headers: corsHeaders });
         }
 
         const isSafe = body.vote === "safe" ? 1 : 0;
         const isMalware = body.vote === "malware" ? 1 : 0;
-        const fileName = body.file_name || "download";
-        const fileSize = parseInt(body.file_size) || 0;
+        const rawFileName = body.file_name || "download";
+        const fileName = (typeof rawFileName === "string" ? rawFileName.replace(/[\x00-\x1F\x7F<>'"&]/g, "").slice(0, 255) : "download") || "download";
+        const fileSize = Math.max(0, parseInt(body.file_size, 10) || 0);
 
         if (env.DB) {
           await env.DB.prepare(`
@@ -168,8 +220,8 @@ export default {
         const hash = url.searchParams.get("hash")?.trim().toLowerCase();
         const lan_ip = url.searchParams.get("lan_ip")?.trim() || "";
 
-        if (!hash) {
-          return new Response(JSON.stringify({ error: "Missing hash parameter" }), { status: 400, headers: corsHeaders });
+        if (!hash || !isValidSha256(hash)) {
+          return new Response(JSON.stringify({ error: "Invalid or missing SHA-256 hash parameter" }), { status: 400, headers: corsHeaders });
         }
 
         let peersList = [];
@@ -197,11 +249,19 @@ export default {
       // POST /api/p2p/announce
       // ----------------------------------------------------------------------
       if (path === "/api/p2p/announce" && method === "POST") {
+        if (checkRateLimit(`ann:${clientPublicIp}`, 60, 60)) {
+          return new Response(JSON.stringify({ error: "Rate limit exceeded for peer announce. Please wait 60 seconds." }), {
+            status: 429,
+            headers: { ...corsHeaders, "Retry-After": "60" }
+          });
+        }
+
         const body = await request.json().catch(() => ({}));
         const { peer_id, sha256, lan_ip, port, completed_chunks, total_chunks } = body;
 
-        if (!peer_id || !sha256 || !lan_ip || !port) {
-          return new Response(JSON.stringify({ error: "Missing required peer fields" }), { status: 400, headers: corsHeaders });
+        const numPort = parseInt(port, 10);
+        if (!peer_id || !sha256 || !isValidSha256(sha256) || !lan_ip || isNaN(numPort) || numPort < 1 || numPort > 65535 || !/^[a-zA-Z0-9_-]{8,64}$/.test(peer_id) || !/^[\d.]{7,15}$/.test(lan_ip)) {
+          return new Response(JSON.stringify({ error: "Invalid or missing peer announce parameters" }), { status: 400, headers: corsHeaders });
         }
 
         if (env.DB) {
@@ -212,7 +272,7 @@ export default {
               completed_chunks = excluded.completed_chunks,
               total_chunks = excluded.total_chunks,
               last_heartbeat = CURRENT_TIMESTAMP
-          `).bind(peer_id, sha256.toLowerCase(), clientPublicIp, lan_ip, parseInt(port), completed_chunks || 0, total_chunks || 0).run();
+          `).bind(peer_id, sha256.toLowerCase(), clientPublicIp, lan_ip, numPort, completed_chunks || 0, total_chunks || 0).run();
 
           // Background cleanup of stale peers (> 10 mins inactive)
           if (ctx && ctx.waitUntil) {
@@ -231,8 +291,8 @@ export default {
       // ----------------------------------------------------------------------
       if (path === "/api/mirrors" && method === "GET") {
         const hash = url.searchParams.get("hash")?.trim().toLowerCase();
-        if (!hash) {
-          return new Response(JSON.stringify({ error: "Missing hash parameter" }), { status: 400, headers: corsHeaders });
+        if (!hash || !isValidSha256(hash)) {
+          return new Response(JSON.stringify({ error: "Invalid or missing SHA-256 hash parameter" }), { status: 400, headers: corsHeaders });
         }
 
         let mirrorsList = [];
@@ -255,8 +315,8 @@ export default {
       // ----------------------------------------------------------------------
       if (path === "/api/domain/health" && method === "GET") {
         const domain = url.searchParams.get("domain")?.trim().toLowerCase();
-        if (!domain) {
-          return new Response(JSON.stringify({ error: "Missing domain parameter" }), { status: 400, headers: corsHeaders });
+        if (!domain || !/^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(domain)) {
+          return new Response(JSON.stringify({ error: "Invalid or missing domain parameter" }), { status: 400, headers: corsHeaders });
         }
 
         let health = null;
@@ -281,6 +341,16 @@ export default {
 
       // Telegram Webhook Receiver (POST from Telegram Servers)
       if (path === "/api/telegram/webhook" && method === "POST") {
+        // Enforce Webhook Secret Token validation
+        const webhookSecret = env.TELEGRAM_SECRET_TOKEN || env.TELEGRAM_WEBHOOK_SECRET || "PRRX_TELEGRAM_WEBHOOK_SECRET_VAULT_2026";
+        const incomingSecret = request.headers.get("X-Telegram-Bot-Api-Secret-Token");
+        if (webhookSecret && incomingSecret !== webhookSecret) {
+          return new Response(JSON.stringify({ error: "Unauthorized: Invalid Telegram Webhook Secret Token" }), {
+            status: 401,
+            headers: corsHeaders
+          });
+        }
+
         const update = await request.json().catch(() => null);
         if (update) {
           if (ctx && ctx.waitUntil) {
@@ -292,14 +362,41 @@ export default {
         return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
       }
 
+      // Webhook setup endpoint
+      if (path === "/api/telegram/setup-webhook" && method === "POST") {
+        const body = await request.json().catch(() => ({}));
+        const adminKey = env.ADMIN_KEY || env.TELEGRAM_SECRET_TOKEN || "PRRX_TELEGRAM_WEBHOOK_SECRET_VAULT_2026";
+        const authHeader = request.headers.get("Authorization") || "";
+        const providedKey = authHeader.replace(/^Bearer\s+/i, "").trim() || body.admin_key || body.secret_token;
+        if (!providedKey || providedKey !== adminKey) {
+          return new Response(JSON.stringify({ error: "Unauthorized: Admin authorization required" }), { status: 401, headers: corsHeaders });
+        }
+
+        const secretToken = body.secret_token || env.TELEGRAM_SECRET_TOKEN || "PRRX_TELEGRAM_WEBHOOK_SECRET_VAULT_2026";
+        const webhookUrl = body.url || `${url.origin}/api/telegram/webhook`;
+        const setupRes = await fetch(`${TELEGRAM_API_BASE}/setWebhook?url=${encodeURIComponent(webhookUrl)}&secret_token=${encodeURIComponent(secretToken)}&allowed_updates=["message","edited_message","channel_post"]`);
+        const setupData = await setupRes.json().catch(() => ({ ok: false }));
+        return new Response(JSON.stringify(setupData), { status: setupRes.status, headers: corsHeaders });
+      }
+
       // Register / Generate Desktop Pairing Code (POST)
       if (path === "/api/telegram/pair" && method === "POST") {
+        if (checkRateLimit(`pair:${clientPublicIp}`, 20, 60)) {
+          return new Response(JSON.stringify({ error: "Rate limit exceeded for pairing. Please wait 60 seconds." }), {
+            status: 429,
+            headers: { ...corsHeaders, "Retry-After": "60" }
+          });
+        }
+
         const body = await request.json().catch(() => ({}));
-        const clientId = (typeof body.clientId === "string" && body.clientId.trim())
-          ? body.clientId.trim()
-          : crypto.randomUUID();
-        const pairCode = (typeof body.pairCode === "string" && /^PRRX-[A-Z0-9]{4,12}$/i.test(body.pairCode.trim()))
-          ? body.pairCode.trim().toUpperCase()
+        const rawClientId = body.clientId || body.client_id;
+        const clientId = (typeof rawClientId === "string" && /^[a-zA-Z0-9_-]{8,64}$/.test(rawClientId))
+          ? rawClientId
+          : crypto.randomUUID().replace(/-/g, "");
+
+        const rawPairCode = body.pairCode || body.pair_code;
+        const pairCode = (typeof rawPairCode === "string" && /^PRRX-[A-Z0-9]{4,12}$/i.test(rawPairCode.trim()))
+          ? rawPairCode.trim().toUpperCase()
           : generatePairCode();
 
         pairMap.set(pairCode, clientId);
@@ -342,10 +439,25 @@ export default {
       // Desktop App Task Polling Endpoint (GET)
       if (path === "/api/telegram/tasks" && method === "GET") {
         const clientId = url.searchParams.get("client_id");
-        if (!clientId) {
+        if (!clientId || !/^[a-zA-Z0-9_-]{8,64}$/.test(clientId)) {
           return new Response(JSON.stringify({ tasks: [] }), { status: 200, headers: corsHeaders });
         }
 
+        if (checkRateLimit(`tasks_ip:${clientPublicIp}`, 180, 60)) {
+          return new Response(JSON.stringify({ error: "Rate limit exceeded for task polling from this IP. Please reduce polling frequency." }), {
+            status: 429,
+            headers: { ...corsHeaders, "Retry-After": "10" }
+          });
+        }
+
+        if (checkRateLimit(`tasks:${clientId}`, 120, 60)) {
+          return new Response(JSON.stringify({ error: "Rate limit exceeded for task polling. Please reduce polling frequency." }), {
+            status: 429,
+            headers: { ...corsHeaders, "Retry-After": "10" }
+          });
+        }
+
+        const autoAck = url.searchParams.get("auto_ack") === "1" || url.searchParams.get("ack") === "true";
         let tasks = [];
 
         if (env.DB) {
@@ -365,7 +477,7 @@ export default {
 
             tasks = rows.results || [];
 
-            if (tasks.length > 0) {
+            if (tasks.length > 0 && autoAck) {
               const ids = tasks.map(t => t.id);
               const placeholders = ids.map(() => "?").join(",");
               await env.DB.prepare(`
@@ -375,12 +487,14 @@ export default {
               `).bind(...ids).run();
             }
 
-            // Occasional background cleanup of delivered tasks older than 3 days
+            // Automated background cleanup: delivered tasks older than 1 hour, stale pending older than 7 days, expired pairs (>1 hour)
             if (ctx && ctx.waitUntil) {
               ctx.waitUntil(
-                env.DB.prepare(
-                  "DELETE FROM telegram_tasks WHERE status = 'delivered' AND datetime(delivered_at) < datetime('now', '-3 days')"
-                ).run().catch(() => {})
+                Promise.all([
+                  env.DB.prepare("DELETE FROM telegram_tasks WHERE status = 'delivered' AND datetime(delivered_at) < datetime('now', '-1 hour')").run().catch(() => {}),
+                  env.DB.prepare("DELETE FROM telegram_tasks WHERE status = 'pending' AND datetime(created_at) < datetime('now', '-7 days')").run().catch(() => {}),
+                  env.DB.prepare("DELETE FROM telegram_pairs WHERE datetime(expires_at) < datetime('now')").run().catch(() => {})
+                ])
               );
             }
           } catch (e) {
@@ -393,7 +507,9 @@ export default {
           const memTasks = taskQueues.get(clientId) || [];
           if (memTasks.length > 0) {
             tasks = memTasks;
-            taskQueues.set(clientId, []); // Dequeue tasks
+            if (autoAck) {
+              taskQueues.set(clientId, []); // Dequeue tasks
+            }
           }
         }
 
@@ -401,11 +517,54 @@ export default {
           const kvTasks = await env.PRRX_KV.get(`tasks:${clientId}`, "json");
           if (kvTasks && kvTasks.length > 0) {
             tasks = kvTasks;
-            await env.PRRX_KV.delete(`tasks:${clientId}`);
+            if (autoAck) {
+              await env.PRRX_KV.delete(`tasks:${clientId}`);
+            }
           }
         }
 
         return new Response(JSON.stringify({ tasks: tasks }), { status: 200, headers: corsHeaders });
+      }
+
+      // Desktop App Task Acknowledge Endpoint (POST)
+      if (path === "/api/telegram/ack" && method === "POST") {
+        if (checkRateLimit(`ack:${clientPublicIp}`, 60, 60)) {
+          return new Response(JSON.stringify({ error: "Rate limit exceeded for task acknowledgment." }), {
+            status: 429,
+            headers: { ...corsHeaders, "Retry-After": "10" }
+          });
+        }
+
+        const body = await request.json().catch(() => ({}));
+        const rawClientId = body.clientId || body.client_id;
+        const clientId = (typeof rawClientId === "string" && /^[a-zA-Z0-9_-]{8,64}$/.test(rawClientId)) ? rawClientId : null;
+        const rawTaskIds = body.taskIds || body.task_ids || [];
+        const taskIds = Array.isArray(rawTaskIds)
+          ? rawTaskIds.filter(id => typeof id === "string" && /^[a-zA-Z0-9_-]{8,64}$/.test(id)).slice(0, 100)
+          : [];
+
+        if (clientId && taskIds.length > 0) {
+          if (env.DB) {
+            await ensureTelegramTables(env.DB);
+            try {
+              const placeholders = taskIds.map(() => "?").join(",");
+              await env.DB.prepare(`
+                UPDATE telegram_tasks
+                SET status = 'delivered', delivered_at = CURRENT_TIMESTAMP
+                WHERE client_id = ? AND id IN (${placeholders})
+              `).bind(clientId, ...taskIds).run();
+            } catch (e) {
+              console.error("D1 tasks ack error:", e);
+            }
+          }
+
+          if (taskQueues.has(clientId)) {
+            const current = taskQueues.get(clientId) || [];
+            const remaining = current.filter(t => !taskIds.includes(t.id));
+            taskQueues.set(clientId, remaining);
+          }
+        }
+        return new Response(JSON.stringify({ success: true, count: taskIds.length }), { status: 200, headers: corsHeaders });
       }
 
       // Route Not Found
@@ -768,6 +927,17 @@ async function handleTelegramUpdate(update, env, ctx) {
     publicPostUrl = `https://t.me/${forwardChannel}/${forwardMsgId}`;
   }
 
+  // Also extract public post link from text or caption if not forwarded directly
+  if (!publicPostUrl && (text || msg.caption)) {
+    const rawContent = `${text || ""} ${msg.caption || ""}`;
+    const tmeMatch = rawContent.match(/(?:https?:\/\/)?(?:t\.me|telegram\.me)\/([a-zA-Z0-9_]{4,32})\/(\d+)/i);
+    if (tmeMatch) {
+      if (!forwardChannel) forwardChannel = tmeMatch[1];
+      if (!forwardMsgId) forwardMsgId = parseInt(tmeMatch[2], 10);
+      publicPostUrl = `https://t.me/${tmeMatch[1]}/${tmeMatch[2]}`;
+    }
+  }
+
   // 4. Check for Media Files (Video, Document, Audio, Voice, Photo, Animation, Video Note)
   let fileId = null;
   let fileName = "telegram_download.bin";
@@ -845,7 +1015,8 @@ async function handleTelegramUpdate(update, env, ctx) {
     // Encode full remote task metadata into a modern tg:// file URI
     if (!downloadUrl) {
       const channelParam = forwardChannel ? `&channel=${encodeURIComponent(forwardChannel)}&channel_msg_id=${forwardMsgId || 0}` : "";
-      downloadUrl = `tg://file?file_id=${fileId}&file_name=${encodeURIComponent(fileName)}&file_size=${fileSize}&mime_type=${encodeURIComponent(mimeType || "")}&chat_id=${chatId}&message_id=${msg.message_id || 0}${channelParam}`;
+      const publicUrlParam = publicPostUrl ? `&public_url=${encodeURIComponent(publicPostUrl)}` : "";
+      downloadUrl = `tg://file?file_id=${fileId}&file_name=${encodeURIComponent(fileName)}&file_size=${fileSize}&mime_type=${encodeURIComponent(mimeType || "")}&chat_id=${chatId}&message_id=${msg.message_id || 0}${channelParam}${publicUrlParam}`;
     }
 
     const formattedSize = formatBytes(fileSize);

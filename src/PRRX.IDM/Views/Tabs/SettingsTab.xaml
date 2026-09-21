@@ -318,6 +318,9 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
                     <CheckBox Content="Enable automated background downloading from Telegram Bot" 
                               IsChecked="{Binding IsTelegramBotEnabled, Mode=TwoWay}"
                               FontWeight="Medium" FontSize="12"/>
+                    <CheckBox Content="Keep running in system tray on close (background sync stays active)" 
+                              IsChecked="{Binding MinimizeToTrayOnClose, Mode=TwoWay}"
+                              FontWeight="Medium" FontSize="12" Margin="0,6,0,0"/>
                 </StackPanel>
             </Border>
 
@@ -475,6 +478,9 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
                     <CheckBox Content="Enable automated background download sync from @PRRX_IDM_Bot"
                               IsChecked="{Binding IsTelegramBotEnabled, Mode=TwoWay}"
                               FontWeight="Medium" Margin="2,0,0,0"/>
+                    <CheckBox Content="Keep running in system tray on close (background sync stays active)"
+                              IsChecked="{Binding MinimizeToTrayOnClose, Mode=TwoWay}"
+                              FontWeight="Medium" Margin="2,6,0,0"/>
                 </StackPanel>
             </Border>
 

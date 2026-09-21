@@ -56,6 +56,10 @@ namespace PRRX.IDM.Services
             @"<meta[^>]+(?:property|name)=[""'](?:og:video(?::url|:secure_url)?|twitter:player:stream)[""'][^>]+content=[""']([^""']+)[""']",
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
+        private static readonly Regex OgVideoReversedRegex = new(
+            @"<meta[^>]+content=[""']([^""']+)[""'][^>]+(?:property|name)=[""'](?:og:video(?::url|:secure_url)?|twitter:player:stream)[""']",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
         private static readonly Regex OgAudioRegex = new(
             @"<meta[^>]+(?:property|name)=[""'](?:og:audio(?::url|:secure_url)?)[""'][^>]+content=[""']([^""']+)[""']",
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
@@ -73,12 +77,20 @@ namespace PRRX.IDM.Services
             @"<video\b[^>]*?\bsrc=[""']?([^""'>\s]+)[""']?",
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
+        private static readonly Regex VideoDataSrcRegex = new(
+            @"<video\b[^>]*?\b(?:data-src|data-video-src)=[""']?([^""'>\s]+)[""']?",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
         private static readonly Regex AudioSrcRegex = new(
             @"<audio\b[^>]*?\bsrc=[""']?([^""'>\s]+)[""']?",
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
         private static readonly Regex SourceTagRegex = new(
             @"<source\b[^>]*?\bsrc=[""']?([^""'>\s]+)[""']?",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+        private static readonly Regex CdnStreamRegex = new(
+            @"https?:\/\/(?:[a-zA-Z0-9_-]+\.)?(?:telesco\.pe|stel\.com|telegram\.org|t\.me)\/(?:file|stream|i\/stream)\/[a-zA-Z0-9_.-]+",
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
         private static readonly Regex DocumentWrapRegex = new(
@@ -111,8 +123,31 @@ namespace PRRX.IDM.Services
             if (!SharedHttpClient.DefaultRequestHeaders.Contains("User-Agent"))
             {
                 SharedHttpClient.DefaultRequestHeaders.Add("User-Agent", 
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 PRRX-IDM/1.6.0");
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 PRRX-IDM/1.7.0");
             }
+        }
+
+        /// <summary>
+        /// Validates that a resolved URL is an actual direct HTTP socket stream or media binary,
+        /// and not an HTML webpage or internal tg:// protocol link.
+        /// </summary>
+        public static bool IsValidDirectStreamUrl(string? url)
+        {
+            if (string.IsNullOrWhiteSpace(url)) return false;
+            var trimmed = url.Trim();
+            if (!trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
+                !trimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            // Exclude web pages that do not host a direct binary stream
+            if (Regex.IsMatch(trimmed, @"^https?:\/\/(?:www\.)?(?:t|telegram)\.me\/(?!file\/|stream\/)[^\/\s]+(?:\/\d+)?(?:\?[^\s]*)?$", RegexOptions.IgnoreCase))
+            {
+                return false;
+            }
+
+            return true;
         }
 
         public bool IsTelegramUrl(string? url)
@@ -172,10 +207,48 @@ namespace PRRX.IDM.Services
                 var req = TelegramDownloadProvider.Current.ParseTelegramUrlOrTask(cleanUrl);
                 if (req != null)
                 {
+                    // Check if direct stream URL was already encoded in the tg:// link
+                    if (!string.IsNullOrWhiteSpace(req.DirectStreamUrl) && IsValidDirectStreamUrl(req.DirectStreamUrl))
+                    {
+                        return new TelegramResolvedMedia
+                        {
+                            SourceUrl = cleanUrl,
+                            DirectStreamUrl = req.DirectStreamUrl,
+                            FileName = req.FileName,
+                            Title = req.FileName,
+                            MediaType = req.MediaType,
+                            FormattedSize = req.FormattedSize,
+                            EstimatedSizeBytes = req.FileSize,
+                            ChannelName = req.ChatId
+                        };
+                    }
+
+                    // Check if public channel information is present to resolve direct stream
+                    if (!string.IsNullOrWhiteSpace(req.ChatId) && req.MessageId > 0 &&
+                        !req.ChatId.StartsWith("-100") && !long.TryParse(req.ChatId, out _))
+                    {
+                        var channelPost = $"https://t.me/{req.ChatId}/{req.MessageId}";
+                        var resolvedFromPost = await ResolveTelegramMediaAsync(channelPost, cancellationToken);
+                        if (resolvedFromPost != null && IsValidDirectStreamUrl(resolvedFromPost.DirectStreamUrl))
+                        {
+                            resolvedFromPost.SourceUrl = cleanUrl;
+                            if (string.IsNullOrWhiteSpace(resolvedFromPost.FileName) || resolvedFromPost.FileName.StartsWith($"{req.ChatId}_"))
+                            {
+                                resolvedFromPost.FileName = req.FileName;
+                            }
+                            if (resolvedFromPost.EstimatedSizeBytes <= 0 && req.FileSize > 0)
+                            {
+                                resolvedFromPost.EstimatedSizeBytes = req.FileSize;
+                                resolvedFromPost.FormattedSize = req.FormattedSize;
+                            }
+                            return resolvedFromPost;
+                        }
+                    }
+
                     return new TelegramResolvedMedia
                     {
                         SourceUrl = cleanUrl,
-                        DirectStreamUrl = cleanUrl,
+                        DirectStreamUrl = !string.IsNullOrWhiteSpace(req.DirectStreamUrl) ? req.DirectStreamUrl : cleanUrl,
                         FileName = req.FileName,
                         Title = req.FileName,
                         MediaType = req.MediaType,
@@ -211,19 +284,41 @@ namespace PRRX.IDM.Services
 
             try
             {
+                // Step A: Probe embed widget endpoint
                 var embedUrl = $"https://t.me/{channel}/{messageId}?embed=1";
                 using var request = new HttpRequestMessage(HttpMethod.Get, embedUrl);
                 request.Headers.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
                 request.Headers.Add("Referer", $"https://t.me/{channel}/{messageId}");
 
                 using var response = await SharedHttpClient.SendAsync(request, HttpCompletionOption.ResponseContentRead, cancellationToken);
-                if (!response.IsSuccessStatusCode)
+                if (response.IsSuccessStatusCode)
                 {
-                    return null;
+                    var html = await response.Content.ReadAsStringAsync(cancellationToken);
+                    var resolved = ParseTelegramEmbedHtml(html, cleanUrl, channel, messageId);
+                    if (resolved != null && IsValidDirectStreamUrl(resolved.DirectStreamUrl))
+                    {
+                        return resolved;
+                    }
                 }
 
-                var html = await response.Content.ReadAsStringAsync(cancellationToken);
-                return ParseTelegramEmbedHtml(html, cleanUrl, channel, messageId);
+                // Step B: Probe the full public post webpage (rich OpenGraph tags)
+                var mainUrl = $"https://t.me/{channel}/{messageId}";
+                using var mainReq = new HttpRequestMessage(HttpMethod.Get, mainUrl);
+                mainReq.Headers.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
+                mainReq.Headers.Add("User-Agent", "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)");
+
+                using var mainResp = await SharedHttpClient.SendAsync(mainReq, HttpCompletionOption.ResponseContentRead, cancellationToken);
+                if (mainResp.IsSuccessStatusCode)
+                {
+                    var mainHtml = await mainResp.Content.ReadAsStringAsync(cancellationToken);
+                    var resolved = ParseTelegramEmbedHtml(mainHtml, cleanUrl, channel, messageId);
+                    if (resolved != null && IsValidDirectStreamUrl(resolved.DirectStreamUrl))
+                    {
+                        return resolved;
+                    }
+                }
+
+                return null;
             }
             catch
             {
@@ -243,7 +338,7 @@ namespace PRRX.IDM.Services
 
             // 1. Look for Video: HTML5 video tag, source tag, or OpenGraph video
             var videoMatch = VideoSrcRegex.Match(html);
-            if (videoMatch.Success)
+            if (videoMatch.Success && IsValidDirectStreamUrl(videoMatch.Groups[1].Value))
             {
                 resolved.DirectStreamUrl = HttpUtility.HtmlDecode(videoMatch.Groups[1].Value);
                 resolved.MediaType = "video";
@@ -251,12 +346,32 @@ namespace PRRX.IDM.Services
             }
             else
             {
-                var ogVideo = OgVideoRegex.Match(html);
-                if (ogVideo.Success)
+                var dataSrcMatch = VideoDataSrcRegex.Match(html);
+                if (dataSrcMatch.Success && IsValidDirectStreamUrl(dataSrcMatch.Groups[1].Value))
                 {
-                    resolved.DirectStreamUrl = HttpUtility.HtmlDecode(ogVideo.Groups[1].Value);
+                    resolved.DirectStreamUrl = HttpUtility.HtmlDecode(dataSrcMatch.Groups[1].Value);
                     resolved.MediaType = "video";
                     resolved.FileName = $"{channel}_{messageId}.mp4";
+                }
+                else
+                {
+                    var ogVideo = OgVideoRegex.Match(html);
+                    if (ogVideo.Success && IsValidDirectStreamUrl(ogVideo.Groups[1].Value))
+                    {
+                        resolved.DirectStreamUrl = HttpUtility.HtmlDecode(ogVideo.Groups[1].Value);
+                        resolved.MediaType = "video";
+                        resolved.FileName = $"{channel}_{messageId}.mp4";
+                    }
+                    else
+                    {
+                        var ogVideoRev = OgVideoReversedRegex.Match(html);
+                        if (ogVideoRev.Success && IsValidDirectStreamUrl(ogVideoRev.Groups[1].Value))
+                        {
+                            resolved.DirectStreamUrl = HttpUtility.HtmlDecode(ogVideoRev.Groups[1].Value);
+                            resolved.MediaType = "video";
+                            resolved.FileName = $"{channel}_{messageId}.mp4";
+                        }
+                    }
                 }
             }
 
@@ -264,7 +379,7 @@ namespace PRRX.IDM.Services
             if (string.IsNullOrEmpty(resolved.DirectStreamUrl))
             {
                 var audioMatch = AudioSrcRegex.Match(html);
-                if (audioMatch.Success)
+                if (audioMatch.Success && IsValidDirectStreamUrl(audioMatch.Groups[1].Value))
                 {
                     resolved.DirectStreamUrl = HttpUtility.HtmlDecode(audioMatch.Groups[1].Value);
                     resolved.MediaType = "audio";
@@ -273,7 +388,7 @@ namespace PRRX.IDM.Services
                 else
                 {
                     var ogAudio = OgAudioRegex.Match(html);
-                    if (ogAudio.Success)
+                    if (ogAudio.Success && IsValidDirectStreamUrl(ogAudio.Groups[1].Value))
                     {
                         resolved.DirectStreamUrl = HttpUtility.HtmlDecode(ogAudio.Groups[1].Value);
                         resolved.MediaType = "audio";
@@ -286,7 +401,7 @@ namespace PRRX.IDM.Services
             if (string.IsNullOrEmpty(resolved.DirectStreamUrl))
             {
                 var srcMatch = SourceTagRegex.Match(html);
-                if (srcMatch.Success)
+                if (srcMatch.Success && IsValidDirectStreamUrl(srcMatch.Groups[1].Value))
                 {
                     resolved.DirectStreamUrl = HttpUtility.HtmlDecode(srcMatch.Groups[1].Value);
                     resolved.MediaType = "video";
@@ -294,26 +409,44 @@ namespace PRRX.IDM.Services
                 }
             }
 
-            // 4. Look for Document Wrap
+            // 4. Look for Document Wrap (ONLY if it is a genuine direct stream URL, not a t.me webpage)
             if (string.IsNullOrEmpty(resolved.DirectStreamUrl))
             {
                 var docMatch = DocumentWrapRegex.Match(html);
                 if (docMatch.Success)
                 {
-                    resolved.DirectStreamUrl = HttpUtility.HtmlDecode(docMatch.Groups[1].Value);
-                    resolved.MediaType = "document";
+                    var href = HttpUtility.HtmlDecode(docMatch.Groups[1].Value);
+                    if (IsValidDirectStreamUrl(href))
+                    {
+                        resolved.DirectStreamUrl = href;
+                        resolved.MediaType = "document";
+                    }
+                }
+            }
+
+            // 5. Look for embedded CDN stream URLs (e.g. telesco.pe or stel.com)
+            if (string.IsNullOrEmpty(resolved.DirectStreamUrl))
+            {
+                var cleanHtml = html.Replace(@"\/", "/");
+                var cdnMatch = CdnStreamRegex.Match(cleanHtml);
+                if (cdnMatch.Success && IsValidDirectStreamUrl(cdnMatch.Value))
+                {
+                    resolved.DirectStreamUrl = cdnMatch.Value;
+                    resolved.MediaType = cdnMatch.Value.EndsWith(".mp3", StringComparison.OrdinalIgnoreCase) ? "audio" : "video";
+                    resolved.FileName = $"{channel}_{messageId}.mp4";
                 }
             }
 
             // 5. Extract Document Title or OpenGraph Title
             var titleMatch = DocumentTitleRegex.Match(html);
-            if (titleMatch.Success)
+            if (titleMatch.Success && (resolved.MediaType == "document" || string.IsNullOrEmpty(resolved.DirectStreamUrl)))
             {
                 var title = HttpUtility.HtmlDecode(titleMatch.Groups[1].Value).Trim();
                 if (!string.IsNullOrWhiteSpace(title))
                 {
                     resolved.Title = title;
                     resolved.FileName = title;
+                    resolved.MediaType = GuessMediaTypeFromExtension(title);
                 }
             }
             else

@@ -31,6 +31,8 @@ namespace PRRX.IDM.Services
         public string MimeType { get; set; } = string.Empty;
         public string ChatId { get; set; } = string.Empty;
         public long MessageId { get; set; } = 0;
+        public string Channel { get; set; } = string.Empty;
+        public long ChannelMessageId { get; set; } = 0;
         public string DirectStreamUrl { get; set; } = string.Empty;
         public int Concurrency { get; set; } = 32;
     }
@@ -74,7 +76,7 @@ namespace PRRX.IDM.Services
             if (!SharedClient.DefaultRequestHeaders.Contains("User-Agent"))
             {
                 SharedClient.DefaultRequestHeaders.Add("User-Agent",
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 PRRX-IDM/1.6.0");
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 PRRX-IDM/1.7.0");
             }
         }
 
@@ -181,8 +183,17 @@ namespace PRRX.IDM.Services
                 if (long.TryParse(msgIdStr, out var mid)) request.MessageId = mid;
                 if (!string.IsNullOrWhiteSpace(channel))
                 {
+                    request.Channel = channel;
                     request.ChatId = channel;
-                    if (long.TryParse(channelMsgIdStr, out var cmid) && cmid > 0) request.MessageId = cmid;
+                    if (long.TryParse(channelMsgIdStr, out var cmid) && cmid > 0)
+                    {
+                        request.ChannelMessageId = cmid;
+                        request.MessageId = cmid;
+                    }
+                }
+                else if (long.TryParse(channelMsgIdStr, out var cmidOnly) && cmidOnly > 0)
+                {
+                    request.ChannelMessageId = cmidOnly;
                 }
                 if (!string.IsNullOrWhiteSpace(publicUrl))
                 {
@@ -200,82 +211,87 @@ namespace PRRX.IDM.Services
             if (string.IsNullOrWhiteSpace(url)) return null;
             var cleanUrl = url.Trim();
 
-            // 1. Direct Telegram Bot File URL (<= 20MB)
-            if (cleanUrl.Contains("api.telegram.org/file/bot", StringComparison.OrdinalIgnoreCase))
-            {
-                return cleanUrl;
-            }
-
-            // 2. Direct CDN URLs (telesco.pe, stel.com)
-            if (cleanUrl.Contains("telesco.pe", StringComparison.OrdinalIgnoreCase) ||
-                cleanUrl.Contains("stel.com", StringComparison.OrdinalIgnoreCase))
-            {
-                return cleanUrl;
-            }
-
-            // 3. Telegram Web Stream URLs
-            if (cleanUrl.Contains("web.telegram.org", StringComparison.OrdinalIgnoreCase) &&
-                (cleanUrl.Contains("/stream") || cleanUrl.Contains("/file")))
-            {
-                return cleanUrl;
-            }
-
-            // 4. Telegram Post URL (t.me/channel/messageId)
-            if (TelegramLinkResolver.ParsePostUrl(cleanUrl, out var channel, out var messageId))
-            {
-                var resolver = new TelegramLinkResolver();
-                var media = await resolver.ResolveTelegramMediaAsync(cleanUrl, cancellationToken);
-                if (media != null && !string.IsNullOrWhiteSpace(media.DirectStreamUrl))
-                {
-                    return media.DirectStreamUrl;
-                }
-            }
-
-            // 5. If it's a tg://file URI, resolve public channel post, direct stream, or Bot API path
+            // 1. If it's a tg://file URI, resolve public channel post, direct stream, or Bot API path first
             if (cleanUrl.StartsWith("tg://", StringComparison.OrdinalIgnoreCase))
             {
                 var req = ParseTelegramUrlOrTask(cleanUrl);
                 if (req != null)
                 {
-                    if (!string.IsNullOrWhiteSpace(req.DirectStreamUrl) && req.DirectStreamUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                    // A. Check if DirectStreamUrl is already a direct CDN stream URL
+                    if (!string.IsNullOrWhiteSpace(req.DirectStreamUrl) && TelegramLinkResolver.IsValidDirectStreamUrl(req.DirectStreamUrl))
                     {
                         return req.DirectStreamUrl;
                     }
 
-                    // Check if ChatId points to a public channel with a messageId
-                    if (!string.IsNullOrWhiteSpace(req.ChatId) && req.MessageId > 0 &&
-                        !req.ChatId.StartsWith("-100") && !long.TryParse(req.ChatId, out _))
+                    // B. Check if DirectStreamUrl is a public post link (e.g. t.me/NecflixsLK/7445)
+                    if (!string.IsNullOrWhiteSpace(req.DirectStreamUrl) && TelegramLinkResolver.ParsePostUrl(req.DirectStreamUrl, out _, out _))
                     {
-                        var postUrl = $"https://t.me/{req.ChatId}/{req.MessageId}";
                         var resolver = new TelegramLinkResolver();
-                        var media = await resolver.ResolveTelegramMediaAsync(postUrl, cancellationToken);
-                        if (media != null && !string.IsNullOrWhiteSpace(media.DirectStreamUrl) && media.DirectStreamUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                        var media = await resolver.ResolveTelegramMediaAsync(req.DirectStreamUrl, cancellationToken);
+                        if (media != null && !string.IsNullOrWhiteSpace(media.DirectStreamUrl) && TelegramLinkResolver.IsValidDirectStreamUrl(media.DirectStreamUrl))
                         {
                             return media.DirectStreamUrl;
                         }
                     }
 
-                    if (!string.IsNullOrWhiteSpace(req.FileId))
+                    // C. Check if Channel or ChatId points to a public channel with a messageId
+                    var targetChannel = !string.IsNullOrWhiteSpace(req.Channel) ? req.Channel : req.ChatId;
+                    var targetMsgId = req.ChannelMessageId > 0 ? req.ChannelMessageId : req.MessageId;
+
+                    if (!string.IsNullOrWhiteSpace(targetChannel) && targetMsgId > 0 &&
+                        !targetChannel.StartsWith("-100") && !long.TryParse(targetChannel, out _))
+                    {
+                        var postUrl = $"https://t.me/{targetChannel}/{targetMsgId}";
+                        var resolver = new TelegramLinkResolver();
+                        var media = await resolver.ResolveTelegramMediaAsync(postUrl, cancellationToken);
+                        if (media != null && !string.IsNullOrWhiteSpace(media.DirectStreamUrl) && TelegramLinkResolver.IsValidDirectStreamUrl(media.DirectStreamUrl))
+                        {
+                            return media.DirectStreamUrl;
+                        }
+                    }
+
+                    // D. If file is <= 20MB, try official Bot API getFile
+                    if (!string.IsNullOrWhiteSpace(req.FileId) && (req.FileSize <= 0 || req.FileSize <= 20 * 1024 * 1024))
                     {
                         var directUrl = await TryGetBotApiFileUrlAsync(req.FileId, cancellationToken);
                         if (!string.IsNullOrWhiteSpace(directUrl))
                         {
                             return directUrl;
                         }
-
-                        // For files of any size (up to 2GB/4GB), probe high-speed direct CDN endpoints
-                        var cdnCandidate = $"https://cdn4.telesco.pe/file/{req.FileId}.mp4";
-                        try
-                        {
-                            using var probeReq = new HttpRequestMessage(HttpMethod.Head, cdnCandidate);
-                            using var probeResp = await SharedClient.SendAsync(probeReq, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-                            if (probeResp.IsSuccessStatusCode)
-                            {
-                                return cdnCandidate;
-                            }
-                        }
-                        catch { }
                     }
+                }
+
+                return null;
+            }
+
+            // 2. Direct Telegram Bot File URL (<= 20MB)
+            if (cleanUrl.Contains("api.telegram.org/file/bot", StringComparison.OrdinalIgnoreCase))
+            {
+                return cleanUrl;
+            }
+
+            // 3. Direct CDN URLs (telesco.pe, stel.com)
+            if (cleanUrl.Contains("telesco.pe", StringComparison.OrdinalIgnoreCase) ||
+                cleanUrl.Contains("stel.com", StringComparison.OrdinalIgnoreCase))
+            {
+                return cleanUrl;
+            }
+
+            // 4. Telegram Web Stream URLs
+            if (cleanUrl.Contains("web.telegram.org", StringComparison.OrdinalIgnoreCase) &&
+                (cleanUrl.Contains("/stream") || cleanUrl.Contains("/file")))
+            {
+                return cleanUrl;
+            }
+
+            // 5. Telegram Post URL (t.me/channel/messageId)
+            if (TelegramLinkResolver.ParsePostUrl(cleanUrl, out var channel, out var messageId))
+            {
+                var resolver = new TelegramLinkResolver();
+                var media = await resolver.ResolveTelegramMediaAsync(cleanUrl, cancellationToken);
+                if (media != null && !string.IsNullOrWhiteSpace(media.DirectStreamUrl) && TelegramLinkResolver.IsValidDirectStreamUrl(media.DirectStreamUrl))
+                {
+                    return media.DirectStreamUrl;
                 }
             }
 
@@ -323,11 +339,11 @@ namespace PRRX.IDM.Services
             }
 
             // Step 1: Try resolving to direct CDN / HTTP stream URL
-            var directUrl = !string.IsNullOrWhiteSpace(request.DirectStreamUrl)
+            var directUrl = !string.IsNullOrWhiteSpace(request.DirectStreamUrl) && TelegramLinkResolver.IsValidDirectStreamUrl(request.DirectStreamUrl)
                 ? request.DirectStreamUrl
                 : await ResolveDirectStreamUrlAsync(request.Url, cancellationToken);
 
-            if (!string.IsNullOrWhiteSpace(directUrl) && directUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+            if (!string.IsNullOrWhiteSpace(directUrl) && TelegramLinkResolver.IsValidDirectStreamUrl(directUrl))
             {
                 // Download using native MultiSegmentDownloader with 32 parallel sockets
                 var downloader = new MultiSegmentDownloader();
@@ -353,13 +369,32 @@ namespace PRRX.IDM.Services
                 }
             }
 
-            // Step 2: MTProto Chunked Stream Assembly for Large Files (up to 2GB/4GB)
+            // Step 2: Probe if direct stream chunk can be fetched before launching workers
+            var probeChunk = await FetchTelegramStreamChunkAsync(request, 0, 4096, cancellationToken);
+            if (probeChunk == null || probeChunk.Length == 0)
+            {
+                // Do NOT hang silently at 0 B/s: deliver immediate clear diagnostic feedback
+                progress?.Report(new SegmentProgressEventArgs
+                {
+                    OverallPercentage = 0.0,
+                    TotalBytes = request.FileSize,
+                    DownloadedBytes = 0,
+                    TransferRateFormatted = "0 B/s",
+                    TimeLeftFormatted = "--:--",
+                    StatusMessage = "Stream Unreachable: Direct stream unavailable for private file. Forward from a public channel or provide direct link.",
+                    IsResumeSupported = false,
+                    Threads = new List<DownloadConnectionThread>()
+                });
+                return false;
+            }
+
+            // Step 3: MTProto Chunked Stream Assembly with unified 32-segment visual threads
             return await DownloadLargeTelegramFileChunksAsync(request, progress, cancellationToken);
         }
 
         /// <summary>
-        /// Downloads large Telegram files of ANY size (up to 2GB/4GB) by chunked stream assembly,
-        /// writing pre-allocated blocks directly to disk with parallel concurrency.
+        /// Downloads large Telegram files of ANY size by chunked stream assembly,
+        /// rendering unified 32-segment graphical blocks identically to native downloads.
         /// </summary>
         private async Task<bool> DownloadLargeTelegramFileChunksAsync(
             TelegramDownloadRequest request,
@@ -393,14 +428,23 @@ namespace PRRX.IDM.Services
             long lastReportBytes = 0;
             var lastReportTime = stopwatch.ElapsedMilliseconds;
 
+            // Unify thread visual model: 32 segmented connection blocks across totalBytes
+            long segmentSize = totalBytes > 0 ? (long)Math.Ceiling((double)totalBytes / concurrency) : totalBytes;
             var threads = new List<DownloadConnectionThread>();
             for (int i = 0; i < concurrency; i++)
             {
+                long segStart = i * segmentSize;
+                long segEnd = (i == concurrency - 1) ? totalBytes - 1 : Math.Min(totalBytes - 1, segStart + segmentSize - 1);
                 threads.Add(new DownloadConnectionThread
                 {
                     ThreadId = i + 1,
-                    StatusInfo = "Standby",
-                    IsActive = false
+                    StartByte = segStart,
+                    EndByte = Math.Max(segStart, segEnd),
+                    CurrentByte = segStart,
+                    DownloadedBytes = 0,
+                    FormattedDownloaded = "0 KB",
+                    StatusInfo = "Receiving data...",
+                    IsActive = true
                 });
             }
 
@@ -418,21 +462,10 @@ namespace PRRX.IDM.Services
                 int currentWorker = workerId;
                 activeWorkers.Add(Task.Run(async () =>
                 {
-                    var threadInfo = threads[currentWorker];
-                    threadInfo.IsActive = true;
-
-                    byte[] chunkBuffer = new byte[chunkSize];
-
                     while (!cancellationToken.IsCancellationRequested && chunkQueue.TryDequeue(out int chunkIndex))
                     {
                         long chunkOffset = (long)chunkIndex * chunkSize;
                         int currentChunkSize = (int)Math.Min(chunkSize, totalBytes - chunkOffset);
-
-                        threadInfo.StatusInfo = $"Chunk {chunkIndex + 1}/{totalChunks}";
-                        threadInfo.StartByte = chunkOffset;
-                        threadInfo.EndByte = chunkOffset + currentChunkSize;
-                        threadInfo.CurrentByte = chunkOffset;
-                        threadInfo.DownloadedBytes = 0;
 
                         bool chunkSuccess = false;
                         int retries = 0;
@@ -441,7 +474,6 @@ namespace PRRX.IDM.Services
                         {
                             try
                             {
-                                // Stream chunk payload (handling Telegram Web stream URLs or direct MTProto stream chunks)
                                 var chunkBytes = await FetchTelegramStreamChunkAsync(request, chunkOffset, currentChunkSize, cancellationToken);
                                 if (chunkBytes != null && chunkBytes.Length > 0)
                                 {
@@ -450,6 +482,16 @@ namespace PRRX.IDM.Services
                                         using var writeStream = new FileStream(tempPath, FileMode.Open, FileAccess.Write, FileShare.ReadWrite);
                                         writeStream.Seek(chunkOffset, SeekOrigin.Begin);
                                         writeStream.Write(chunkBytes, 0, chunkBytes.Length);
+
+                                        // Update corresponding segmented thread block
+                                        int tIdx = segmentSize > 0 ? Math.Clamp((int)(chunkOffset / segmentSize), 0, concurrency - 1) : 0;
+                                        var targetThread = threads[tIdx];
+                                        targetThread.DownloadedBytes += chunkBytes.Length;
+                                        targetThread.CurrentByte = chunkOffset + chunkBytes.Length;
+                                        targetThread.FormattedDownloaded = FormatBytes(targetThread.DownloadedBytes);
+                                        long slotLen = Math.Max(1, targetThread.EndByte - targetThread.StartByte + 1);
+                                        targetThread.ProgressPercentage = Math.Clamp((double)targetThread.DownloadedBytes / slotLen * 100.0, 0, 100);
+                                        targetThread.StatusInfo = targetThread.DownloadedBytes >= slotLen ? "Complete" : "Receiving data...";
                                     }
 
                                     Interlocked.Add(ref downloadedBytes, chunkBytes.Length);
@@ -468,7 +510,7 @@ namespace PRRX.IDM.Services
                             }
                         }
 
-                        // Periodic progress reporting
+                        // Periodic progress reporting matching IDM visual style
                         var now = stopwatch.ElapsedMilliseconds;
                         if (now - lastReportTime >= 250)
                         {
@@ -491,15 +533,12 @@ namespace PRRX.IDM.Services
                                 DownloadedBytes = currentDownloaded,
                                 TransferRateFormatted = speedFormatted,
                                 TimeLeftFormatted = eta,
-                                StatusMessage = $"Downloading Telegram stream ({pct:F1}%)...",
+                                StatusMessage = $"Receiving data... ({pct:F1}%)",
                                 IsResumeSupported = true,
                                 Threads = new List<DownloadConnectionThread>(threads)
                             });
                         }
                     }
-
-                    threadInfo.IsActive = false;
-                    threadInfo.StatusInfo = "Completed";
                 }, cancellationToken));
             }
 
@@ -527,6 +566,7 @@ namespace PRRX.IDM.Services
             // Final rename from temp to destination
             if (File.Exists(destinationPath)) File.Delete(destinationPath);
             File.Move(tempPath, destinationPath);
+            PRRX.IDM.Security.SecurityGuard.ApplyMarkOfTheWeb(destinationPath, request.DirectStreamUrl ?? request.Url);
 
             progress?.Report(new SegmentProgressEventArgs
             {

@@ -74,7 +74,7 @@ namespace PRRX.IDM.Services
             var client = new HttpClient { Timeout = TimeSpan.FromSeconds(35) };
             var asm = typeof(App).Assembly;
             var ver = asm.GetName().Version;
-            var verStr = ver != null ? $"{ver.Major}.{ver.Minor}.{Math.Max(0, ver.Build)}" : "1.5.0";
+            var verStr = ver != null ? $"{ver.Major}.{ver.Minor}.{Math.Max(0, ver.Build)}" : "1.7.0";
             client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("PRRX-IDM", verStr));
             client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github.v3+json"));
             return client;
@@ -109,7 +109,7 @@ namespace PRRX.IDM.Services
                 }
                 catch { }
 
-                return new Version(1, 6, 0);
+                return new Version(1, 7, 0);
             }
         }
 
@@ -209,7 +209,7 @@ namespace PRRX.IDM.Services
                 using var doc = JsonDocument.Parse(json);
                 var root = doc.RootElement;
 
-                var rawTag = root.TryGetProperty("tag_name", out var tagProp) ? tagProp.GetString() ?? "1.5.0" : "1.5.0";
+                var rawTag = root.TryGetProperty("tag_name", out var tagProp) ? tagProp.GetString() ?? "1.7.0" : "1.7.0";
                 var cleanVersion = rawTag.TrimStart('v', 'V').Trim();
 
                 var releaseName = root.TryGetProperty("name", out var nameProp) ? nameProp.GetString() : rawTag;

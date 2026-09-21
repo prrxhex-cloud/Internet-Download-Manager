@@ -210,6 +210,7 @@ namespace PRRX.IDM
                         if (_configService.CurrentConfig.IsTelegramBotSyncEnabled)
                         {
                             _telegramBotSyncService.Start();
+                            await _telegramBotSyncService.HydratePendingTasksAsync();
                         }
                     }
                     catch { }
@@ -341,7 +342,27 @@ namespace PRRX.IDM
 
                 // Ensure app lifecycle survives dialog closings while MainWindow is hidden
                 ShutdownMode = ShutdownMode.OnExplicitShutdown;
-                mainWindow.Closed += (_, _) => Shutdown(0);
+
+                var systemTrayService = new SystemTrayService();
+                systemTrayService.Initialize(mainWindow, _configService);
+
+                mainWindow.Closing += (sender, args) =>
+                {
+                    if (!systemTrayService.IsExplicitExitRequested && _configService.CurrentConfig.MinimizeToTrayOnClose)
+                    {
+                        args.Cancel = true;
+                        mainWindow.Hide();
+                        systemTrayService.ShowBalloonNotification(
+                            "PRRX IDM is running in background",
+                            "PRRX IDM is minimized to system tray. Remote Telegram downloads and browser sync stay active.");
+                    }
+                };
+
+                mainWindow.Closed += (_, _) =>
+                {
+                    systemTrayService.Dispose();
+                    Shutdown(0);
+                };
 
                 _themeService.ApplyTheme(_configService.CurrentConfig.ThemeMode, mainWindow);
 

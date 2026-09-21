@@ -17,6 +17,11 @@ document.addEventListener("DOMContentLoaded", () => {
   const dotSync = document.getElementById("dotSync");
   const txtSyncStatus = document.getElementById("txtSyncStatus");
 
+  const versionTag = document.querySelector(".version-tag");
+  if (versionTag && chrome.runtime?.getManifest) {
+    versionTag.textContent = "v" + (chrome.runtime.getManifest().version || "1.7.0");
+  }
+
   const HTTP_PING_URL = "http://127.0.0.1:46543/api/ping";
   const HTTP_SYNC_URL = "http://127.0.0.1:46543/api/sync";
   const CLOUD_API_HEALTH = "https://prrx-api.sayurusenavirathna70.workers.dev/api/health";
@@ -47,7 +52,7 @@ document.addEventListener("DOMContentLoaded", () => {
       clearTimeout(timeoutId);
       if (res.ok) {
         const data = await res.json();
-        return { status: "online", version: data.version || "1.6.0" };
+        return { status: "online", version: data.version || "1.7.0" };
       }
     } catch (e) {
       // Direct fetch failed, try background service worker fallback
@@ -149,7 +154,7 @@ document.addEventListener("DOMContentLoaded", () => {
   queryDesktopStatus().then((res) => {
     if (res.status === "online") {
       dotDesktop.className = "status-dot online";
-      txtDesktopStatus.textContent = `Online (v${res.version || "1.6.0"})`;
+      txtDesktopStatus.textContent = `Online (v${res.version || "1.7.0"})`;
       syncWithDesktop();
     } else {
       dotDesktop.className = "status-dot offline";

@@ -114,10 +114,30 @@ namespace PRRX.IDM.Models
         /// </summary>
         public bool IsTelegramBotSyncEnabled { get; set; } = true;
 
+        private string _telegramClientId = string.Empty;
+
         /// <summary>
-        /// Persistent unique client ID for Telegram Bot pairing
+        /// Persistent unique client ID for Telegram Bot pairing.
+        /// Stored encrypted on disk via Windows DPAPI.
         /// </summary>
-        public string TelegramClientId { get; set; } = string.Empty;
+        [System.Text.Json.Serialization.JsonPropertyName("telegramClientId")]
+        public string StoredTelegramClientId
+        {
+            get => Security.DpapiVault.ProtectString(_telegramClientId);
+            set => _telegramClientId = Security.DpapiVault.UnprotectString(value);
+        }
+
+        [System.Text.Json.Serialization.JsonIgnore]
+        public string TelegramClientId
+        {
+            get => _telegramClientId;
+            set => _telegramClientId = value ?? string.Empty;
+        }
+
+        /// <summary>
+        /// Keep IDM running in system tray when main window is closed so background Telegram sync continues
+        /// </summary>
+        public bool MinimizeToTrayOnClose { get; set; } = true;
     }
 
     public enum DownloadStatus

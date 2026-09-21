@@ -44,6 +44,8 @@ namespace PRRX.IDM.Services
         Task InitializeAsync();
         void Start();
         void Stop();
+        Task<List<TelegramRemoteTask>> HydratePendingTasksAsync(CancellationToken ct = default);
+        Task<bool> AcknowledgeTasksAsync(IEnumerable<string> taskIds, CancellationToken ct = default);
     }
 
     public class TelegramBotSyncService : ITelegramBotSyncService
@@ -93,7 +95,7 @@ namespace PRRX.IDM.Services
         {
             if (!SharedHttpClient.DefaultRequestHeaders.Contains("User-Agent"))
             {
-                SharedHttpClient.DefaultRequestHeaders.Add("User-Agent", "PRRX-IDM-TelegramSync/1.6.0");
+                SharedHttpClient.DefaultRequestHeaders.Add("User-Agent", "PRRX-IDM-TelegramSync/1.7.0");
             }
         }
 
@@ -220,6 +222,77 @@ namespace PRRX.IDM.Services
             }
         }
 
+        public async Task<bool> AcknowledgeTasksAsync(IEnumerable<string> taskIds, CancellationToken ct = default)
+        {
+            try
+            {
+                var list = new List<string>(taskIds);
+                if (list.Count == 0) return true;
+
+                var ackUri = $"{_baseUrl}/api/telegram/ack";
+                var payload = JsonSerializer.Serialize(new
+                {
+                    clientId = ClientId,
+                    taskIds = list
+                });
+
+                using var content = new StringContent(payload, System.Text.Encoding.UTF8, "application/json");
+                using var resp = await SharedHttpClient.PostAsync(ackUri, content, ct);
+                return resp.IsSuccessStatusCode;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public async Task<List<TelegramRemoteTask>> HydratePendingTasksAsync(CancellationToken ct = default)
+        {
+            var results = new List<TelegramRemoteTask>();
+            if (!IsEnabled) return results;
+
+            try
+            {
+                var taskUri = $"{_baseUrl}/api/telegram/tasks?client_id={ClientId}";
+                using var resp = await SharedHttpClient.GetAsync(taskUri, ct);
+                if (!resp.IsSuccessStatusCode) return results;
+
+                var json = await resp.Content.ReadAsStringAsync(ct);
+                using var doc = JsonDocument.Parse(json);
+
+                var ackIds = new List<string>();
+
+                if (doc.RootElement.TryGetProperty("tasks", out var tasksArray) && tasksArray.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var taskElem in tasksArray.EnumerateArray())
+                    {
+                        var task = ParseTaskFromJson(taskElem);
+                        if (!string.IsNullOrWhiteSpace(task.Url))
+                        {
+                            results.Add(task);
+                            if (!string.IsNullOrWhiteSpace(task.Id))
+                            {
+                                ackIds.Add(task.Id);
+                            }
+                            IsConnected = true;
+                            TaskReceived?.Invoke(this, task);
+                        }
+                    }
+                }
+
+                if (ackIds.Count > 0)
+                {
+                    await AcknowledgeTasksAsync(ackIds, ct);
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[TelegramBotSync] Hydrate error: {ex.Message}");
+            }
+
+            return results;
+        }
+
         private async Task PollRemoteTasksAsync(CancellationToken ct)
         {
             var taskUri = $"{_baseUrl}/api/telegram/tasks?client_id={ClientId}";
@@ -229,42 +302,59 @@ namespace PRRX.IDM.Services
             var json = await resp.Content.ReadAsStringAsync(ct);
             using var doc = JsonDocument.Parse(json);
 
+            var ackIds = new List<string>();
+
             if (doc.RootElement.TryGetProperty("tasks", out var tasksArray) && tasksArray.ValueKind == JsonValueKind.Array)
             {
                 foreach (var taskElem in tasksArray.EnumerateArray())
                 {
-                    var task = new TelegramRemoteTask
-                    {
-                        Id = taskElem.TryGetProperty("id", out var idElem) ? idElem.GetString() ?? "" : "",
-                        Url = taskElem.TryGetProperty("url", out var urlElem) ? urlElem.GetString() ?? "" : "",
-                        FileName = taskElem.TryGetProperty("fileName", out var fnElem) ? fnElem.GetString() ?? "" : "telegram_file.bin",
-                        FileSize = taskElem.TryGetProperty("fileSize", out var fsElem) && fsElem.TryGetInt64(out var fsVal) ? fsVal : 0,
-                        FormattedSize = taskElem.TryGetProperty("formattedSize", out var fszElem) ? fszElem.GetString() ?? "" : "",
-                        MediaType = taskElem.TryGetProperty("mediaType", out var mtElem) ? mtElem.GetString() ?? "document" : "document",
-                        Source = taskElem.TryGetProperty("source", out var srcElem) ? srcElem.GetString() ?? "@PRRX_IDM_Bot" : "@PRRX_IDM_Bot",
-                        FileId = taskElem.TryGetProperty("fileId", out var fidElem) ? fidElem.GetString() ?? "" : "",
-                        MimeType = taskElem.TryGetProperty("mimeType", out var mtpElem) ? mtpElem.GetString() ?? "" : "",
-                        ChatId = taskElem.TryGetProperty("chatId", out var cidElem) ? cidElem.GetString() ?? "" : "",
-                        MessageId = taskElem.TryGetProperty("messageId", out var midElem) && midElem.TryGetInt64(out var midVal) ? midVal : 0
-                    };
-
-                    if (string.IsNullOrWhiteSpace(task.Url) && !string.IsNullOrWhiteSpace(task.FileId))
-                    {
-                        task.Url = $"tg://file?file_id={task.FileId}&file_name={Uri.EscapeDataString(task.FileName)}&file_size={task.FileSize}&mime_type={Uri.EscapeDataString(task.MimeType)}&chat_id={task.ChatId}&message_id={task.MessageId}";
-                    }
-
-                    if (task.FileSize > 0 && string.IsNullOrWhiteSpace(task.FormattedSize))
-                    {
-                        task.FormattedSize = TelegramDownloadProvider.FormatBytes(task.FileSize);
-                    }
-
+                    var task = ParseTaskFromJson(taskElem);
                     if (!string.IsNullOrWhiteSpace(task.Url))
                     {
+                        if (!string.IsNullOrWhiteSpace(task.Id))
+                        {
+                            ackIds.Add(task.Id);
+                        }
                         IsConnected = true;
                         TaskReceived?.Invoke(this, task);
                     }
                 }
             }
+
+            if (ackIds.Count > 0)
+            {
+                await AcknowledgeTasksAsync(ackIds, ct);
+            }
+        }
+
+        private static TelegramRemoteTask ParseTaskFromJson(JsonElement taskElem)
+        {
+            var task = new TelegramRemoteTask
+            {
+                Id = taskElem.TryGetProperty("id", out var idElem) ? idElem.GetString() ?? "" : "",
+                Url = taskElem.TryGetProperty("url", out var urlElem) ? urlElem.GetString() ?? "" : "",
+                FileName = taskElem.TryGetProperty("fileName", out var fnElem) ? fnElem.GetString() ?? "" : "telegram_file.bin",
+                FileSize = taskElem.TryGetProperty("fileSize", out var fsElem) && fsElem.TryGetInt64(out var fsVal) ? fsVal : 0,
+                FormattedSize = taskElem.TryGetProperty("formattedSize", out var fszElem) ? fszElem.GetString() ?? "" : "",
+                MediaType = taskElem.TryGetProperty("mediaType", out var mtElem) ? mtElem.GetString() ?? "document" : "document",
+                Source = taskElem.TryGetProperty("source", out var srcElem) ? srcElem.GetString() ?? "@PRRX_IDM_Bot" : "@PRRX_IDM_Bot",
+                FileId = taskElem.TryGetProperty("fileId", out var fidElem) ? fidElem.GetString() ?? "" : "",
+                MimeType = taskElem.TryGetProperty("mimeType", out var mtpElem) ? mtpElem.GetString() ?? "" : "",
+                ChatId = taskElem.TryGetProperty("chatId", out var cidElem) ? cidElem.GetString() ?? "" : "",
+                MessageId = taskElem.TryGetProperty("messageId", out var midElem) && midElem.TryGetInt64(out var midVal) ? midVal : 0
+            };
+
+            if (string.IsNullOrWhiteSpace(task.Url) && !string.IsNullOrWhiteSpace(task.FileId))
+            {
+                task.Url = $"tg://file?file_id={task.FileId}&file_name={Uri.EscapeDataString(task.FileName)}&file_size={task.FileSize}&mime_type={Uri.EscapeDataString(task.MimeType)}&chat_id={task.ChatId}&message_id={task.MessageId}";
+            }
+
+            if (task.FileSize > 0 && string.IsNullOrWhiteSpace(task.FormattedSize))
+            {
+                task.FormattedSize = TelegramDownloadProvider.FormatBytes(task.FileSize);
+            }
+
+            return task;
         }
     }
 }

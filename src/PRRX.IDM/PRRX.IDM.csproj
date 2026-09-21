@@ -13,9 +13,9 @@
     <Description>Enterprise-Grade High-Performance Windows Internet Download Manager</Description>
     <Copyright>Copyright © 2026 PRRX Cooperation. All Rights Reserved. PRRX IDM™ - Confidential &amp; Proprietary Engine</Copyright>
     <GenerateAssemblyCopyrightAttribute>false</GenerateAssemblyCopyrightAttribute>
-    <Version>1.6.0</Version>
-    <AssemblyVersion>1.6.0.0</AssemblyVersion>
-    <FileVersion>1.6.0.0</FileVersion>
+    <Version>1.7.0</Version>
+    <AssemblyVersion>1.7.0.0</AssemblyVersion>
+    <FileVersion>1.7.0.0</FileVersion>
     
     <!-- Application Icon -->
     <ApplicationIcon>Assets\app_icon.ico</ApplicationIcon>

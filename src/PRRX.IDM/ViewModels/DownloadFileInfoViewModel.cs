@@ -682,9 +682,53 @@ namespace PRRX.IDM.ViewModels
                         }
                         AutoPopulateDescription(_cachedPageTitle, tgMetadata.MimeType);
                     }
-                    IsProbing = false;
                 });
-                return Task.CompletedTask;
+
+                lock (_probeLock)
+                {
+                    if (_activeProbeTask != null && !_activeProbeTask.IsCompleted && _activeProbeUrl == url)
+                    {
+                        return _activeProbeTask;
+                    }
+
+                    _probeCts?.Cancel();
+                    var cts = new CancellationTokenSource();
+                    _probeCts = cts;
+                    _activeProbeUrl = url;
+
+                    _activeProbeTask = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            var resolvedStream = await TelegramDownloadProvider.Current.ResolveDirectStreamUrlAsync(url, cts.Token);
+                            if (!string.IsNullOrWhiteSpace(resolvedStream) && !cts.IsCancellationRequested)
+                            {
+                                DispatchToUi(() =>
+                                {
+                                    _url = resolvedStream;
+                                    OnPropertyChanged(nameof(Url));
+                                });
+                                await DoProbeFileSizeAsync(resolvedStream, cts);
+                            }
+                            else
+                            {
+                                DispatchToUi(() =>
+                                {
+                                    IsProbing = false;
+                                });
+                            }
+                        }
+                        catch
+                        {
+                            DispatchToUi(() =>
+                            {
+                                IsProbing = false;
+                            });
+                        }
+                    }, cts.Token);
+
+                    return _activeProbeTask;
+                }
             }
 
             if (TelegramLinkResolver.ParsePostUrl(url, out var channel, out var messageId))

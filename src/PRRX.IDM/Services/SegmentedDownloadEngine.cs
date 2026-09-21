@@ -158,7 +158,7 @@ namespace PRRX.IDM.Services
                     {
                         tgReq.DestinationFilePath = destinationFilePath;
                         var resolvedStream = await TelegramDownloadProvider.Current.ResolveDirectStreamUrlAsync(url, _cts.Token);
-                        if (!string.IsNullOrWhiteSpace(resolvedStream) && resolvedStream.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                        if (!string.IsNullOrWhiteSpace(resolvedStream) && TelegramLinkResolver.IsValidDirectStreamUrl(resolvedStream))
                         {
                             url = resolvedStream;
                         }
@@ -173,12 +173,13 @@ namespace PRRX.IDM.Services
                             IsRunning = false;
                             if (success)
                             {
+                                PRRX.IDM.Security.SecurityGuard.ApplyMarkOfTheWeb(destinationFilePath, url);
                                 DownloadCompleted?.Invoke(this, destinationFilePath);
                                 return true;
                             }
                             else
                             {
-                                DownloadFailed?.Invoke(this, "Telegram stream download cancelled or failed.");
+                                DownloadFailed?.Invoke(this, "Telegram stream download cancelled or failed: stream endpoint not reachable.");
                                 return false;
                             }
                         }
@@ -367,6 +368,7 @@ namespace PRRX.IDM.Services
 
                 IsRunning = false;
                 ReportProgress("Complete - Downloaded successfully");
+                PRRX.IDM.Security.SecurityGuard.ApplyMarkOfTheWeb(destinationFilePath, url, referer);
                 DownloadCompleted?.Invoke(this, destinationFilePath);
                 MemoryOptimizer.TrimMemory();
                 return true;

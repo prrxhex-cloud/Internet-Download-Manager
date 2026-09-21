@@ -11,10 +11,28 @@
 <p align="center">
   <a href="#"><img src="https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011%20(x64)-0078D4?logo=windows" alt="Windows"/></a>
   <a href="#"><img src="https://img.shields.io/badge/.NET-8.0%20WPF-512BD4?logo=dotnet" alt=".NET 8"/></a>
-  <a href="https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/tag/v1.5.0"><img src="https://img.shields.io/badge/Version-1.5.0-107C41" alt="Version"/></a>
+  <a href="https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/tag/v1.7.0"><img src="https://img.shields.io/badge/Version-1.7.0-107C41" alt="Version"/></a>
   <a href="#"><img src="https://img.shields.io/badge/RAM%20Footprint-~20%20MB%20Idle-brightgreen" alt="Memory"/></a>
   <a href="LICENSE.txt"><img src="https://img.shields.io/badge/License-PRRX%20EULA-blue" alt="License"/></a>
 </p>
+
+---
+
+## 🌟 What's New in Version 1.7.0
+
+- ⚡ **Dynamic 32-Stream Telegram Turbo Acceleration**: Solved the Telegram 0 B/s and plain chunk list display bug. Telegram media forwarded from public channels and posts (including `NecflixsLK` and `t.me/channel/id`) automatically resolves into direct CDN stream URLs, powering downloads through the standard 32-stream segmented engine with vibrant blue connection progress blocks and maximum bandwidth saturation.
+- 📥 **Closed-App Queuing & Startup Task Hydration**: Tasks sent to `@PRRX_IDM_Bot` while PRRX IDM was closed are safely stored in Cloudflare D1 Edge SQLite and hydrated immediately upon startup. Minimized-to-tray background polling keeps remote Telegram and browser sync active.
+- 🛡️ **Server & Database Security Hardening**:
+  - Enforced strict `X-Telegram-Bot-Api-Secret-Token` validation on Telegram webhook endpoints, rejecting missing or invalid tokens with `401 Unauthorized`.
+  - Comprehensive parameterized SQL queries across Cloudflare D1 database interactions.
+  - Dual-tier rate limiting by client IP and client ID on `/api/telegram/tasks`.
+  - Automated background garbage collection cleaning up expired pairing codes and delivered tasks older than 1 hour.
+- 🔒 **Client-Side Security Hardening**:
+  - Hardware-tied Windows DPAPI encryption for stored `TelegramClientId`.
+  - Strict path sanitization blocking directory traversal (`../`, `..\`) and reserved DOS device names (`CON`, `PRN`, `AUX`, `NUL`, `COM1-9`, `LPT1-9`).
+  - Windows NTFS Mark-of-the-Web (`Zone.Identifier` ZoneId=3) applied to all completed downloads.
+  - Isolated temporary staging directories for chunk assembly preventing partial download exposure.
+- 🧩 **Extension v1.7.0 & Build Synchronization**: Synchronized Chrome extension manifest and popup to v1.7.0 with real-time version reflection and clean packaging pipelines.
 
 ---
 

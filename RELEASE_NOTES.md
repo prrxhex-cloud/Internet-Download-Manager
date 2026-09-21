@@ -1,10 +1,41 @@
-# 🚀 PRRX Internet Download Manager — Release Notes v1.5.0
+# 🚀 PRRX Internet Download Manager — Release Notes v1.7.0
 
-**Release Tag**: `v1.5.0`  
+**Release Tag**: `v1.7.0`  
 **Target Branch**: `main`  
-**Date**: September 19, 2026  
+**Date**: September 21, 2026  
 **Target Platform**: Windows 10 / Windows 11 (x64)  
 **Publisher**: PRRX Cooperation  
+
+---
+
+## 🌟 What's New in Version 1.7.0
+
+### ⚡ 1. Telegram 32-Stream Turbo Acceleration Engine
+- **Direct CDN Stream Resolution**: Media forwarded from public channels and posts (e.g. `NecflixsLK` and `t.me/channel/id`) automatically resolves into direct CDN stream URLs.
+- **Engine Unification**: Downloads execute through the full 32-stream segmented downloader rather than the legacy single-stream plain chunk list.
+- **Visual Feedback**: Real-time multi-connection blue block progress grid, transfer speeds, ETA estimation, and byte counters.
+- **0 B/s Bug Elimination**: Direct asynchronous stream resolution inside `DownloadFileInfoViewModel` ensures endpoints are fully validated and probed before download initiation.
+
+### 📥 2. Closed-App Queuing & Startup Task Hydration
+- **Cloudflare D1 Persistence**: Files sent to `@PRRX_IDM_Bot` while the IDM client is closed are stored in Cloudflare D1 Edge SQLite and immediately hydrated when IDM launches.
+- **Minimize-to-Tray Background Sync**: IDM maintains lightweight background synchronization while minimized to the Windows system tray.
+- **One-Click Pairing**: Effortless desktop-to-bot pairing via 6-character authentication codes (`PRRX-XXXX`).
+
+### 🛡️ 3. Server & Database Security Hardening
+- **Webhook Secret Token Verification**: Mandatory enforcement of `X-Telegram-Bot-Api-Secret-Token` on Telegram webhook endpoints; requests with missing or invalid tokens are rejected immediately with `401 Unauthorized`.
+- **Parameterized SQL Enforcement**: 100% parameterized queries across all Cloudflare D1 interactions to prevent SQL injection vulnerabilities.
+- **Dual-Tier Rate Limiting**: Independent IP-address and Client-ID rate limiters to protect task polling and pairing endpoints against abuse.
+- **Automated Expired Data GC**: Background cleanup routine purges delivered tasks and expired pairing codes older than 1 hour.
+
+### 🔒 4. Client-Side Defense & System Protection
+- **Windows DPAPI Encryption**: Client pairing identifiers (`TelegramClientId`) are hardware-encrypted on disk using Windows Data Protection APIs.
+- **Strict Path & Device Sanitization**: Robust protection against directory traversal (`../`, `..\`) and legacy DOS device names (`CON`, `PRN`, `AUX`, `NUL`, `COM1-9`, `LPT1-9`).
+- **NTFS Mark-of-the-Web**: Automatic attachment of `Zone.Identifier` (ZoneId=3) alternate data streams to downloaded files for Windows Defender / SmartScreen validation.
+- **Isolated Staging Storage**: Chunk assembly is performed in isolated application data directories to prevent accidental partial file exposure.
+
+### 🧩 5. Browser Extension v1.7.0 Synchronization
+- **Manifest Version Alignment**: Updated manifest to `1.7.0` with dynamic version reflection in extension popup.
+- **Packaging Pipeline Hardening**: Packaging scripts updated to prevent stale extension artifacts from contaminating release bundles.
 
 ---
 

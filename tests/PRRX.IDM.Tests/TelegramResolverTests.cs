@@ -281,5 +281,26 @@ namespace PRRX.IDM.Tests
                 try { if (File.Exists(tempFile + ".prrx_tg_part")) File.Delete(tempFile + ".prrx_tg_part"); } catch { }
             }
         }
+
+        [Fact]
+        public async Task TelegramDownloadProvider_ResolveDirectStreamUrlAsync_ResolvesCdnFromPublicUrlParam()
+        {
+            var cdnUrl = "https://cdn4.telesco.pe/file/test_stream.mp4";
+            var tgUri = $"tg://file?file_id=TEST_123&file_name=video.mp4&file_size=50000000&public_url={Uri.EscapeDataString(cdnUrl)}";
+
+            var resolved = await TelegramDownloadProvider.Current.ResolveDirectStreamUrlAsync(tgUri);
+            Assert.Equal(cdnUrl, resolved);
+        }
+
+        [Fact]
+        public void DownloadFileInfoViewModel_ExtractsTelegramMetadataImmediately()
+        {
+            var tgUri = "tg://file?file_id=VID_777&file_name=Sample_Episode.mkv&file_size=157286400&channel=NecflixsLK&channel_msg_id=7445";
+            var vm = new DownloadFileInfoViewModel(tgUri, Path.GetTempPath());
+
+            Assert.Equal("Sample_Episode.mkv", vm.FileName);
+            Assert.Equal(157286400, vm.DetectedBytes);
+            Assert.Equal(FileCategory.Video, vm.SelectedCategory);
+        }
     }
 }

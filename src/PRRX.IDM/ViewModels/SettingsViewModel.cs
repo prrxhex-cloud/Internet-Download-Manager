@@ -237,7 +237,7 @@ namespace PRRX.IDM.ViewModels
             set => SetProperty(ref _appVersion, value);
         }
 
-        public string CurrentVersionClean => _updateService?.CurrentVersionClean ?? "1.6.0";
+        public string CurrentVersionClean => _updateService?.CurrentVersionClean ?? "1.7.0";
 
         public PriorityItem SelectedPriority
         {
@@ -332,6 +332,20 @@ namespace PRRX.IDM.ViewModels
                         if (value) TelegramBotSyncService.Current.Start();
                         else TelegramBotSyncService.Current.Stop();
                     }
+                }
+            }
+        }
+
+        public bool MinimizeToTrayOnClose
+        {
+            get => _configService.CurrentConfig.MinimizeToTrayOnClose;
+            set
+            {
+                if (_configService.CurrentConfig.MinimizeToTrayOnClose != value)
+                {
+                    _configService.CurrentConfig.MinimizeToTrayOnClose = value;
+                    _configService.SaveConfig();
+                    OnPropertyChanged();
                 }
             }
         }
@@ -753,15 +767,35 @@ namespace PRRX.IDM.ViewModels
         {
             ChangelogHistory.Clear();
 
-            // v1.6.0 (Current Release)
+            // v1.7.0 (Current Release)
+            var rel170 = new ChangelogRelease
+            {
+                Version = "v1.7.0",
+                ReleaseDate = "September 2026",
+                IsCurrentRelease = true,
+                StatusBadge = "Current Release",
+                Summary = "Dynamic 32-stream segmented Telegram acceleration engine, background system tray synchronization with task hydration on startup, Windows DPAPI client security vault, and end-to-end edge anti-abuse security.",
+                IsExpanded = true,
+                Items = new System.Collections.Generic.List<ChangelogItem>
+                {
+                    new() { Category = "Features", Description = "Dynamic 32-Stream Telegram Acceleration: Unifies Telegram download pipeline with standard segmented multi-stream engine, rendering real-time blue connection thread blocks, dynamic throughput counters, and resolving direct CDN streams.", CategoryBadgeColor = "#0078D4", CategoryBgColor = "#200078D4" },
+                    new() { Category = "Features", Description = "Startup Task Hydration & Queuing: Automatically pulls queued offline tasks sent to @PRRX_IDM_Bot when IDM opens, popping up the native download dialog without dropping unacknowledged jobs.", CategoryBadgeColor = "#0078D4", CategoryBgColor = "#200078D4" },
+                    new() { Category = "Features", Description = "Background System Tray Integration: Minimize PRRX IDM to system tray on close so remote bot tasks and browser extensions remain continuously active without desktop clutter.", CategoryBadgeColor = "#0078D4", CategoryBgColor = "#200078D4" },
+                    new() { Category = "Security", Description = "Windows DPAPI Client Credential Vault: Encrypts stored pairing identifiers, bot client secrets, and sensitive tokens using Windows ProtectedData APIs.", CategoryBadgeColor = "#107C41", CategoryBgColor = "#20107C41" },
+                    new() { Category = "Security", Description = "Cloudflare D1 & Edge Security: Enforces Telegram webhook secret tokens, strict parameterized SQL query validation, rate-limiting guards, and automated 1-hour pairing code expiration.", CategoryBadgeColor = "#107C41", CategoryBgColor = "#20107C41" },
+                    new() { Category = "Fixes", Description = "Resolved 0 B/s Telegram stream stall bug with pre-flight stream probing and native fallback channel extraction.", CategoryBadgeColor = "#D83B01", CategoryBgColor = "#20D83B01" }
+                }
+            };
+
+            // v1.6.0
             var rel160 = new ChangelogRelease
             {
                 Version = "v1.6.0",
                 ReleaseDate = "September 2026",
-                IsCurrentRelease = true,
-                StatusBadge = "Current Release",
+                IsCurrentRelease = false,
+                StatusBadge = "Previous Release",
                 Summary = "Comprehensive multi-channel Telegram download ecosystem: Automated remote downloading via official Telegram Bot (@PRRX_IDM_Bot) with live Cloudflare Worker webhook edge gateway, zero-latency public post scraper (t.me/channel/id) with direct CDN extraction, Telegram Web (WebK & WebA) floating media grabber, extension context lifecycle protection, and dedicated Telegram pairing settings UI.",
-                IsExpanded = true,
+                IsExpanded = false,
                 Items = new System.Collections.Generic.List<ChangelogItem>
                 {
                     new() { Category = "Features", Description = "Automated Telegram Bot Remote Downloader: Link your PC with official bot @PRRX_IDM_Bot to forward any video, movie, audio, or document from your phone/desktop directly to PRRX IDM.", CategoryBadgeColor = "#0078D4", CategoryBgColor = "#200078D4" },
@@ -892,6 +926,7 @@ namespace PRRX.IDM.ViewModels
                 }
             };
 
+            ChangelogHistory.Add(rel170);
             ChangelogHistory.Add(rel160);
             ChangelogHistory.Add(rel150);
             ChangelogHistory.Add(rel140);
@@ -922,7 +957,7 @@ namespace PRRX.IDM.ViewModels
                 }
             }
 
-            if (!currentFound && UpdateService.IsVersionNewer(CurrentVersionClean, "1.5.0"))
+            if (!currentFound && UpdateService.IsVersionNewer(CurrentVersionClean, "1.7.0"))
             {
                 ChangelogHistory.Insert(0, new ChangelogRelease
                 {

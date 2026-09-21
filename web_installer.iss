@@ -8,15 +8,15 @@
 ; Uses Inno Setup 6 Native Download Engine & PowerShell Automatic Extraction
 
 #define MyAppName "PRRX Internet Download Manager"
-#define MyAppVersion "1.6.0"
-; Version Lineage: 1.5.0 -> 1.6.0
+#define MyAppVersion "1.7.0"
+; Version Lineage: 1.5.0 -> 1.6.0 -> 1.7.0
 #define MyAppPublisher "PRRX Cooperation"
 #define MyAppURL "https://github.com/prrxhex-cloud/Internet-Download-Manager"
 #define MyAppExeName "PRRX.InternetDownloadManager.exe"
 #define MyAppExtId "mjcomdjfgmiphnekplhmgdepbhafbjal"
 #define LegacyExtId "jpnkdblibibkbnllncikdeijkbdnmpem"
 #define SecondaryExtId "mjcomdjfgmiphnekplhmgdepbhafbjal"
-#define PackageUrl "https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.6.0/PRRX_Internet_Download_Manager_v1.6.0_Portable.zip"
+#define PackageUrl "https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.7.0/PRRX_Internet_Download_Manager_v1.7.0_Portable.zip"
 
 [Setup]
 AppId={{D8146F25-8A11-47A1-8E2E-73E9623D7091}
