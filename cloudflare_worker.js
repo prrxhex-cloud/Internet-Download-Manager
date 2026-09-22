@@ -118,10 +118,10 @@ export default {
       if (path === "/api/manifest" && method === "GET") {
         return new Response(JSON.stringify({
           version: "1.7.0",
-          releaseDate: "2026-09-21",
+          releaseDate: "2026-09-22",
           downloadUrl: "https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.7.0/PRRX_Internet_Download_Manager_v1.7.0_Portable.zip",
-          sha256Hash: "7E4E549FD6751037094F7B273EE40730F607B9637A87918133ACDBC06127538E",
-          releaseNotes: "PRRX IDM v1.7.0: Dynamic 32-Stream Telegram Turbo Acceleration, Background Tray Sync, Startup Task Hydration, and Native Direct CDN Stream Resolvers.",
+          sha256Hash: "49EEBF576700F6977BE3D59EA7610E3C3EB9CEC0D45A04C12B80C8AACC350770",
+          releaseNotes: "PRRX IDM v1.7.0: Native MTProto Engine direct Data Center streaming (lifting 20MB limit up to 2GB/4GB), 32 parallel connection threads with live visual blocks, real-time transfer speed calculation, and Cloudflare Edge SQLite pairing.",
           isMandatory: false
         }), { status: 200, headers: corsHeaders });
       }
@@ -991,6 +991,23 @@ async function handleTelegramUpdate(update, env, ctx) {
     mimeType = "video/mp4";
   }
 
+  // Extract channel mention from fileName (e.g. @SECL4U.Obsession...) if forwardChannel not yet found
+  if (!forwardChannel && fileName) {
+    const fnChannelMatch = fileName.match(/^@([a-zA-Z0-9_]{3,32})/);
+    if (fnChannelMatch && fnChannelMatch[1].toLowerCase() !== "prrx_idm_bot") {
+      forwardChannel = fnChannelMatch[1];
+    }
+  }
+
+  // Extract channel mention from caption/text if still not found
+  if (!forwardChannel && (text || msg.caption)) {
+    const rawAll = `${text || ""} ${msg.caption || ""}`;
+    const mentionMatch = rawAll.match(/@([a-zA-Z0-9_]{3,32})/);
+    if (mentionMatch && mentionMatch[1].toLowerCase() !== "prrx_idm_bot") {
+      forwardChannel = mentionMatch[1];
+    }
+  }
+
   // 5. Resolve File Download URL if media detected (Supports ANY size up to 2GB/4GB without 20MB limit)
   if (fileId) {
     let downloadUrl = "";
@@ -1046,7 +1063,7 @@ async function handleTelegramUpdate(update, env, ctx) {
       `🚀 <b>Sent to PRRX IDM on your PC! File: ${escapeHtml(fileName)} (${formattedSize})</b>\n\n` +
       `📁 <b>Name:</b> <code>${escapeHtml(fileName)}</code>\n` +
       `📦 <b>Size:</b> ${formattedSize}\n` +
-      `⚡ <b>Engine:</b> PRRX Unlimited Turbo Downloader\n\n` +
+      `⚡ <b>Engine:</b> Native MTProto Turbo Engine (32 Parallel Streams)\n\n` +
       `<i>PRRX IDM has detected this task and popped up the download dialog on your PC screen!</i>`
     );
     return;

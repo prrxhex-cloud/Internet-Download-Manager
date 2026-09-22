@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using PRRX.IDM.Models;
 using PRRX.IDM.Services;
 using PRRX.IDM.ViewModels;
+using TL;
 using Xunit;
 
 namespace PRRX.IDM.Tests
@@ -301,6 +302,21 @@ namespace PRRX.IDM.Tests
             Assert.Equal("Sample_Episode.mkv", vm.FileName);
             Assert.Equal(157286400, vm.DetectedBytes);
             Assert.Equal(FileCategory.Video, vm.SelectedCategory);
+        }
+
+        [Fact]
+        public async Task TelegramMtprotoService_ConnectsAndResolvesChannel()
+        {
+            var service = TelegramMtprotoService.Current;
+            var client = await service.GetClientAsync();
+
+            Assert.NotNull(client);
+            Assert.NotNull(client.User);
+            Assert.Equal("PRRX_IDM_Bot", client.User.username);
+
+            var resolved = await client.Contacts_ResolveUsername("SECL4U");
+            Assert.NotNull(resolved);
+            Assert.NotNull(resolved.Chat);
         }
     }
 }

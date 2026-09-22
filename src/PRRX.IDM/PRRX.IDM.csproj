@@ -48,6 +48,7 @@
 
   <ItemGroup>
     <PackageReference Include="WPF-UI" Version="4.3.0" />
+    <PackageReference Include="WTelegramClient" Version="4.4.8" />
     <PackageReference Include="YoutubeExplode" Version="6.6.2" />
     <PackageReference Include="YoutubeExplode.Converter" Version="6.6.2" />
   </ItemGroup>

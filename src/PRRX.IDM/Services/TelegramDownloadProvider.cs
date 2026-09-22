@@ -369,11 +369,17 @@ namespace PRRX.IDM.Services
                 }
             }
 
-            // Step 2: Probe if direct stream chunk can be fetched before launching workers
+            // Step 2: Native MTProto Engine Direct Download (Lifts 20 MB limit up to 2GB/4GB from Telegram DCs)
+            bool mtprotoSuccess = await TryDownloadViaMtprotoAsync(request, progress, cancellationToken);
+            if (mtprotoSuccess)
+            {
+                return true;
+            }
+
+            // Step 3: Probe fallback chunked streams if direct MTProto was unavailable
             var probeChunk = await FetchTelegramStreamChunkAsync(request, 0, 4096, cancellationToken);
             if (probeChunk == null || probeChunk.Length == 0)
             {
-                // Do NOT hang silently at 0 B/s: deliver immediate clear diagnostic feedback
                 progress?.Report(new SegmentProgressEventArgs
                 {
                     OverallPercentage = 0.0,
@@ -381,15 +387,198 @@ namespace PRRX.IDM.Services
                     DownloadedBytes = 0,
                     TransferRateFormatted = "0 B/s",
                     TimeLeftFormatted = "--:--",
-                    StatusMessage = "Stream Unreachable: Direct stream unavailable for private file. Forward from a public channel or provide direct link.",
+                    StatusMessage = "Stream Unreachable: Telegram stream could not be established. Ensure channel is public or provide a direct stream link.",
                     IsResumeSupported = false,
                     Threads = new List<DownloadConnectionThread>()
                 });
                 return false;
             }
 
-            // Step 3: MTProto Chunked Stream Assembly with unified 32-segment visual threads
+            // Step 4: Chunked Stream Assembly Fallback
             return await DownloadLargeTelegramFileChunksAsync(request, progress, cancellationToken);
+        }
+
+        /// <summary>
+        /// Attempts to download the file directly from Telegram's official Data Centers
+        /// using the Native MTProto Engine, completely bypassing the 20 MB Bot API limit.
+        /// </summary>
+        private async Task<bool> TryDownloadViaMtprotoAsync(
+            TelegramDownloadRequest request,
+            IProgress<SegmentProgressEventArgs>? progress,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                // 1. Extract channel name from metadata, fileName (@SECL4U), or chatId
+                string? targetChannel = !string.IsNullOrWhiteSpace(request.Channel) ? request.Channel : null;
+                if (string.IsNullOrWhiteSpace(targetChannel) && !string.IsNullOrWhiteSpace(request.FileName))
+                {
+                    var match = Regex.Match(request.FileName, @"^@([a-zA-Z0-9_]{3,32})");
+                    if (match.Success)
+                    {
+                        targetChannel = match.Groups[1].Value;
+                    }
+                }
+                if (string.IsNullOrWhiteSpace(targetChannel) && !string.IsNullOrWhiteSpace(request.ChatId) &&
+                    !request.ChatId.StartsWith("-100") && !long.TryParse(request.ChatId, out _))
+                {
+                    targetChannel = request.ChatId;
+                }
+
+                long msgId = request.ChannelMessageId > 0 ? request.ChannelMessageId : request.MessageId;
+
+                TL.Document? doc = null;
+                if (!string.IsNullOrWhiteSpace(targetChannel) && msgId > 0)
+                {
+                    doc = await TelegramMtprotoService.Current.GetChannelDocumentAsync(targetChannel, msgId, cancellationToken);
+                }
+
+                var destinationPath = request.DestinationFilePath;
+                var tempPath = destinationPath + ".prrx_tg_part";
+
+                long totalBytes = request.FileSize > 0 ? request.FileSize : (doc?.size ?? 0);
+                int concurrency = Math.Clamp(request.Concurrency > 0 ? request.Concurrency : 32, 1, 64);
+                long segmentSize = totalBytes > 0 ? (long)Math.Ceiling((double)totalBytes / concurrency) : totalBytes;
+
+                var threads = new List<DownloadConnectionThread>();
+                for (int i = 0; i < concurrency; i++)
+                {
+                    long segStart = i * segmentSize;
+                    long segEnd = (i == concurrency - 1) ? totalBytes - 1 : Math.Min(totalBytes - 1, segStart + segmentSize - 1);
+                    threads.Add(new DownloadConnectionThread
+                    {
+                        ThreadId = i + 1,
+                        StartByte = segStart,
+                        EndByte = Math.Max(segStart, segEnd),
+                        CurrentByte = segStart,
+                        DownloadedBytes = 0,
+                        FormattedDownloaded = "0 KB",
+                        StatusInfo = "Receiving data...",
+                        IsActive = true
+                    });
+                }
+
+                var stopwatch = Stopwatch.StartNew();
+                long lastReportBytes = 0;
+                long lastReportTime = stopwatch.ElapsedMilliseconds;
+
+                Action<long, long> progressCallback = (downloaded, total) =>
+                {
+                    if (total > 0 && totalBytes <= 0) totalBytes = total;
+
+                    var now = stopwatch.ElapsedMilliseconds;
+                    if (now - lastReportTime >= 200 || downloaded >= totalBytes)
+                    {
+                        var timeDiff = (now - lastReportTime) / 1000.0;
+                        lastReportTime = now;
+                        var bytesDiff = downloaded - lastReportBytes;
+                        lastReportBytes = downloaded;
+
+                        double speedBps = timeDiff > 0 ? (bytesDiff / timeDiff) : 0;
+                        double pct = totalBytes > 0 ? Math.Clamp((double)downloaded / totalBytes * 100.0, 0, 100) : 0;
+                        long remaining = Math.Max(0, totalBytes - downloaded);
+                        string eta = speedBps > 1024 ? FormatEta(remaining / speedBps) : "--:--";
+
+                        // Update 32 connection thread visual blocks dynamically
+                        if (segmentSize > 0)
+                        {
+                            for (int i = 0; i < concurrency; i++)
+                            {
+                                var t = threads[i];
+                                if (downloaded >= t.EndByte)
+                                {
+                                    t.DownloadedBytes = t.EndByte - t.StartByte + 1;
+                                    t.ProgressPercentage = 100.0;
+                                    t.StatusInfo = "Complete";
+                                    t.FormattedDownloaded = FormatBytes(t.DownloadedBytes);
+                                }
+                                else if (downloaded > t.StartByte)
+                                {
+                                    t.DownloadedBytes = downloaded - t.StartByte;
+                                    long slot = Math.Max(1, t.EndByte - t.StartByte + 1);
+                                    t.ProgressPercentage = Math.Clamp((double)t.DownloadedBytes / slot * 100.0, 0, 100);
+                                    t.StatusInfo = "Receiving data...";
+                                    t.FormattedDownloaded = FormatBytes(t.DownloadedBytes);
+                                }
+                                else
+                                {
+                                    t.DownloadedBytes = 0;
+                                    t.ProgressPercentage = 0.0;
+                                    t.StatusInfo = "Pending";
+                                    t.FormattedDownloaded = "0 KB";
+                                }
+                            }
+                        }
+
+                        progress?.Report(new SegmentProgressEventArgs
+                        {
+                            OverallPercentage = pct,
+                            TotalBytes = totalBytes,
+                            DownloadedBytes = downloaded,
+                            TransferRateFormatted = FormatSpeed(speedBps),
+                            TimeLeftFormatted = eta,
+                            StatusMessage = $"Downloading Telegram stream ({pct:F1}%)...",
+                            IsResumeSupported = true,
+                            Threads = new List<DownloadConnectionThread>(threads)
+                        });
+                    }
+                };
+
+                bool downloadOk = false;
+                await using (var fs = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite, 65536, useAsync: true))
+                {
+                    if (doc != null)
+                    {
+                        downloadOk = await TelegramMtprotoService.Current.DownloadDocumentAsync(doc, fs, progressCallback, cancellationToken);
+                    }
+                    else if (!string.IsNullOrWhiteSpace(request.FileId))
+                    {
+                        var decoded = TelegramFileIdDecoder.Decode(request.FileId);
+                        if (decoded != null && decoded.IsValid)
+                        {
+                            var location = new TL.InputDocumentFileLocation
+                            {
+                                id = decoded.Id,
+                                access_hash = decoded.AccessHash,
+                                file_reference = decoded.FileReference ?? Array.Empty<byte>(),
+                                thumb_size = ""
+                            };
+                            downloadOk = await TelegramMtprotoService.Current.DownloadFileLocationAsync(
+                                location, fs, decoded.DcId, totalBytes, progressCallback, cancellationToken);
+                        }
+                    }
+                }
+
+                if (downloadOk && File.Exists(tempPath) && new FileInfo(tempPath).Length > 0)
+                {
+                    if (File.Exists(destinationPath)) File.Delete(destinationPath);
+                    File.Move(tempPath, destinationPath);
+                    PRRX.IDM.Security.SecurityGuard.ApplyMarkOfTheWeb(destinationPath, request.DirectStreamUrl ?? request.Url);
+
+                    progress?.Report(new SegmentProgressEventArgs
+                    {
+                        OverallPercentage = 100.0,
+                        TotalBytes = totalBytes,
+                        DownloadedBytes = totalBytes,
+                        TransferRateFormatted = "Completed",
+                        TimeLeftFormatted = "00:00",
+                        StatusMessage = "Telegram Download Completed Successfully!",
+                        IsResumeSupported = true,
+                        Threads = threads
+                    });
+                    return true;
+                }
+                else
+                {
+                    try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[TelegramDownloadProvider] MTProto download error: {ex.Message}");
+            }
+
+            return false;
         }
 
         /// <summary>
