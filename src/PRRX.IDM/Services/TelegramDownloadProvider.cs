@@ -211,46 +211,21 @@ namespace PRRX.IDM.Services
             if (string.IsNullOrWhiteSpace(url)) return null;
             var cleanUrl = url.Trim();
 
-            // 1. If it's a tg://file URI, resolve public channel post, direct stream, or Bot API path first
+            // 1. If it's a tg://file URI, resolve official Bot API path (<=20MB) or explicit non-teaser CDN URL
             if (cleanUrl.StartsWith("tg://", StringComparison.OrdinalIgnoreCase))
             {
                 var req = ParseTelegramUrlOrTask(cleanUrl);
                 if (req != null)
                 {
-                    // A. Check if DirectStreamUrl is already a direct CDN stream URL
-                    if (!string.IsNullOrWhiteSpace(req.DirectStreamUrl) && TelegramLinkResolver.IsValidDirectStreamUrl(req.DirectStreamUrl))
+                    // A. Check if DirectStreamUrl is already an explicit direct CDN stream URL (not telesco.pe teaser)
+                    if (!string.IsNullOrWhiteSpace(req.DirectStreamUrl) &&
+                        !req.DirectStreamUrl.Contains("telesco.pe", StringComparison.OrdinalIgnoreCase) &&
+                        TelegramLinkResolver.IsValidDirectStreamUrl(req.DirectStreamUrl))
                     {
                         return req.DirectStreamUrl;
                     }
 
-                    // B. Check if DirectStreamUrl is a public post link (e.g. t.me/NecflixsLK/7445)
-                    if (!string.IsNullOrWhiteSpace(req.DirectStreamUrl) && TelegramLinkResolver.ParsePostUrl(req.DirectStreamUrl, out _, out _))
-                    {
-                        var resolver = new TelegramLinkResolver();
-                        var media = await resolver.ResolveTelegramMediaAsync(req.DirectStreamUrl, cancellationToken);
-                        if (media != null && !string.IsNullOrWhiteSpace(media.DirectStreamUrl) && TelegramLinkResolver.IsValidDirectStreamUrl(media.DirectStreamUrl))
-                        {
-                            return media.DirectStreamUrl;
-                        }
-                    }
-
-                    // C. Check if Channel or ChatId points to a public channel with a messageId
-                    var targetChannel = !string.IsNullOrWhiteSpace(req.Channel) ? req.Channel : req.ChatId;
-                    var targetMsgId = req.ChannelMessageId > 0 ? req.ChannelMessageId : req.MessageId;
-
-                    if (!string.IsNullOrWhiteSpace(targetChannel) && targetMsgId > 0 &&
-                        !targetChannel.StartsWith("-100") && !long.TryParse(targetChannel, out _))
-                    {
-                        var postUrl = $"https://t.me/{targetChannel}/{targetMsgId}";
-                        var resolver = new TelegramLinkResolver();
-                        var media = await resolver.ResolveTelegramMediaAsync(postUrl, cancellationToken);
-                        if (media != null && !string.IsNullOrWhiteSpace(media.DirectStreamUrl) && TelegramLinkResolver.IsValidDirectStreamUrl(media.DirectStreamUrl))
-                        {
-                            return media.DirectStreamUrl;
-                        }
-                    }
-
-                    // D. If file is <= 20MB, try official Bot API getFile
+                    // B. If file is <= 20MB, try official Bot API getFile
                     if (!string.IsNullOrWhiteSpace(req.FileId) && (req.FileSize <= 0 || req.FileSize <= 20 * 1024 * 1024))
                     {
                         var directUrl = await TryGetBotApiFileUrlAsync(req.FileId, cancellationToken);
@@ -261,6 +236,7 @@ namespace PRRX.IDM.Services
                     }
                 }
 
+                // For all other tg:// files (up to 2GB/4GB), MTProto is authoritative
                 return null;
             }
 
@@ -338,12 +314,26 @@ namespace PRRX.IDM.Services
                 Directory.CreateDirectory(destDir);
             }
 
-            // Step 1: Try resolving to direct CDN / HTTP stream URL
-            var directUrl = !string.IsNullOrWhiteSpace(request.DirectStreamUrl) && TelegramLinkResolver.IsValidDirectStreamUrl(request.DirectStreamUrl)
+            // Step 1: For tg:// URIs and Telegram tasks, ALWAYS download via Native MTProto Engine directly from Telegram DCs
+            if (request.Url.StartsWith("tg://", StringComparison.OrdinalIgnoreCase) || !string.IsNullOrWhiteSpace(request.FileId))
+            {
+                bool mtprotoSuccess = await TryDownloadViaMtprotoAsync(request, progress, cancellationToken);
+                if (mtprotoSuccess)
+                {
+                    return true;
+                }
+            }
+
+            // Step 2: Try resolving to direct CDN / HTTP stream URL (non-telescope direct streams)
+            var directUrl = !string.IsNullOrWhiteSpace(request.DirectStreamUrl) &&
+                            !request.DirectStreamUrl.Contains("telesco.pe", StringComparison.OrdinalIgnoreCase) &&
+                            TelegramLinkResolver.IsValidDirectStreamUrl(request.DirectStreamUrl)
                 ? request.DirectStreamUrl
                 : await ResolveDirectStreamUrlAsync(request.Url, cancellationToken);
 
-            if (!string.IsNullOrWhiteSpace(directUrl) && TelegramLinkResolver.IsValidDirectStreamUrl(directUrl))
+            if (!string.IsNullOrWhiteSpace(directUrl) &&
+                !directUrl.Contains("telesco.pe", StringComparison.OrdinalIgnoreCase) &&
+                TelegramLinkResolver.IsValidDirectStreamUrl(directUrl))
             {
                 // Download using native MultiSegmentDownloader with 32 parallel sockets
                 var downloader = new MultiSegmentDownloader();
@@ -367,13 +357,6 @@ namespace PRRX.IDM.Services
 
                     return await tcs.Task;
                 }
-            }
-
-            // Step 2: Native MTProto Engine Direct Download (Lifts 20 MB limit up to 2GB/4GB from Telegram DCs)
-            bool mtprotoSuccess = await TryDownloadViaMtprotoAsync(request, progress, cancellationToken);
-            if (mtprotoSuccess)
-            {
-                return true;
             }
 
             // Step 3: Probe fallback chunked streams if direct MTProto was unavailable
@@ -428,7 +411,20 @@ namespace PRRX.IDM.Services
                 long msgId = request.ChannelMessageId > 0 ? request.ChannelMessageId : request.MessageId;
 
                 TL.Document? doc = null;
-                if (!string.IsNullOrWhiteSpace(targetChannel) && msgId > 0)
+                // A. If channel username and channel message ID are available
+                if (!string.IsNullOrWhiteSpace(targetChannel) && request.ChannelMessageId > 0)
+                {
+                    doc = await TelegramMtprotoService.Current.GetChannelDocumentAsync(targetChannel, request.ChannelMessageId, cancellationToken);
+                }
+
+                // B. If document was sent or forwarded to the bot in its chat
+                if (doc == null && request.MessageId > 0)
+                {
+                    doc = await TelegramMtprotoService.Current.GetChatMessageDocumentAsync(request.MessageId, cancellationToken);
+                }
+
+                // C. Fallback: try channel with general msgId
+                if (doc == null && !string.IsNullOrWhiteSpace(targetChannel) && msgId > 0)
                 {
                     doc = await TelegramMtprotoService.Current.GetChannelDocumentAsync(targetChannel, msgId, cancellationToken);
                 }

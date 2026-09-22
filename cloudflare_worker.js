@@ -120,7 +120,7 @@ export default {
           version: "1.7.0",
           releaseDate: "2026-09-22",
           downloadUrl: "https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.7.0/PRRX_Internet_Download_Manager_v1.7.0_Portable.zip",
-          sha256Hash: "49EEBF576700F6977BE3D59EA7610E3C3EB9CEC0D45A04C12B80C8AACC350770",
+          sha256Hash: "8FA3BCFCE7BC9252734A642690C96673D4D94A080F741174736191A096A074EF",
           releaseNotes: "PRRX IDM v1.7.0: Native MTProto Engine direct Data Center streaming (lifting 20MB limit up to 2GB/4GB), 32 parallel connection threads with live visual blocks, real-time transfer speed calculation, and Cloudflare Edge SQLite pairing.",
           isMandatory: false
         }), { status: 200, headers: corsHeaders });

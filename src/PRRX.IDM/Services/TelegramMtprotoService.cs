@@ -92,6 +92,34 @@ namespace PRRX.IDM.Services
         }
 
         /// <summary>
+        /// Retrieves the Document object from a message sent directly or forwarded to the bot in its chat.
+        /// </summary>
+        public async Task<Document?> GetChatMessageDocumentAsync(long messageId, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                if (messageId <= 0) return null;
+                var client = await GetClientAsync(cancellationToken);
+                var messages = await client.Messages_GetMessages(new InputMessage[] { (int)messageId });
+                if (messages is Messages_MessagesBase mmb && mmb.Messages.Length > 0)
+                {
+                    foreach (var m in mmb.Messages)
+                    {
+                        if (m is Message msg && msg.media is MessageMediaDocument mmd && mmd.document is Document doc)
+                        {
+                            return doc;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[TelegramMtproto] Get chat message document failed: {ex.Message}");
+            }
+            return null;
+        }
+
+        /// <summary>
         /// Downloads a Telegram Document directly from Telegram Data Centers into the provided stream.
         /// Bypasses all Bot API 20 MB limits up to 2 GB (Free) / 4 GB (Premium).
         /// </summary>

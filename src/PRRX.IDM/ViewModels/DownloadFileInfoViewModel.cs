@@ -402,10 +402,9 @@ namespace PRRX.IDM.ViewModels
             VoteSafeCommand = new AsyncRelayCommand(() => VoteReputationAsync("safe"), () => CanVote);
             VoteSuspiciousCommand = new AsyncRelayCommand(() => VoteReputationAsync("malware"), () => CanVote);
 
-            if (precalculatedSize.HasValue && precalculatedSize.Value > 0)
+            if (_detectedBytes.HasValue && _detectedBytes.Value > 0)
             {
-                _detectedBytes = precalculatedSize.Value;
-                _fileSizeFormatted = FormatBytes(precalculatedSize.Value);
+                _fileSizeFormatted = FormatBytes(_detectedBytes.Value);
                 _isProbing = false;
             }
             else
@@ -414,8 +413,11 @@ namespace PRRX.IDM.ViewModels
                 _isProbing = true;
             }
 
-            // Launch size & filename probing strictly in background (<100ms instant dialog launch)
-            _ = Task.Run(() => ProbeFileSizeAsync(initialUrl));
+            // Launch size & filename probing strictly in background for non-Telegram URLs (<100ms instant dialog launch)
+            if (!initialUrl.StartsWith("tg://", StringComparison.OrdinalIgnoreCase))
+            {
+                _ = Task.Run(() => ProbeFileSizeAsync(initialUrl));
+            }
 
             // Launch non-blocking background lookup for domain health & community reputation
             _ = Task.Run(() => LoadCloudIntelligenceAsync(initialUrl));
@@ -682,53 +684,9 @@ namespace PRRX.IDM.ViewModels
                         }
                         AutoPopulateDescription(_cachedPageTitle, tgMetadata.MimeType);
                     }
+                    IsProbing = false;
                 });
-
-                lock (_probeLock)
-                {
-                    if (_activeProbeTask != null && !_activeProbeTask.IsCompleted && _activeProbeUrl == url)
-                    {
-                        return _activeProbeTask;
-                    }
-
-                    _probeCts?.Cancel();
-                    var cts = new CancellationTokenSource();
-                    _probeCts = cts;
-                    _activeProbeUrl = url;
-
-                    _activeProbeTask = Task.Run(async () =>
-                    {
-                        try
-                        {
-                            var resolvedStream = await TelegramDownloadProvider.Current.ResolveDirectStreamUrlAsync(url, cts.Token);
-                            if (!string.IsNullOrWhiteSpace(resolvedStream) && !cts.IsCancellationRequested)
-                            {
-                                DispatchToUi(() =>
-                                {
-                                    _url = resolvedStream;
-                                    OnPropertyChanged(nameof(Url));
-                                });
-                                await DoProbeFileSizeAsync(resolvedStream, cts);
-                            }
-                            else
-                            {
-                                DispatchToUi(() =>
-                                {
-                                    IsProbing = false;
-                                });
-                            }
-                        }
-                        catch
-                        {
-                            DispatchToUi(() =>
-                            {
-                                IsProbing = false;
-                            });
-                        }
-                    }, cts.Token);
-
-                    return _activeProbeTask;
-                }
+                return Task.CompletedTask;
             }
 
             if (TelegramLinkResolver.ParsePostUrl(url, out var channel, out var messageId))

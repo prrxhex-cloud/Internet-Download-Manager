@@ -286,7 +286,7 @@ namespace PRRX.IDM.Tests
         [Fact]
         public async Task TelegramDownloadProvider_ResolveDirectStreamUrlAsync_ResolvesCdnFromPublicUrlParam()
         {
-            var cdnUrl = "https://cdn4.telesco.pe/file/test_stream.mp4";
+            var cdnUrl = "https://cdn.example.com/file/test_stream.mp4";
             var tgUri = $"tg://file?file_id=TEST_123&file_name=video.mp4&file_size=50000000&public_url={Uri.EscapeDataString(cdnUrl)}";
 
             var resolved = await TelegramDownloadProvider.Current.ResolveDirectStreamUrlAsync(tgUri);
@@ -294,14 +294,26 @@ namespace PRRX.IDM.Tests
         }
 
         [Fact]
-        public void DownloadFileInfoViewModel_ExtractsTelegramMetadataImmediately()
+        public async Task TelegramDownloadProvider_ResolveDirectStreamUrlAsync_IgnoresTelescopeTeasersForLargeTgFiles()
         {
-            var tgUri = "tg://file?file_id=VID_777&file_name=Sample_Episode.mkv&file_size=157286400&channel=NecflixsLK&channel_msg_id=7445";
+            var cdnUrl = "https://cdn5.telesco.pe/file/teaser_clip.mp4";
+            var tgUri = $"tg://file?file_id=TEST_123&file_name=Movie.mkv&file_size=2147483648&public_url={Uri.EscapeDataString(cdnUrl)}";
+
+            var resolved = await TelegramDownloadProvider.Current.ResolveDirectStreamUrlAsync(tgUri);
+            Assert.Null(resolved);
+        }
+
+        [Fact]
+        public void DownloadFileInfoViewModel_TgUri_PreservesTrueSizeAndDoesNotOverwriteWithTeaser()
+        {
+            long largeSize = 2202009600; // 2.05 GB
+            var tgUri = $"tg://file?file_id=BQACAgQAAxkBAAMI&file_name=@SECL4U.Wrong_Turn_5.mkv&file_size={largeSize}&channel=SECL4U&channel_msg_id=7445";
             var vm = new DownloadFileInfoViewModel(tgUri, Path.GetTempPath());
 
-            Assert.Equal("Sample_Episode.mkv", vm.FileName);
-            Assert.Equal(157286400, vm.DetectedBytes);
-            Assert.Equal(FileCategory.Video, vm.SelectedCategory);
+            Assert.Equal("@SECL4U.Wrong_Turn_5.mkv", vm.FileName);
+            Assert.Equal(largeSize, vm.DetectedBytes);
+            Assert.Equal("2.05 GB", vm.FileSizeFormatted);
+            Assert.StartsWith("tg://file", vm.Url);
         }
 
         [Fact]
@@ -317,6 +329,9 @@ namespace PRRX.IDM.Tests
             var resolved = await client.Contacts_ResolveUsername("SECL4U");
             Assert.NotNull(resolved);
             Assert.NotNull(resolved.Chat);
+
+            var msgs = await client.Messages_GetMessages(new InputMessage[] { 1 });
+            Assert.NotNull(msgs);
         }
     }
 }

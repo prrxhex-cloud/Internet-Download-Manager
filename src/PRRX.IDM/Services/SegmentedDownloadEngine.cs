@@ -157,12 +157,8 @@ namespace PRRX.IDM.Services
                     if (tgReq != null)
                     {
                         tgReq.DestinationFilePath = destinationFilePath;
-                        var resolvedStream = await TelegramDownloadProvider.Current.ResolveDirectStreamUrlAsync(url, _cts.Token);
-                        if (!string.IsNullOrWhiteSpace(resolvedStream) && TelegramLinkResolver.IsValidDirectStreamUrl(resolvedStream))
-                        {
-                            url = resolvedStream;
-                        }
-                        else if (url.StartsWith("tg://", StringComparison.OrdinalIgnoreCase))
+
+                        if (url.StartsWith("tg://", StringComparison.OrdinalIgnoreCase))
                         {
                             var progressReporter = new Progress<SegmentProgressEventArgs>(args =>
                             {
@@ -182,6 +178,12 @@ namespace PRRX.IDM.Services
                                 DownloadFailed?.Invoke(this, "Telegram stream download cancelled or failed: stream endpoint not reachable.");
                                 return false;
                             }
+                        }
+
+                        var resolvedStream = await TelegramDownloadProvider.Current.ResolveDirectStreamUrlAsync(url, _cts.Token);
+                        if (!string.IsNullOrWhiteSpace(resolvedStream) && TelegramLinkResolver.IsValidDirectStreamUrl(resolvedStream))
+                        {
+                            url = resolvedStream;
                         }
                     }
                 }
