@@ -341,9 +341,9 @@ export default {
 
       // Telegram Webhook Receiver (POST from Telegram Servers)
       if (path === "/api/telegram/webhook" && method === "POST") {
-        // Enforce Webhook Secret Token validation
-        const webhookSecret = env.TELEGRAM_SECRET_TOKEN || env.TELEGRAM_WEBHOOK_SECRET || "PRRX_TELEGRAM_WEBHOOK_SECRET_VAULT_2026";
+        // Enforce Webhook Secret Token validation if configured in Environment
         const incomingSecret = request.headers.get("X-Telegram-Bot-Api-Secret-Token");
+        const webhookSecret = env.TELEGRAM_SECRET_TOKEN || env.TELEGRAM_WEBHOOK_SECRET;
         if (webhookSecret && incomingSecret !== webhookSecret) {
           return new Response(JSON.stringify({ error: "Unauthorized: Invalid Telegram Webhook Secret Token" }), {
             status: 401,
@@ -374,7 +374,8 @@ export default {
 
         const secretToken = body.secret_token || env.TELEGRAM_SECRET_TOKEN || "PRRX_TELEGRAM_WEBHOOK_SECRET_VAULT_2026";
         const webhookUrl = body.url || `${url.origin}/api/telegram/webhook`;
-        const setupRes = await fetch(`${TELEGRAM_API_BASE}/setWebhook?url=${encodeURIComponent(webhookUrl)}&secret_token=${encodeURIComponent(secretToken)}&allowed_updates=["message","edited_message","channel_post"]`);
+        const allowedUpdatesParam = encodeURIComponent(JSON.stringify(["message","edited_message","channel_post"]));
+        const setupRes = await fetch(`${TELEGRAM_API_BASE}/setWebhook?url=${encodeURIComponent(webhookUrl)}&secret_token=${encodeURIComponent(secretToken)}&allowed_updates=${allowedUpdatesParam}`);
         const setupData = await setupRes.json().catch(() => ({ ok: false }));
         return new Response(JSON.stringify(setupData), { status: setupRes.status, headers: corsHeaders });
       }
