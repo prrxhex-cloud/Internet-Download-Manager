@@ -1,0 +1,9 @@
+name = "prrx-api"
+main = "cloudflare_worker.js"
+compatibility_date = "2024-09-14"
+compatibility_flags = ["nodejs_compat"]
+
+# D1 Database binding configured in Cloudflare Dashboard
+# [[d1_databases]]
+# binding = "DB"
+# database_name = "prrx-db"
