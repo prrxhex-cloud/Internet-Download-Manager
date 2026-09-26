@@ -120,7 +120,7 @@ export default {
           version: "1.8.0",
           releaseDate: "2026-09-26",
           downloadUrl: "https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.8.0/PRRX_Internet_Download_Manager_v1.8.0_Portable.zip",
-          sha256Hash: "DACFB759D0570039CCC183D4230030538BE36AC2134575D4C9233D9F31B8CE89",
+          sha256Hash: "695CD6656F135835CA914664913921A374BB3796FCC8F7BCFF7D38B968CD0284",
           releaseNotes: "PRRX IDM v1.8.0: Ultra-fast MTProto Telegram downloads (ParallelTransfers=16, 1MB socket buffer, 512KB part chunks), dedicated IDM Downloads Tab & Settings, Video Downloader Tab with 29+ format selector, Media Converter with live audio/video player & inspector (Internet Downloads only), Draggable Floating Grabber with format conversion, sub-150ms instant cold-start download dialog, and hardened zero-resurrection uninstaller.",
           isMandatory: false
         }), { status: 200, headers: corsHeaders });

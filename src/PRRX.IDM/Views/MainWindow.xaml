@@ -73,7 +73,7 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
 
                 <!-- Navigation Buttons (Fluent 2 Micro-interactions & Clear Icons) -->
                 <StackPanel Grid.Row="1">
-                    <ui:Button Content="IDM Downloads" Icon="{ui:SymbolIcon Symbol=GlobeArrowDownload24}"
+                    <ui:Button Content="IDM Downloads" Icon="{ui:SymbolIcon Symbol=ArrowDownload24}"
                                Command="{Binding NavigateTabCommand}" CommandParameter="IdmDownloads"
                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
                                Height="44" Margin="0,0,0,8" Padding="16,0" CornerRadius="8"/>

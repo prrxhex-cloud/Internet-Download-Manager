@@ -399,9 +399,10 @@ namespace PRRX.IDM
             }
             catch (Exception ex)
             {
+                var fullErr = ex.InnerException != null ? $"{ex.Message}\n\nDetails: {ex.InnerException.Message}" : ex.Message;
                 Debug.WriteLine($"Startup exception: {ex}");
                 MessageBox.Show(
-                    $"A startup error occurred:\n\n{ex.Message}",
+                    $"A startup error occurred:\n\n{fullErr}",
                     "PRRX IDM Startup Notice",
                     MessageBoxButton.OK,
                     MessageBoxImage.Error);
