@@ -80,8 +80,8 @@ namespace PRRX.IDM.Services
         public string? FfmpegDirectoryPath { get; private set; }
         public string? Aria2cExecutablePath { get; private set; }
 
-        public string? ActiveCookiesPath => ResolveCookiesPath();
-        public bool IsCookiesConfigured => !string.IsNullOrWhiteSpace(ActiveCookiesPath);
+        public string? ActiveCookiesPath => null;
+        public bool IsCookiesConfigured => false;
         public bool IsEngineAvailable => File.Exists(EngineExecutablePath);
 
         public MediaEngineService(IConfigurationService? configService = null)
@@ -156,22 +156,6 @@ namespace PRRX.IDM.Services
             return null;
         }
 
-        public string? ResolveCookiesPath()
-        {
-            // Cookies are strictly optional fallback (never mandatory)
-            if (_configService == null || !_configService.CurrentConfig.IsCookiesEnabled)
-            {
-                return null;
-            }
-
-            if (!string.IsNullOrWhiteSpace(_configService.CurrentConfig.CookiesFilePath) && File.Exists(_configService.CurrentConfig.CookiesFilePath))
-            {
-                return _configService.CurrentConfig.CookiesFilePath;
-            }
-
-            return null;
-        }
-
         private void AttachCommonArguments(ProcessStartInfo startInfo)
         {
             if (!string.IsNullOrWhiteSpace(FfmpegDirectoryPath))
@@ -186,63 +170,31 @@ namespace PRRX.IDM.Services
             startInfo.ArgumentList.Add("--extractor-args");
             startInfo.ArgumentList.Add("youtubetab:approximate_date");
 
-            // Cookies are strictly optional fallback (never mandatory)
-            var cookies = ResolveCookiesPath();
-            if (!string.IsNullOrWhiteSpace(cookies) && File.Exists(cookies))
-            {
-                startInfo.ArgumentList.Add("--cookies");
-                startInfo.ArgumentList.Add(cookies);
-            }
+            // Multi-Connection Turbo Speed Acceleration
+            var connections = Math.Clamp(_configService?.CurrentConfig.TurboConnectionCount ?? 32, 8, 64);
+            startInfo.ArgumentList.Add("--concurrent-fragments");
+            startInfo.ArgumentList.Add(connections.ToString());
 
-            // Download Acceleration Mode (Cloud Install vs. Default Direct)
-            bool isCloud = _configService?.CurrentConfig.AccelerationMode != DownloadAccelerationMode.DefaultDirect;
+            // Anti-freeze & Anti-stall streaming optimizations
+            startInfo.ArgumentList.Add("--throttled-rate");
+            startInfo.ArgumentList.Add("100K"); // Auto-drops any CDN connection that stalls below 100 KB/s and restarts it instantly
 
-            if (isCloud)
-            {
-                // Cloud Accelerated: Ultra-fast parallel multi-socket fragment extraction
-                var connections = Math.Clamp(_configService?.CurrentConfig.TurboConnectionCount ?? 32, 8, 64);
-                startInfo.ArgumentList.Add("--concurrent-fragments");
-                startInfo.ArgumentList.Add(connections.ToString());
+            startInfo.ArgumentList.Add("--hls-use-mpegts"); // Seamless fragment demuxing without MP4 container lock delays
+            startInfo.ArgumentList.Add("--no-part"); // Direct streaming into destination without locking .part files
+            startInfo.ArgumentList.Add("--file-allocation");
+            startInfo.ArgumentList.Add("none"); // Eliminates Windows file-allocation pauses
 
-                // Anti-freeze & Anti-stall streaming optimizations
-                startInfo.ArgumentList.Add("--throttled-rate");
-                startInfo.ArgumentList.Add("100K"); // Auto-drops any CDN connection that stalls below 100 KB/s and restarts it instantly
+            startInfo.ArgumentList.Add("--buffer-size");
+            startInfo.ArgumentList.Add("8M"); // 8MB high-throughput buffer
+            startInfo.ArgumentList.Add("--http-chunk-size");
+            startInfo.ArgumentList.Add("10M");
 
-                startInfo.ArgumentList.Add("--hls-use-mpegts"); // Seamless fragment demuxing without MP4 container lock delays
-                startInfo.ArgumentList.Add("--no-part"); // Direct streaming into destination without locking .part files
-                startInfo.ArgumentList.Add("--file-allocation");
-                startInfo.ArgumentList.Add("none"); // Eliminates Windows file-allocation pauses
-
-                startInfo.ArgumentList.Add("--buffer-size");
-                startInfo.ArgumentList.Add("8M"); // 8MB high-throughput buffer for Cloud mode
-                startInfo.ArgumentList.Add("--http-chunk-size");
-                startInfo.ArgumentList.Add("10M");
-
-                startInfo.ArgumentList.Add("--socket-timeout");
-                startInfo.ArgumentList.Add("5"); // Fast 5s timeout fails hung sockets immediately and recovers
-                startInfo.ArgumentList.Add("--retries");
-                startInfo.ArgumentList.Add("10");
-                startInfo.ArgumentList.Add("--fragment-retries");
-                startInfo.ArgumentList.Add("10");
-            }
-            else
-            {
-                // Default Direct: Standard direct origin connection
-                startInfo.ArgumentList.Add("--concurrent-fragments");
-                startInfo.ArgumentList.Add("4");
-
-                startInfo.ArgumentList.Add("--buffer-size");
-                startInfo.ArgumentList.Add("1M");
-                startInfo.ArgumentList.Add("--http-chunk-size");
-                startInfo.ArgumentList.Add("2M");
-
-                startInfo.ArgumentList.Add("--socket-timeout");
-                startInfo.ArgumentList.Add("10");
-                startInfo.ArgumentList.Add("--retries");
-                startInfo.ArgumentList.Add("5");
-                startInfo.ArgumentList.Add("--fragment-retries");
-                startInfo.ArgumentList.Add("5");
-            }
+            startInfo.ArgumentList.Add("--socket-timeout");
+            startInfo.ArgumentList.Add("5"); // Fast 5s timeout fails hung sockets immediately and recovers
+            startInfo.ArgumentList.Add("--retries");
+            startInfo.ArgumentList.Add("10");
+            startInfo.ArgumentList.Add("--fragment-retries");
+            startInfo.ArgumentList.Add("10");
         }
 
         public async Task<(MediaProbeResult? Result, string? ErrorMessage)> ProbeMediaAsync(string url, CancellationToken cancellationToken = default)
