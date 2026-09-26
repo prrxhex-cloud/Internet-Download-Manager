@@ -52,9 +52,67 @@ namespace PRRX.IDM.Services
     {
         public static TelegramDownloadProvider Current { get; } = new();
 
-        private const string BotToken = "8728261333:AAHuFJ7bhIZ_jElnnIo6h_BgGQzpE1niEr4";
-        private const string TelegramApiBase = "https://api.telegram.org";
-        private const string TelegramFileBase = "https://api.telegram.org/file/bot" + BotToken;
+        private static string? _cachedBotToken;
+        private static string? _cachedApiHash;
+        private static DateTime _tokenCacheExpiry = DateTime.MinValue;
+        private static readonly SemaphoreSlim _tokenLock = new(1, 1);
+        private const string DefaultWorkerBase = "https://prrx-api.sayurusenavirathna70.workers.dev";
+
+        public static async Task<string?> GetBotTokenAsync(CancellationToken cancellationToken = default)
+        {
+            if (!string.IsNullOrWhiteSpace(_cachedBotToken) && DateTime.UtcNow < _tokenCacheExpiry)
+            {
+                return _cachedBotToken;
+            }
+
+            await _tokenLock.WaitAsync(cancellationToken);
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(_cachedBotToken) && DateTime.UtcNow < _tokenCacheExpiry)
+                {
+                    return _cachedBotToken;
+                }
+
+                using var req = new HttpRequestMessage(HttpMethod.Get, $"{DefaultWorkerBase}/api/telegram/client-config");
+                using var resp = await SharedClient.SendAsync(req, cancellationToken);
+                if (resp.IsSuccessStatusCode)
+                {
+                    var json = await resp.Content.ReadAsStringAsync(cancellationToken);
+                    using var doc = System.Text.Json.JsonDocument.Parse(json);
+                    if (doc.RootElement.TryGetProperty("token", out var tokenElem) &&
+                        tokenElem.GetString() is { } token && !string.IsNullOrWhiteSpace(token))
+                    {
+                        _cachedBotToken = token.Trim();
+                        _tokenCacheExpiry = DateTime.UtcNow.AddMinutes(30);
+                    }
+                    if (doc.RootElement.TryGetProperty("api_hash", out var hashElem) &&
+                        hashElem.GetString() is { } hash && !string.IsNullOrWhiteSpace(hash))
+                    {
+                        _cachedApiHash = hash.Trim();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[TelegramDownloadProvider] Failed to fetch client-config: {ex.Message}");
+            }
+            finally
+            {
+                _tokenLock.Release();
+            }
+
+            return _cachedBotToken;
+        }
+
+        public static async Task<string?> GetApiHashAsync(CancellationToken cancellationToken = default)
+        {
+            if (!string.IsNullOrWhiteSpace(_cachedApiHash) && DateTime.UtcNow < _tokenCacheExpiry)
+            {
+                return _cachedApiHash;
+            }
+            await GetBotTokenAsync(cancellationToken);
+            return _cachedApiHash;
+        }
 
         private static readonly Regex TelegramUriRegex = new(
             @"^(?:tg:\/\/|https?:\/\/(?:[a-zA-Z0-9_-]+\.)?(?:t\.me|telegram\.me|telegram\.org|telesco\.pe|stel\.com))",
@@ -278,7 +336,10 @@ namespace PRRX.IDM.Services
         {
             try
             {
-                var endpoint = $"{TelegramApiBase}/bot{BotToken}/getFile?file_id={fileId}";
+                var botToken = await GetBotTokenAsync(cancellationToken);
+                if (string.IsNullOrWhiteSpace(botToken)) return null;
+
+                var endpoint = $"https://api.telegram.org/bot{botToken}/getFile?file_id={fileId}";
                 using var resp = await SharedClient.GetAsync(endpoint, cancellationToken);
                 if (resp.IsSuccessStatusCode)
                 {
@@ -289,7 +350,7 @@ namespace PRRX.IDM.Services
                         resElem.TryGetProperty("file_path", out var pathElem) &&
                         pathElem.GetString() is { } filePath && !string.IsNullOrWhiteSpace(filePath))
                     {
-                        return $"{TelegramFileBase}/{filePath}";
+                        return $"https://api.telegram.org/file/bot{botToken}/{filePath}";
                     }
                 }
             }
@@ -789,12 +850,17 @@ namespace PRRX.IDM.Services
             // 2. Probing Telegram Web CDN stream endpoints for the file
             if (!string.IsNullOrWhiteSpace(request.FileId))
             {
-                var candidateUrls = new[]
+                var candidateUrls = new List<string>
                 {
                     $"https://cdn4.telesco.pe/file/{request.FileId}.mp4",
-                    $"https://cdn1.telesco.pe/file/{request.FileId}.bin",
-                    $"{TelegramFileBase}/remote/{request.FileId}"
+                    $"https://cdn1.telesco.pe/file/{request.FileId}.bin"
                 };
+
+                var botToken = await GetBotTokenAsync(cancellationToken);
+                if (!string.IsNullOrWhiteSpace(botToken))
+                {
+                    candidateUrls.Add($"https://api.telegram.org/file/bot{botToken}/remote/{request.FileId}");
+                }
 
                 foreach (var url in candidateUrls)
                 {

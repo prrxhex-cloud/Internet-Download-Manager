@@ -20,8 +20,6 @@ namespace PRRX.IDM.Services
         public static TelegramMtprotoService Current => _instance.Value;
 
         private const int ApiId = 2040;
-        private const string ApiHash = "b18441a1ff607e10a989891a5462e627";
-        private const string BotToken = "8728261333:AAHuFJ7bhIZ_jElnnIo6h_BgGQzpE1niEr4";
 
         private Client? _client;
         private readonly SemaphoreSlim _initLock = new(1, 1);
@@ -29,7 +27,7 @@ namespace PRRX.IDM.Services
 
         private TelegramMtprotoService() { }
 
-        public async Task<Client> GetClientAsync(CancellationToken cancellationToken = default)
+        public async Task<Client?> GetClientAsync(CancellationToken cancellationToken = default)
         {
             if (_client != null) return _client;
 
@@ -38,12 +36,21 @@ namespace PRRX.IDM.Services
             {
                 if (_client != null) return _client;
 
+                var botToken = await TelegramDownloadProvider.GetBotTokenAsync(cancellationToken);
+                var apiHash = await TelegramDownloadProvider.GetApiHashAsync(cancellationToken);
+
+                if (string.IsNullOrWhiteSpace(botToken))
+                {
+                    System.Diagnostics.Debug.WriteLine("[TelegramMtproto] Bot token is not configured on server.");
+                    return null;
+                }
+
                 var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
                 var sessionDir = Path.Combine(appData, "PRRX Cooperation");
                 Directory.CreateDirectory(sessionDir);
                 var sessionPath = Path.Combine(sessionDir, "tg_bot_session.dat");
 
-                var client = new Client(ApiId, ApiHash, sessionPath)
+                var client = new Client(ApiId, apiHash ?? "", sessionPath)
                 {
                     TcpHandler = async (host, port) =>
                     {
@@ -57,7 +64,7 @@ namespace PRRX.IDM.Services
                     FilePartSize = 512 * 1024
                 };
 
-                await client.LoginBotIfNeeded(BotToken);
+                await client.LoginBotIfNeeded(botToken);
 
                 try
                 {
@@ -67,6 +74,11 @@ namespace PRRX.IDM.Services
 
                 _client = client;
                 return _client;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[TelegramMtproto] Init client failed: {ex.Message}");
+                return null;
             }
             finally
             {
@@ -85,6 +97,7 @@ namespace PRRX.IDM.Services
                 if (string.IsNullOrWhiteSpace(cleanChannel)) return null;
 
                 var client = await GetClientAsync(cancellationToken);
+                if (client == null) return null;
                 var resolved = await client.Contacts_ResolveUsername(cleanChannel);
                 if (resolved.Chat is Channel channel)
                 {
@@ -119,6 +132,7 @@ namespace PRRX.IDM.Services
             {
                 if (messageId <= 0) return null;
                 var client = await GetClientAsync(cancellationToken);
+                if (client == null) return null;
                 var messages = await client.Messages_GetMessages(new InputMessage[] { (int)messageId });
                 if (messages is Messages_MessagesBase mmb && mmb.Messages.Length > 0)
                 {
@@ -151,6 +165,7 @@ namespace PRRX.IDM.Services
             try
             {
                 var client = await GetClientAsync(cancellationToken);
+                if (client == null) return false;
 
                 // Download directly to stream with progress tracking
                 await client.DownloadFileAsync(document, outputStream, (PhotoSizeBase?)null, (downloaded, total) =>
@@ -189,6 +204,7 @@ namespace PRRX.IDM.Services
             try
             {
                 var client = await GetClientAsync(cancellationToken);
+                if (client == null) return false;
 
                 await client.DownloadFileAsync(fileLocation, outputStream, dcId, fileSize, (downloaded, total) =>
                 {

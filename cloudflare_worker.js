@@ -7,10 +7,46 @@
  * ============================================================================
  */
 
-// Configuration
-const BOT_TOKEN = "8728261333:AAHuFJ7bhIZ_jElnnIo6h_BgGQzpE1niEr4";
-const TELEGRAM_API_BASE = `https://api.telegram.org/bot${BOT_TOKEN}`;
-const TELEGRAM_FILE_BASE = `https://api.telegram.org/file/bot${BOT_TOKEN}`;
+// Worker Global Environment & Dynamic Secrets (Zero Hardcoded Secrets Architecture)
+let currentWorkerEnv = null;
+let cachedBotToken = null;
+let lastTokenFetchTime = 0;
+
+async function getBotToken(env) {
+  const activeEnv = env || currentWorkerEnv;
+  if (activeEnv?.TELEGRAM_BOT_TOKEN) return activeEnv.TELEGRAM_BOT_TOKEN.trim();
+  if (activeEnv?.BOT_TOKEN) return activeEnv.BOT_TOKEN.trim();
+
+  const now = Date.now();
+  if (cachedBotToken && (now - lastTokenFetchTime < 60000)) {
+    return cachedBotToken;
+  }
+
+  const db = activeEnv?.DB;
+  if (db) {
+    try {
+      const row = await db.prepare("SELECT value FROM app_secrets WHERE key = 'telegram_bot_token' LIMIT 1").first();
+      if (row && row.value) {
+        cachedBotToken = row.value.trim();
+        lastTokenFetchTime = now;
+        return cachedBotToken;
+      }
+    } catch (e) {
+      console.warn("Could not load token from app_secrets table:", e);
+    }
+  }
+  return cachedBotToken || "";
+}
+
+async function getTelegramApiBase(env) {
+  const token = await getBotToken(env);
+  return token ? `https://api.telegram.org/bot${token}` : "";
+}
+
+async function getTelegramFileBase(env) {
+  const token = await getBotToken(env);
+  return token ? `https://api.telegram.org/file/bot${token}` : "";
+}
 
 // In-Memory Global Task Queues and Pairing Maps (Per Worker Instance / KV Fallback)
 const taskQueues = new Map();    // clientId -> Array of task objects
@@ -48,6 +84,7 @@ function isValidSha256(str) {
 
 export default {
   async fetch(request, env, ctx) {
+    currentWorkerEnv = env;
     const url = new URL(request.url);
     const path = url.pathname;
     const method = request.method.toUpperCase();
@@ -120,7 +157,7 @@ export default {
           version: "1.8.0",
           releaseDate: "2026-09-26",
           downloadUrl: "https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.8.0/PRRX_Internet_Download_Manager_v1.8.0_Portable.zip",
-          sha256Hash: "695CD6656F135835CA914664913921A374BB3796FCC8F7BCFF7D38B968CD0284",
+          sha256Hash: "9989C83F49013D5CF6B89806F5716AEC6453535F87257511D575B21D35256216",
           releaseNotes: "PRRX IDM v1.8.0: Ultra-fast MTProto Telegram downloads (ParallelTransfers=16, 1MB socket buffer, 512KB part chunks), dedicated IDM Downloads Tab & Settings, Video Downloader Tab with 29+ format selector, Media Converter with live audio/video player & inspector (Internet Downloads only), Draggable Floating Grabber with format conversion, sub-150ms instant cold-start download dialog, and hardened zero-resurrection uninstaller.",
           isMandatory: false
         }), { status: 200, headers: corsHeaders });
@@ -375,7 +412,12 @@ export default {
         const secretToken = body.secret_token || env.TELEGRAM_SECRET_TOKEN || "PRRX_TELEGRAM_WEBHOOK_SECRET_VAULT_2026";
         const webhookUrl = body.url || `${url.origin}/api/telegram/webhook`;
         const allowedUpdatesParam = encodeURIComponent(JSON.stringify(["message","edited_message","channel_post"]));
-        const setupRes = await fetch(`${TELEGRAM_API_BASE}/setWebhook?url=${encodeURIComponent(webhookUrl)}&secret_token=${encodeURIComponent(secretToken)}&allowed_updates=${allowedUpdatesParam}`);
+        const token = await getBotToken(env);
+        if (!token) {
+          return new Response(JSON.stringify({ error: "Telegram bot token is not configured. Set TELEGRAM_BOT_TOKEN in Cloudflare environment variables or via /api/telegram/set-secret" }), { status: 500, headers: corsHeaders });
+        }
+        const apiBase = `https://api.telegram.org/bot${token}`;
+        const setupRes = await fetch(`${apiBase}/setWebhook?url=${encodeURIComponent(webhookUrl)}&secret_token=${encodeURIComponent(secretToken)}&allowed_updates=${allowedUpdatesParam}`);
         const setupData = await setupRes.json().catch(() => ({ ok: false }));
         return new Response(JSON.stringify(setupData), { status: setupRes.status, headers: corsHeaders });
       }
@@ -568,6 +610,60 @@ export default {
         return new Response(JSON.stringify({ success: true, count: taskIds.length }), { status: 200, headers: corsHeaders });
       }
 
+      // Client Configuration Endpoint for Desktop App (GET)
+      if (path === "/api/telegram/client-config" && method === "GET") {
+        const token = await getBotToken(env);
+        const apiHash = env?.TELEGRAM_API_HASH || "";
+        return new Response(JSON.stringify({
+          status: token ? "ready" : "unconfigured",
+          bot_username: "@PRRX_IDM_Bot",
+          api_id: 2040,
+          api_hash: apiHash,
+          token: token,
+          api_base: token ? `https://api.telegram.org/bot${token}` : "",
+          file_base: token ? `https://api.telegram.org/file/bot${token}` : ""
+        }), { status: 200, headers: corsHeaders });
+      }
+
+      // Secure App Secret Management Endpoint (POST)
+      if (path === "/api/telegram/set-secret" && method === "POST") {
+        const body = await request.json().catch(() => ({}));
+        const adminKey = env.ADMIN_KEY || env.TELEGRAM_SECRET_TOKEN || "PRRX_TELEGRAM_WEBHOOK_SECRET_VAULT_2026";
+        const authHeader = request.headers.get("Authorization") || "";
+        const providedKey = authHeader.replace(/^Bearer\s+/i, "").trim() || body.admin_key || body.secret_token;
+        if (!providedKey || providedKey !== adminKey) {
+          return new Response(JSON.stringify({ error: "Unauthorized: Admin authorization required" }), { status: 401, headers: corsHeaders });
+        }
+
+        const secretKey = typeof body.key === "string" ? body.key.trim() : "";
+        const secretValue = typeof body.value === "string" ? body.value.trim() : "";
+        if (!secretKey || !secretValue) {
+          return new Response(JSON.stringify({ error: "Missing required fields: key and value" }), { status: 400, headers: corsHeaders });
+        }
+
+        if (env.DB) {
+          await ensureTelegramTables(env.DB);
+          try {
+            await env.DB.prepare(`
+              INSERT INTO app_secrets (key, value, updated_at)
+              VALUES (?1, ?2, CURRENT_TIMESTAMP)
+              ON CONFLICT(key) DO UPDATE SET value = ?2, updated_at = CURRENT_TIMESTAMP
+            `).bind(secretKey, secretValue).run();
+
+            if (secretKey === "telegram_bot_token") {
+              cachedBotToken = secretValue;
+              lastTokenFetchTime = Date.now();
+            }
+
+            return new Response(JSON.stringify({ success: true, message: `Secret '${secretKey}' updated successfully in D1 database` }), { status: 200, headers: corsHeaders });
+          } catch (dbErr) {
+            return new Response(JSON.stringify({ error: "Failed to persist secret in database", details: dbErr.message }), { status: 500, headers: corsHeaders });
+          }
+        }
+
+        return new Response(JSON.stringify({ error: "Cloudflare D1 database binding (DB) is not configured" }), { status: 503, headers: corsHeaders });
+      }
+
       // Route Not Found
       return new Response(JSON.stringify({ error: "Endpoint not found", path: path }), { status: 404, headers: corsHeaders });
 
@@ -587,6 +683,13 @@ async function ensureTelegramTables(db) {
   if (!db || telegramTablesInitialized) return;
   try {
     await db.batch([
+      db.prepare(`
+        CREATE TABLE IF NOT EXISTS app_secrets (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `),
       db.prepare(`
         CREATE TABLE IF NOT EXISTS telegram_pairs (
           pair_code TEXT PRIMARY KEY,
@@ -1015,9 +1118,12 @@ async function handleTelegramUpdate(update, env, ctx) {
 
     // For files <= 20MB, try to get direct Bot API download path
     if (fileSize > 0 && fileSize <= MAX_BOT_API_DIRECT_FILE) {
-      const fileInfo = await getTelegramFileInfo(fileId);
+      const fileInfo = await getTelegramFileInfo(fileId, env);
       if (fileInfo && fileInfo.file_path) {
-        downloadUrl = `${TELEGRAM_FILE_BASE}/${fileInfo.file_path}`;
+        const fileBase = await getTelegramFileBase(env);
+        if (fileBase) {
+          downloadUrl = `${fileBase}/${fileInfo.file_path}`;
+        }
         if (!fileSize && fileInfo.file_size) {
           fileSize = fileInfo.file_size;
         }
@@ -1193,9 +1299,14 @@ async function enqueueTask(clientId, task, env) {
   }
 }
 
-async function getTelegramFileInfo(fileId) {
+async function getTelegramFileInfo(fileId, env) {
   try {
-    const res = await fetch(`${TELEGRAM_API_BASE}/getFile?file_id=${fileId}`);
+    const apiBase = await getTelegramApiBase(env);
+    if (!apiBase) {
+      console.warn("getTelegramFileInfo: Telegram bot token not configured.");
+      return null;
+    }
+    const res = await fetch(`${apiBase}/getFile?file_id=${fileId}`);
     if (res.ok) {
       const data = await res.json();
       if (data.ok) return data.result;
@@ -1206,9 +1317,14 @@ async function getTelegramFileInfo(fileId) {
   return null;
 }
 
-async function sendTelegramMessage(chatId, htmlText) {
+async function sendTelegramMessage(chatId, htmlText, env) {
   try {
-    await fetch(`${TELEGRAM_API_BASE}/sendMessage`, {
+    const apiBase = await getTelegramApiBase(env);
+    if (!apiBase) {
+      console.warn("sendTelegramMessage: Telegram bot token not configured.");
+      return;
+    }
+    await fetch(`${apiBase}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
