@@ -11,10 +11,22 @@
 <p align="center">
   <a href="#"><img src="https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011%20(x64)-0078D4?logo=windows" alt="Windows"/></a>
   <a href="#"><img src="https://img.shields.io/badge/.NET-8.0%20WPF-512BD4?logo=dotnet" alt=".NET 8"/></a>
-  <a href="https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/tag/v1.7.0"><img src="https://img.shields.io/badge/Version-1.7.0-107C41" alt="Version"/></a>
+  <a href="https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/tag/v1.8.0"><img src="https://img.shields.io/badge/Version-1.8.0-107C41" alt="Version"/></a>
   <a href="#"><img src="https://img.shields.io/badge/RAM%20Footprint-~20%20MB%20Idle-brightgreen" alt="Memory"/></a>
   <a href="LICENSE.txt"><img src="https://img.shields.io/badge/License-PRRX%20EULA-blue" alt="License"/></a>
 </p>
+
+---
+
+## 🌟 What's New in Version 1.8.0
+
+- 🚀 **Maximum Speed MTProto & Telegram Acceleration**: Telegram downloads now execute with 16 parallel MTProto connections (`ParallelTransfers = 16`), expanded 1 MB socket receive buffers, 512 KB part chunk sizes, zero inter-chunk latency, and multi-connection visual stream blocks for maximum bandwidth saturation.
+- 📁 **Dedicated IDM Downloads Navigation Tab**: Introduced a standalone primary navigation tab housing all browser-captured downloads and complete IDM integration preferences (removed clutter from general Settings).
+- 🎬 **Video Downloader Tab with 29+ Format Selector**: Target video format can now be selected prior to download across 29+ audio/video formats with MP4 set as default high-compatibility format.
+- 🔄 **Media Converter Tab with Live Technical Inspector**: Conversion is now strictly limited to Internet Downloads and online streams. Includes integrated video/audio preview playback and media metadata inspection (bitrate, codec, dimensions, channels).
+- 📌 **Draggable Floating Video Grabber & Direct Conversion**: Extension video grabber can now be freely dragged across the viewport with automatic coordinate persistence. Users can directly select video and audio conversion targets from the floating grabber.
+- ⚡ **Sub-150ms Cold-Start Instant Dialog**: Browser download intercept and payload requests now launch the download dialog within 100ms without waiting for main window hydration.
+- 🛡️ **Zero-Resurrection Hardened Uninstallation**: Forcefully terminates any remaining background processes and purges all `%AppData%` / `%LocalAppData%` caches so no residual history can resurrect.
 
 ---
 
@@ -175,29 +187,19 @@ PRRX IDM automatically registers the Native Messaging Host (`com.prrx.idm`) and 
 If you need to install the extension manually:
 1. Open `chrome://extensions` or `edge://extensions` in your browser.
 2. Toggle ON **Developer mode** in the top-right corner.
-3. Click **Load unpacked** and select the extension directory:
-   `D:\Internet Download Manager\publish\extension\` (or `D:\Internet Download Manager\extension\`).
+3. Click **Load unpacked** and select the extension directory inside your PRRX IDM installation folder (e.g., `<InstallDir>\extension`).
 4. Click the Extensions (Puzzle) icon on your toolbar and click the **Pin** icon next to PRRX IDM.
 
 ---
 
-## 📥 Installation & Downloads (v1.4.0)
+## 📥 Installation & Downloads (v1.8.0)
 
-| Package | Filename | Size | Description |
-| :--- | :--- | :--- | :--- |
-| **Online Web Setup** *(Recommended)* | [`PRRX_IDM_Setup_Online.exe`](https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.4.0/PRRX_IDM_Setup_Online.exe) | **1.99 MB** (2,081,787 bytes) | Lightweight installer that downloads and installs the latest engine files and sets up shortcuts. |
-| **Offline Setup** | [`PRRX_Internet_Download_Manager_v1.4.0_Setup.exe`](https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.4.0/PRRX_Internet_Download_Manager_v1.4.0_Setup.exe) | **88.17 MB** (92,448,467 bytes) | Complete self-contained installer with embedded 64-stream turbo engine and browser integration. |
-| **Portable Package** | [`PRRX_Internet_Download_Manager_v1.4.0_Portable.zip`](https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.4.0/PRRX_Internet_Download_Manager_v1.4.0_Portable.zip) | **91.81 MB** (96,269,484 bytes) | Zero-install standalone archive. Extract anywhere and run `PRRX.InternetDownloadManager.exe`. |
-| **Update Manifest** | [`manifest.json`](https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.4.0/manifest.json) | **0.001 MB** (832 bytes) | Update metadata and checksum verification for in-app automatic updating. |
-
-### 🔒 SHA-256 Checksums
-
-```text
-C2984AA0DD8930984D61B3A11023A534C14D164966D141028A826DCCAF5A5846  PRRX_IDM_Setup_Online.exe
-5AC2DEAD4A728C58C26F8AC57CC07B3BE31232778AC79F02B39448959DDB137E  PRRX_Internet_Download_Manager_v1.4.0_Setup.exe
-AC16EDD8EE6A7FF93E82DA49A19A4B7CD409BF39F995FE4F33A6FFDB0B3AD284  PRRX_Internet_Download_Manager_v1.4.0_Portable.zip
-415FE3CDCFE165BED41334F9952CF17B4172FB5FE12796197D3CDB6F6AE26D4D  manifest.json
-```
+| Package | Filename | Description |
+| :--- | :--- | :--- |
+| **Online Web Setup** *(Recommended)* | [`PRRX_IDM_Setup_Online.exe`](https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.8.0/PRRX_IDM_Setup_Online.exe) | Lightweight installer that downloads and installs the latest engine files and sets up shortcuts. |
+| **Offline Setup** | [`PRRX_Internet_Download_Manager_v1.8.0_Setup.exe`](https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.8.0/PRRX_Internet_Download_Manager_v1.8.0_Setup.exe) | Complete self-contained installer with embedded turbo engine and browser integration. |
+| **Portable Package** | [`PRRX_Internet_Download_Manager_v1.8.0_Portable.zip`](https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.8.0/PRRX_Internet_Download_Manager_v1.8.0_Portable.zip) | Zero-install standalone archive. Extract anywhere and run `PRRX.InternetDownloadManager.exe`. |
+| **Update Manifest** | [`manifest.json`](https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.8.0/manifest.json) | Update metadata and checksum verification for in-app automatic updating. |
 
 ---
 
@@ -213,9 +215,9 @@ git clone https://github.com/prrxhex-cloud/Internet-Download-Manager.git
 cd Internet-Download-Manager
 ```
 
-### Run Tests
+### Build Solution
 ```powershell
-dotnet test PRRX.InternetDownloadManager.sln
+dotnet build PRRX.InternetDownloadManager.sln -c Release
 ```
 
 ### Build & Publish Single-File Executable

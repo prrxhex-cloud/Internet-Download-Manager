@@ -76,7 +76,7 @@ namespace PRRX.IDM.Services
             if (!SharedClient.DefaultRequestHeaders.Contains("User-Agent"))
             {
                 SharedClient.DefaultRequestHeaders.Add("User-Agent",
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 PRRX-IDM/1.7.0");
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 PRRX-IDM/1.8.0");
             }
         }
 
@@ -521,7 +521,7 @@ namespace PRRX.IDM.Services
                 };
 
                 bool downloadOk = false;
-                await using (var fs = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite, 65536, useAsync: true))
+                await using (var fs = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite, 1048576, useAsync: true))
                 {
                     if (doc != null)
                     {

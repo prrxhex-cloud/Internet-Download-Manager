@@ -106,6 +106,16 @@ namespace PRRX.IDM.ViewModels
         }
 
         public ObservableCollection<MediaFormat> AvailableFormats { get; } = new();
+
+        private VideoFormatDefinition _selectedVideoFormat = VideoFormatDefinition.DefaultFormat;
+        public VideoFormatDefinition SelectedVideoFormat
+        {
+            get => _selectedVideoFormat;
+            set => SetProperty(ref _selectedVideoFormat, value);
+        }
+
+        public ObservableCollection<VideoFormatDefinition> AvailableVideoFormats { get; } = new(VideoFormatDefinition.SupportedFormats);
+
         public ObservableCollection<DownloadItem> DownloadHistory => _historyService.HistoryItems;
 
         public ICommand PasteClipboardCommand { get; }
@@ -302,7 +312,8 @@ namespace PRRX.IDM.ViewModels
                     format,
                     outputFolder,
                     progressReporter,
-                    _downloadCts.Token);
+                    _downloadCts.Token,
+                    targetContainer: SelectedVideoFormat?.Extension?.TrimStart('.'));
 
                 if (success)
                 {
@@ -310,13 +321,16 @@ namespace PRRX.IDM.ViewModels
                     StatusMessage = "Turbo Download completed successfully!";
                     HasError = false;
 
+                    var chosenFormatName = SelectedVideoFormat?.Name ?? "MP4";
+                    var chosenRes = SelectedFormat?.Resolution ?? "1080p Full HD";
+
                     var item = new DownloadItem
                     {
                         Url = InputUrl,
                         Title = CurrentProbeResult?.Title ?? $"Video_{DateTime.Now:yyyyMMdd_HHmmss}",
                         PublisherName = CurrentProbeResult?.PublisherName ?? "Online Creator",
                         ThumbnailUrl = CurrentProbeResult?.ThumbnailUrl ?? string.Empty,
-                        SelectedQuality = SelectedFormat?.Resolution ?? "1080p Full HD",
+                        SelectedQuality = $"{chosenRes} • {chosenFormatName}",
                         TargetFilePath = outputFolder,
                         Status = DownloadStatus.Completed,
                         FormattedTime = DateTime.Now.ToString("MMM dd, h:mm tt"),

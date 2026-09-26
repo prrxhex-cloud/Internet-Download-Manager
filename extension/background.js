@@ -6,7 +6,7 @@
  * Confidential and Proprietary - Licensed under PRRX Open Source Initiative
  * ============================================================================
  */
-// PRRX IDM Integration Module v1.7.0 - High-Reliability Dual-Channel Background Worker
+// PRRX IDM Integration Module v1.8.0 - High-Reliability Dual-Channel Background Worker
 const HOST_NAME = "com.prrx.idm";
 const HTTP_BRIDGE_URL = "http://127.0.0.1:46543/api/download";
 const HTTP_PING_URL = "http://127.0.0.1:46543/api/ping";
@@ -262,7 +262,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         pageTitle: sender.tab?.title || "",
         referer: message.referer || sender.tab?.url || "",
         userAgent: navigator.userAgent,
-        cookies: cookiesStr
+        cookies: cookiesStr,
+        quality: message.quality || "",
+        targetFormat: message.targetFormat || "",
+        mediaType: message.mediaType || ""
       });
       sendResponse({ status: "sent" });
     })();

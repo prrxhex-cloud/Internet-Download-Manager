@@ -91,7 +91,7 @@ namespace PRRX.IDM
                 _thumbnailService = new ThumbnailService();
                 _updateService = new UpdateService();
                 _historyService = new HistoryService();
-                _browserService = new BrowserIntegrationService(_configService);
+                _browserService = new BrowserIntegrationService(_configService, null, _historyService);
                 _telegramBotSyncService = new TelegramBotSyncService(_configService);
 
                 _telegramBotSyncService.TaskReceived += (s, task) =>
@@ -275,6 +275,24 @@ namespace PRRX.IDM
                 }
 
                 bool hasStartupPayload = !string.IsNullOrWhiteSpace(pendingPayloadJson);
+
+                // Fast-Path Launch: If invoked with startup payload, trigger download dialog IMMEDIATELY (<100ms)
+                if (hasStartupPayload && !string.IsNullOrWhiteSpace(pendingPayloadJson))
+                {
+                    try
+                    {
+                        var payload = JsonSerializer.Deserialize<BrowserDownloadPayload>(pendingPayloadJson, new JsonSerializerOptions
+                        {
+                            PropertyNameCaseInsensitive = true
+                        });
+                        if (payload != null)
+                        {
+                            Dispatcher.BeginInvoke(new Action(() => _browserService?.HandleIncomingPayload(payload)), DispatcherPriority.Send);
+                        }
+                    }
+                    catch { }
+                }
+
                 bool isSilentLaunch = false;
                 for (int i = 0; i < e.Args.Length; i++)
                 {
@@ -332,7 +350,8 @@ namespace PRRX.IDM
                     _mediaEngine,
                     _thumbnailService,
                     _updateService,
-                    _historyService);
+                    _historyService,
+                    _browserService!);
 
                 var mainWindow = new MainWindow(mainVm);
                 MainWindow = mainWindow;
@@ -376,23 +395,6 @@ namespace PRRX.IDM
                     mainWindow.Visibility = Visibility.Hidden;
                     mainWindow.ShowInTaskbar = false;
                     System.Threading.Tasks.Task.Delay(600).ContinueWith(_ => MemoryOptimizer.TrimMemory());
-                }
-
-                // Process any incoming payload from command line arguments
-                if (!string.IsNullOrWhiteSpace(pendingPayloadJson))
-                {
-                    try
-                    {
-                        var payload = JsonSerializer.Deserialize<BrowserDownloadPayload>(pendingPayloadJson, new JsonSerializerOptions
-                        {
-                            PropertyNameCaseInsensitive = true
-                        });
-                        if (payload != null)
-                        {
-                            Dispatcher.BeginInvoke(new Action(() => _browserService?.HandleIncomingPayload(payload)), DispatcherPriority.Send);
-                        }
-                    }
-                    catch { }
                 }
             }
             catch (Exception ex)

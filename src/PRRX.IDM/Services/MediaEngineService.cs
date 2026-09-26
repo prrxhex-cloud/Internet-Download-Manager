@@ -43,7 +43,8 @@ namespace PRRX.IDM.Services
             string formatId,
             string outputDirectory,
             IProgress<DownloadProgressReport>? progress = null,
-            CancellationToken cancellationToken = default);
+            CancellationToken cancellationToken = default,
+            string? targetContainer = null);
         Task<bool> ConvertToMp3Async(
             string sourceUrlOrPath,
             string bitrate,
@@ -89,13 +90,13 @@ namespace PRRX.IDM.Services
 
             var baseAppDir = AppDomain.CurrentDomain.BaseDirectory;
             var localBin = Path.Combine(baseAppDir, "bin", "yt-dlp.exe");
-            var devBin = @"D:\Internet Download Manager\bin\yt-dlp.exe";
+            var devBin = FindFileInAncestors(baseAppDir, Path.Combine("bin", "yt-dlp.exe"));
 
             if (File.Exists(localBin))
             {
                 EngineExecutablePath = localBin;
             }
-            else if (File.Exists(devBin))
+            else if (!string.IsNullOrWhiteSpace(devBin) && File.Exists(devBin))
             {
                 EngineExecutablePath = devBin;
             }
@@ -106,15 +107,15 @@ namespace PRRX.IDM.Services
 
             // Locate FFmpeg
             var localFfmpeg = Path.Combine(baseAppDir, "bin");
-            var devFfmpeg = @"D:\Internet Download Manager\bin";
+            var devFfmpeg = FindFileInAncestors(baseAppDir, Path.Combine("bin", "ffmpeg.exe"));
 
             if (File.Exists(Path.Combine(localFfmpeg, "ffmpeg.exe")))
             {
                 FfmpegDirectoryPath = localFfmpeg;
             }
-            else if (File.Exists(Path.Combine(devFfmpeg, "ffmpeg.exe")))
+            else if (!string.IsNullOrWhiteSpace(devFfmpeg))
             {
-                FfmpegDirectoryPath = devFfmpeg;
+                FfmpegDirectoryPath = Path.GetDirectoryName(devFfmpeg);
             }
             else
             {
@@ -123,13 +124,13 @@ namespace PRRX.IDM.Services
 
             // Locate Aria2c
             var localAria2 = Path.Combine(baseAppDir, "bin", "aria2c.exe");
-            var devAria2 = @"D:\Internet Download Manager\bin\aria2c.exe";
+            var devAria2 = FindFileInAncestors(baseAppDir, Path.Combine("bin", "aria2c.exe"));
 
             if (File.Exists(localAria2))
             {
                 Aria2cExecutablePath = localAria2;
             }
-            else if (File.Exists(devAria2))
+            else if (!string.IsNullOrWhiteSpace(devAria2) && File.Exists(devAria2))
             {
                 Aria2cExecutablePath = devAria2;
             }
@@ -137,6 +138,22 @@ namespace PRRX.IDM.Services
             {
                 Aria2cExecutablePath = null;
             }
+        }
+
+        private static string? FindFileInAncestors(string startDir, string relativePath)
+        {
+            try
+            {
+                var current = new DirectoryInfo(startDir);
+                for (int i = 0; i < 5 && current != null; i++)
+                {
+                    var candidate = Path.Combine(current.FullName, relativePath);
+                    if (File.Exists(candidate)) return candidate;
+                    current = current.Parent;
+                }
+            }
+            catch { }
+            return null;
         }
 
         public string? ResolveCookiesPath()
@@ -425,7 +442,8 @@ namespace PRRX.IDM.Services
             string formatId,
             string outputDirectory,
             IProgress<DownloadProgressReport>? progress = null,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            string? targetContainer = null)
         {
             if (!SecurityGuard.ValidateUrl(url, out var safeUrl, out var error))
             {
@@ -454,6 +472,16 @@ namespace PRRX.IDM.Services
             startInfo.ArgumentList.Add(effectiveFormat);
             startInfo.ArgumentList.Add("--newline");
             startInfo.ArgumentList.Add("--no-playlist");
+
+            if (!string.IsNullOrWhiteSpace(targetContainer))
+            {
+                var cleanExt = targetContainer.Trim().TrimStart('.').ToLowerInvariant();
+                if (cleanExt != "auto")
+                {
+                    startInfo.ArgumentList.Add("--remux-video");
+                    startInfo.ArgumentList.Add(cleanExt);
+                }
+            }
 
             // Attach anti-stall parameters
             AttachCommonArguments(startInfo);

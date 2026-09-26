@@ -39,6 +39,9 @@ namespace PRRX.IDM.Services
         public long TotalBytes { get; set; } = 0;
         public Dictionary<string, string>? Headers { get; set; }
         public List<BatchLinkItem>? Links { get; set; }
+        public string Quality { get; set; } = string.Empty;
+        public string TargetFormat { get; set; } = string.Empty;
+        public string MediaType { get; set; } = string.Empty;
     }
 
     public interface IBrowserIntegrationService
@@ -50,6 +53,7 @@ namespace PRRX.IDM.Services
         void StopIpcServer();
         void HandleIncomingPayload(BrowserDownloadPayload payload);
         int ActiveHttpPort { get; }
+        bool IsHostRegistered { get; }
     }
 
     public class BrowserIntegrationService : IBrowserIntegrationService
@@ -65,15 +69,53 @@ namespace PRRX.IDM.Services
         private int _activePort = DefaultHttpPort;
         public int ActiveHttpPort => _activePort;
 
+        public bool IsHostRegistered
+        {
+            get
+            {
+                try
+                {
+                    using var chromeKey = Registry.CurrentUser.OpenSubKey($@"Software\Google\Chrome\NativeMessagingHosts\{HostName}");
+                    var chromeVal = chromeKey?.GetValue("") as string;
+                    if (!string.IsNullOrEmpty(chromeVal) && File.Exists(chromeVal)) return true;
+
+                    using var edgeKey = Registry.CurrentUser.OpenSubKey($@"Software\Microsoft\Edge\NativeMessagingHosts\{HostName}");
+                    var edgeVal = edgeKey?.GetValue("") as string;
+                    if (!string.IsNullOrEmpty(edgeVal) && File.Exists(edgeVal)) return true;
+                }
+                catch { }
+                return false;
+            }
+        }
+
+        private static string? FindAncestorPath(string startDir, string relativeTarget)
+        {
+            try
+            {
+                var cur = new DirectoryInfo(startDir);
+                for (int i = 0; i < 5 && cur != null; i++)
+                {
+                    var candidate = Path.Combine(cur.FullName, relativeTarget);
+                    if (File.Exists(candidate) || Directory.Exists(candidate))
+                        return candidate;
+                    cur = cur.Parent;
+                }
+            }
+            catch { }
+            return null;
+        }
+
         private CancellationTokenSource? _cts;
         private TcpListener? _tcpListener;
         private readonly IConfigurationService _configService;
         private readonly ISecurityService _securityService;
+        private readonly IHistoryService? _historyService;
 
-        public BrowserIntegrationService(IConfigurationService configService, ISecurityService? securityService = null)
+        public BrowserIntegrationService(IConfigurationService configService, ISecurityService? securityService = null, IHistoryService? historyService = null)
         {
             _configService = configService;
             _securityService = securityService ?? new SecurityService();
+            _historyService = historyService;
         }
 
         public bool RegisterBrowserHost()
@@ -91,8 +133,8 @@ namespace PRRX.IDM.Services
 
                 if (!File.Exists(exePath))
                 {
-                    var publishPath = @"D:\Internet Download Manager\publish\PRRX.InternetDownloadManager.exe";
-                    if (File.Exists(publishPath)) exePath = publishPath;
+                    var publishPath = FindAncestorPath(appDir, Path.Combine("publish", "PRRX.InternetDownloadManager.exe"));
+                    if (!string.IsNullOrEmpty(publishPath) && File.Exists(publishPath)) exePath = publishPath;
                 }
 
                 var manifestDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PRRX Cooperation", "NativeMessaging");
@@ -106,13 +148,15 @@ namespace PRRX.IDM.Services
                 discoveredIds.Add(FixedExtensionId);
                 discoveredIds.Add(LegacyExtensionId);
 
-                var extPaths = new[]
+                var extPaths = new List<string>
                 {
-                    @"D:\Internet Download Manager\extension",
-                    @"D:\Internet Download Manager\publish\extension",
                     Path.Combine(appDir, "extension"),
                     Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "extension")
                 };
+                var ancestorExt = FindAncestorPath(appDir, "extension");
+                if (!string.IsNullOrEmpty(ancestorExt) && !extPaths.Contains(ancestorExt)) extPaths.Add(ancestorExt);
+                var ancestorPubExt = FindAncestorPath(appDir, Path.Combine("publish", "extension"));
+                if (!string.IsNullOrEmpty(ancestorPubExt) && !extPaths.Contains(ancestorPubExt)) extPaths.Add(ancestorPubExt);
 
                 foreach (var p in extPaths)
                 {
@@ -173,8 +217,8 @@ namespace PRRX.IDM.Services
                 var extDir = Path.Combine(appDir, "extension");
                 if (!Directory.Exists(extDir))
                 {
-                    var devExt = @"D:\Internet Download Manager\extension";
-                    if (Directory.Exists(devExt)) extDir = devExt;
+                    var devExt = FindAncestorPath(appDir, "extension");
+                    if (!string.IsNullOrEmpty(devExt) && Directory.Exists(devExt)) extDir = devExt;
                 }
 
                 if (Directory.Exists(extDir))
@@ -470,7 +514,7 @@ namespace PRRX.IDM.Services
 
                     if (method == "GET" && path.StartsWith("/api/ping", StringComparison.OrdinalIgnoreCase))
                     {
-                        var body = "{\"status\":\"online\",\"version\":\"1.7.0\",\"app\":\"PRRX IDM\",\"vault\":\"sealed\"}";
+                        var body = "{\"status\":\"online\",\"version\":\"1.8.0\",\"app\":\"PRRX IDM\",\"vault\":\"sealed\"}";
                         var bodyBytes = Encoding.UTF8.GetBytes(body);
                         var response = $"HTTP/1.1 200 OK\r\n" +
                                        $"Access-Control-Allow-Origin: {allowedOrigin}\r\n" +
@@ -492,7 +536,7 @@ namespace PRRX.IDM.Services
                         {
                             status = "ok",
                             app = "PRRX IDM",
-                            version = "1.7.0",
+                            version = "1.8.0",
                             turboStreams = _configService.CurrentConfig.TurboConnectionCount,
                             enableTurbo = _configService.CurrentConfig.EnableTurboAcceleration,
                             accelerationMode = _configService.CurrentConfig.AccelerationMode.ToString(),
@@ -768,6 +812,23 @@ namespace PRRX.IDM.Services
 
                 if (!string.IsNullOrWhiteSpace(payload.FileName)) vm.FileName = payload.FileName;
 
+                if (!string.IsNullOrWhiteSpace(payload.TargetFormat))
+                {
+                    var isAudio = string.Equals(payload.MediaType, "audio", StringComparison.OrdinalIgnoreCase) ||
+                                  payload.TargetFormat.Equals("mp3", StringComparison.OrdinalIgnoreCase) ||
+                                  payload.TargetFormat.Equals("wav", StringComparison.OrdinalIgnoreCase) ||
+                                  payload.TargetFormat.Equals("m4a", StringComparison.OrdinalIgnoreCase) ||
+                                  payload.TargetFormat.Equals("flac", StringComparison.OrdinalIgnoreCase) ||
+                                  payload.TargetFormat.Equals("ogg", StringComparison.OrdinalIgnoreCase);
+
+                    vm.SelectedCategory = isAudio ? FileCategory.Music : FileCategory.Video;
+                    var targetExt = "." + payload.TargetFormat.TrimStart('.');
+                    if (!string.Equals(Path.GetExtension(vm.FileName), targetExt, StringComparison.OrdinalIgnoreCase))
+                    {
+                        vm.FileName = Path.ChangeExtension(vm.FileName, targetExt);
+                    }
+                }
+
                 var dlg = new DownloadFileInfoDialog(vm);
 
                 // Do NOT set dlg.Owner = MainWindow to prevent unminimizing or popping up MainWindow
@@ -794,6 +855,19 @@ namespace PRRX.IDM.Services
                     vm.CancelProbe();
                     if (vm.DialogResult == DownloadDialogResult.StartNow)
                     {
+                        _historyService?.AddItem(new DownloadItem
+                        {
+                            Title = vm.FileName,
+                            Url = vm.Url,
+                            TargetFilePath = vm.SaveAsFullPath,
+                            FileSizeFormatted = vm.FileSizeFormatted,
+                            Status = DownloadStatus.Downloading,
+                            Type = vm.SelectedCategory == FileCategory.Music ? MediaType.Audio : MediaType.Video,
+                            CreatedAt = DateTime.UtcNow,
+                            IsBrowserInitiated = true,
+                            Source = "IDM Module (Extension)"
+                        });
+
                         var activeVm = new ActiveDownloadViewModel(
                             vm.Url, 
                             vm.SaveAsFullPath,
@@ -809,6 +883,22 @@ namespace PRRX.IDM.Services
                         activeWin.Closed += (_, _) => MemoryOptimizer.TrimMemory();
                         activeWin.Show();
                         activeWin.Activate();
+                    }
+                    else if (vm.DialogResult == DownloadDialogResult.DownloadLater)
+                    {
+                        _historyService?.AddItem(new DownloadItem
+                        {
+                            Title = vm.FileName,
+                            Url = vm.Url,
+                            TargetFilePath = vm.SaveAsFullPath,
+                            FileSizeFormatted = vm.FileSizeFormatted,
+                            Status = DownloadStatus.Queued,
+                            Type = vm.SelectedCategory == FileCategory.Music ? MediaType.Audio : MediaType.Video,
+                            CreatedAt = DateTime.UtcNow,
+                            IsBrowserInitiated = true,
+                            Source = "IDM Module (Extension)"
+                        });
+                        MemoryOptimizer.TrimMemory();
                     }
                     else
                     {

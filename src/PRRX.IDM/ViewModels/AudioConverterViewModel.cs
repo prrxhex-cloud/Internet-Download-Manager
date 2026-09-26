@@ -44,12 +44,23 @@ namespace PRRX.IDM.ViewModels
         private readonly IConfigurationService _configService;
 
         private string _sourceInput = string.Empty;
-        private string _detectedSourceFormat = "No file selected";
+        private string _detectedSourceFormat = "No Internet download selected";
         private bool _isSourceDetected;
         private bool _isConverting;
+        private bool _isAnalyzingSource;
         private bool _hasError;
         private double _conversionProgress;
-        private string _statusMessage = "Ready. Select any audio/video file or paste an online link to convert.";
+        private string _statusMessage = "Ready. Paste any online media link or select an Internet download to convert.";
+
+        // Media Preview & Technical Details
+        private string _mediaTitle = string.Empty;
+        private string _mediaPublisher = string.Empty;
+        private string _mediaDuration = string.Empty;
+        private string _mediaThumbnailUrl = string.Empty;
+        private string _mediaAudioCodec = "AAC / MP3 Stream";
+        private string _mediaBitrate = "Dynamic Bitrate";
+        private string _mediaResolution = "High Definition";
+        private bool _hasMediaPreview;
         
         private AudioTargetFormat _selectedTargetFormat;
         private AudioQualityOption _selectedQuality = new();
@@ -79,6 +90,60 @@ namespace PRRX.IDM.ViewModels
         {
             get => _isSourceDetected;
             set => SetProperty(ref _isSourceDetected, value);
+        }
+
+        public bool IsAnalyzingSource
+        {
+            get => _isAnalyzingSource;
+            set => SetProperty(ref _isAnalyzingSource, value);
+        }
+
+        public string MediaTitle
+        {
+            get => _mediaTitle;
+            set => SetProperty(ref _mediaTitle, value);
+        }
+
+        public string MediaPublisher
+        {
+            get => _mediaPublisher;
+            set => SetProperty(ref _mediaPublisher, value);
+        }
+
+        public string MediaDuration
+        {
+            get => _mediaDuration;
+            set => SetProperty(ref _mediaDuration, value);
+        }
+
+        public string MediaThumbnailUrl
+        {
+            get => _mediaThumbnailUrl;
+            set => SetProperty(ref _mediaThumbnailUrl, value);
+        }
+
+        public string MediaAudioCodec
+        {
+            get => _mediaAudioCodec;
+            set => SetProperty(ref _mediaAudioCodec, value);
+        }
+
+        public string MediaBitrate
+        {
+            get => _mediaBitrate;
+            set => SetProperty(ref _mediaBitrate, value);
+        }
+
+        public string MediaResolution
+        {
+            get => _mediaResolution;
+            set => SetProperty(ref _mediaResolution, value);
+        }
+
+        public bool HasMediaPreview
+        {
+            get => _hasMediaPreview;
+            set => SetProperty(ref _hasMediaPreview, value);
         }
 
         public bool IsConverting
@@ -134,7 +199,6 @@ namespace PRRX.IDM.ViewModels
         public ObservableCollection<DownloadItem> ConvertedHistory { get; } = new();
 
         public ICommand PasteClipboardCommand { get; }
-        public ICommand BrowseLocalFileCommand { get; }
         public ICommand StartConversionCommand { get; }
         public ICommand CancelConversionCommand { get; }
         public ICommand OpenOutputFolderCommand { get; }
@@ -169,21 +233,7 @@ namespace PRRX.IDM.ViewModels
                 }
             });
 
-            BrowseLocalFileCommand = new RelayCommand(() =>
-            {
-                var dialog = new OpenFileDialog
-                {
-                    Title = "Select Any Audio or Video File to Convert",
-                    Filter = "All Supported Media (*.mp3;*.wav;*.m4a;*.flac;*.ogg;*.mp4;*.mkv;*.mov;*.webm;*.avi;*.flv;*.aac;*.wma;*.amr;*.opus)|*.mp3;*.wav;*.m4a;*.flac;*.ogg;*.mp4;*.mkv;*.mov;*.webm;*.avi;*.flv;*.aac;*.wma;*.amr;*.opus|Audio Files (*.mp3;*.wav;*.m4a;*.flac;*.ogg;*.aac;*.wma;*.amr;*.opus)|*.mp3;*.wav;*.m4a;*.flac;*.ogg;*.aac;*.wma;*.amr;*.opus|Video Files (*.mp4;*.mkv;*.mov;*.webm;*.avi;*.flv)|*.mp4;*.mkv;*.mov;*.webm;*.avi;*.flv|All Files (*.*)|*.*"
-                };
-
-                if (dialog.ShowDialog() == true)
-                {
-                    SourceInput = dialog.FileName;
-                }
-            });
-
-            StartConversionCommand = new AsyncRelayCommand(StartConversionAsync, () => !IsConverting && !string.IsNullOrWhiteSpace(SourceInput));
+            StartConversionCommand = new AsyncRelayCommand(StartConversionAsync, () => !IsConverting && IsSourceDetected && !HasError);
             CancelConversionCommand = new RelayCommand(CancelConversion, () => IsConverting);
             OpenOutputFolderCommand = new RelayCommand(OpenOutputFolder);
 
@@ -221,45 +271,109 @@ namespace PRRX.IDM.ViewModels
 
         private void DetectSourceFormat(string input)
         {
+            HasMediaPreview = false;
+            MediaTitle = string.Empty;
+            MediaPublisher = string.Empty;
+            MediaDuration = string.Empty;
+            MediaThumbnailUrl = string.Empty;
+
             if (string.IsNullOrWhiteSpace(input))
             {
-                DetectedSourceFormat = "No file selected";
+                DetectedSourceFormat = "No Internet download selected";
                 IsSourceDetected = false;
+                HasError = false;
                 return;
             }
 
-            if (File.Exists(input))
+            var trimmed = input.Trim();
+
+            // 1. Online Internet Media Stream (YouTube, TikTok, Telegram, etc.)
+            if (trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || 
+                trimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
+                trimmed.StartsWith("tg://", StringComparison.OrdinalIgnoreCase))
             {
-                var ext = Path.GetExtension(input).ToLowerInvariant();
-                var sizeMb = new FileInfo(input).Length / (1024.0 * 1024.0);
-                
-                DetectedSourceFormat = ext switch
-                {
-                    ".mp3" => $"MP3 Audio File • {sizeMb:F1} MB",
-                    ".wav" => $"WAV Lossless PCM Audio • {sizeMb:F1} MB",
-                    ".flac" => $"FLAC High-Res Audio • {sizeMb:F1} MB",
-                    ".m4a" => $"M4A Apple Audio • {sizeMb:F1} MB",
-                    ".m4r" => $"M4R iPhone Ringtone • {sizeMb:F1} MB",
-                    ".ogg" => $"OGG Vorbis Audio • {sizeMb:F1} MB",
-                    ".mp4" => $"MP4 Video Container • {sizeMb:F1} MB",
-                    ".mkv" => $"MKV Matroska Video • {sizeMb:F1} MB",
-                    ".webm" => $"WebM Media Stream • {sizeMb:F1} MB",
-                    ".mov" => $"QuickTime MOV Video • {sizeMb:F1} MB",
-                    ".amr" => $"AMR Voice Recording • {sizeMb:F1} MB",
-                    ".mp2" => $"MP2 Broadcast Audio • {sizeMb:F1} MB",
-                    _ => $"{ext.ToUpperInvariant().TrimStart('.')} Media File • {sizeMb:F1} MB"
-                };
+                DetectedSourceFormat = "Online Media Stream (Analyzing details...)";
                 IsSourceDetected = true;
+                HasError = false;
+                _ = ProbeMediaDetailsAsync(trimmed);
             }
-            else if (input.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || input.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            // 2. Previously downloaded Internet file in IDM Downloads
+            else if (File.Exists(trimmed))
             {
-                DetectedSourceFormat = "Online Media Stream (YouTube, TikTok, Vimeo, SoundCloud)";
-                IsSourceDetected = true;
+                var downloadDir = _configService?.CurrentConfig.DownloadDirectory;
+                bool isUnderDownloadDir = !string.IsNullOrWhiteSpace(downloadDir) && 
+                    trimmed.StartsWith(downloadDir, StringComparison.OrdinalIgnoreCase);
+
+                if (isUnderDownloadDir)
+                {
+                    var fileInfo = new FileInfo(trimmed);
+                    var ext = fileInfo.Extension.ToLowerInvariant();
+                    var sizeMb = fileInfo.Length / (1024.0 * 1024.0);
+
+                    MediaTitle = Path.GetFileNameWithoutExtension(trimmed);
+                    MediaPublisher = "Downloaded Media";
+                    MediaDuration = $"{sizeMb:F1} MB";
+                    MediaAudioCodec = ext switch
+                    {
+                        ".mp4" or ".m4a" => "AAC Audio",
+                        ".mkv" or ".webm" => "Opus / Vorbis / AAC",
+                        ".flac" => "FLAC Lossless",
+                        ".wav" => "PCM Uncompressed",
+                        _ => "Native Stream"
+                    };
+                    MediaBitrate = "320 kbps Stream";
+                    MediaResolution = ext.ToUpperInvariant().TrimStart('.');
+                    HasMediaPreview = true;
+
+                    DetectedSourceFormat = $"IDM Downloaded File: {Path.GetFileName(trimmed)} ({sizeMb:F1} MB)";
+                    IsSourceDetected = true;
+                    HasError = false;
+                }
+                else
+                {
+                    HasError = true;
+                    DetectedSourceFormat = "Local file browsing is disabled. You can only convert Internet Downloads and online streams.";
+                    IsSourceDetected = false;
+                }
             }
             else
             {
-                DetectedSourceFormat = "Unrecognized path format";
+                HasError = true;
+                DetectedSourceFormat = "Invalid source. Please paste an online media link or select an Internet download.";
                 IsSourceDetected = false;
+            }
+        }
+
+        private async Task ProbeMediaDetailsAsync(string url)
+        {
+            try
+            {
+                IsAnalyzingSource = true;
+                var (result, error) = await _mediaEngine.ProbeMediaAsync(url);
+                if (result != null)
+                {
+                    MediaTitle = result.Title;
+                    MediaPublisher = !string.IsNullOrWhiteSpace(result.Musician) ? result.Musician : result.PublisherName;
+                    MediaDuration = result.DurationFormatted;
+                    MediaThumbnailUrl = result.ThumbnailUrl;
+                    MediaAudioCodec = result.IsMusic ? "Music Track (High Quality Audio)" : "Stereo Audio Track";
+                    MediaBitrate = "320 kbps Dynamic Stream";
+                    MediaResolution = "HD Stream Audio";
+                    HasMediaPreview = true;
+                    DetectedSourceFormat = $"Online Media: {result.Title} ({result.DurationFormatted})";
+                }
+            }
+            catch
+            {
+                // Fallback graceful display
+                MediaTitle = url;
+                MediaPublisher = "Online Stream";
+                MediaDuration = "--:--";
+                HasMediaPreview = true;
+            }
+            finally
+            {
+                IsAnalyzingSource = false;
             }
         }
 

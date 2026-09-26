@@ -1,10 +1,43 @@
-# 🚀 PRRX Internet Download Manager — Release Notes v1.7.0
+# 🚀 PRRX Internet Download Manager — Release Notes v1.8.0
 
-**Release Tag**: `v1.7.0`  
+**Release Tag**: `v1.8.0`  
 **Target Branch**: `main`  
-**Date**: September 21, 2026  
+**Date**: September 26, 2026  
 **Target Platform**: Windows 10 / Windows 11 (x64)  
 **Publisher**: PRRX Cooperation  
+
+---
+
+## 🌟 What's New in Version 1.8.0
+
+### ⚡ 1. Ultra-High Speed Telegram MTProto Download Acceleration
+- **16 Parallel MTProto Transfers**: Multi-connection stream parallelization (`ParallelTransfers = 16`) saturating high-speed broadband connections.
+- **Large Chunk Buffers & Part Sizing**: Expanded socket receive buffer to 1 MB and part chunk size to 512 KB with zero inter-chunk throttle latency.
+- **Visual Connection Stream Blocks**: Real-time multi-part segmented connection progress blocks displaying live chunk-by-chunk download activity.
+
+### 📁 2. Dedicated IDM Downloads Navigation Tab & Preference Center
+- **Dedicated Navigation Tab**: Clean, dedicated primary tab organizing all downloads initiated via browser extension and IDM modules.
+- **Separation of Concerns**: Moved all IDM extension settings, port bindings, and browser pairing configurations out of the general Settings tab into the IDM Downloads view.
+
+### 🎬 3. Video Downloader Tab Format Selector (29+ Media Formats)
+- **Pre-Download Target Format Selector**: Select target video/audio container prior to download. Defaulted to high-compatibility **MP4**.
+- **Supported Containers**: MP4, MKV, WebM, AVI, MOV, FLV, F4V, VOB, OGV, Dirac, GIFV, MNG, MTS, TS, WMV, YUV, RM, RMVB, VIV, ASF, AMV, MPEG-1, MPEG-2, M4V, SVI, 3GP, 3G2, MXF, ROQ, NSV.
+
+### 🔄 4. Media Converter Tab with Technical Inspector & Internet Downloads Guard
+- **Internet Downloads Exclusivity**: Conversion is strictly governed to work on internet-downloaded media and online captures; arbitrary local disk file browsing is restricted.
+- **Live Preview & Inspector**: Built-in audio/video player with real-time technical metadata inspection (codec, bitrate, container dimensions, channel layout).
+
+### 📌 5. Draggable Floating Video Grabber with Direct Format Conversion
+- **Draggable Viewport Positioning**: Grabber button can be dragged to any screen location with persistent coordinate saving in `chrome.storage.local`.
+- **Direct Video & Audio Format Selection**: Quick format dropdown directly on the floating grabber to send conversion requests straight to PRRX IDM.
+
+### ⚡ 6. Sub-150ms Cold-Start Instant Dialog
+- **Instant Payload Routing**: Bypasses main window initialization when launched via browser intercept (`--payload`), displaying the download dialog in < 100ms.
+- **Lazy Tab Hydration**: Heavy secondary tabs load on demand to minimize startup RAM footprint.
+
+### 🛡️ 7. Zero-Resurrection Uninstaller Hardening
+- **Force Process Termination**: Terminates any active PRRX IDM, aria2c, or yt-dlp instances on uninstallation.
+- **Complete AppData Purge**: Completely wipes `%AppData%\PRRX Cooperation`, `%LocalAppData%\PRRX Cooperation`, `%AppData%\PRRX_IDM`, and `%LocalAppData%\PRRX_IDM`.
 
 ---
 

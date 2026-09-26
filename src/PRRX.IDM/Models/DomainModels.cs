@@ -138,6 +138,16 @@ namespace PRRX.IDM.Models
         /// Keep IDM running in system tray when main window is closed so background Telegram sync continues
         /// </summary>
         public bool MinimizeToTrayOnClose { get; set; } = true;
+
+        /// <summary>
+        /// Enable browser native messaging and download interception
+        /// </summary>
+        public bool EnableBrowserIntegration { get; set; } = true;
+
+        /// <summary>
+        /// Enable draggable floating video grabber panel in web browsers
+        /// </summary>
+        public bool EnableFloatingPanel { get; set; } = true;
     }
 
     public enum DownloadStatus
@@ -181,6 +191,9 @@ namespace PRRX.IDM.Models
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime? CompletedAt { get; set; }
+
+        public bool IsBrowserInitiated { get; set; } = false;
+        public string Source { get; set; } = string.Empty;
     }
 
     public class MediaFormat

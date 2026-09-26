@@ -19,7 +19,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const versionTag = document.querySelector(".version-tag");
   if (versionTag && chrome.runtime?.getManifest) {
-    versionTag.textContent = "v" + (chrome.runtime.getManifest().version || "1.7.0");
+    versionTag.textContent = "v" + (chrome.runtime.getManifest().version || "1.8.0");
   }
 
   const HTTP_PING_URL = "http://127.0.0.1:46543/api/ping";

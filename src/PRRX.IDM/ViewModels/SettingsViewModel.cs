@@ -237,7 +237,7 @@ namespace PRRX.IDM.ViewModels
             set => SetProperty(ref _appVersion, value);
         }
 
-        public string CurrentVersionClean => _updateService?.CurrentVersionClean ?? "1.7.0";
+        public string CurrentVersionClean => _updateService?.CurrentVersionClean ?? "1.8.0";
 
         public PriorityItem SelectedPriority
         {
@@ -580,7 +580,7 @@ namespace PRRX.IDM.ViewModels
                 {
                     Title = "Select Netscape YouTube cookies.txt file",
                     Filter = "Cookie Text Files (*.txt)|*.txt|All Files (*.*)|*.*",
-                    InitialDirectory = Directory.Exists(@"D:\Internet Download Manager") ? @"D:\Internet Download Manager" : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
+                    InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
                 };
 
                 if (dialog.ShowDialog() == true)
@@ -603,11 +603,8 @@ namespace PRRX.IDM.ViewModels
                     var p1 = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "cookies.txt");
                     if (File.Exists(p1)) File.Delete(p1);
 
-                    var p2 = @"D:\Internet Download Manager\cookies.txt";
+                    var p2 = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PRRX Cooperation", "cookies.txt");
                     if (File.Exists(p2)) File.Delete(p2);
-
-                    var p3 = @"D:\Internet Download Manager\publish\cookies.txt";
-                    if (File.Exists(p3)) File.Delete(p3);
                 }
                 catch
                 {
@@ -698,16 +695,28 @@ namespace PRRX.IDM.ViewModels
             {
                 var baseAppDir = AppDomain.CurrentDomain.BaseDirectory;
                 var extDir = Path.Combine(baseAppDir, "extension");
-                var devExtDir = @"D:\Internet Download Manager\extension";
+                if (!Directory.Exists(extDir))
+                {
+                    var cur = new DirectoryInfo(baseAppDir);
+                    for (int i = 0; i < 5 && cur != null; i++)
+                    {
+                        var candidate = Path.Combine(cur.FullName, "extension");
+                        if (Directory.Exists(candidate))
+                        {
+                            extDir = candidate;
+                            break;
+                        }
+                        cur = cur.Parent;
+                    }
+                }
 
-                var target = Directory.Exists(extDir) ? extDir : devExtDir;
-                if (Directory.Exists(target))
+                if (Directory.Exists(extDir))
                 {
                     Process.Start(new ProcessStartInfo
                     {
                         FileName = "explorer.exe",
                         UseShellExecute = false,
-                        ArgumentList = { Path.GetFullPath(target) }
+                        ArgumentList = { Path.GetFullPath(extDir) }
                     });
                 }
             });
@@ -767,15 +776,37 @@ namespace PRRX.IDM.ViewModels
         {
             ChangelogHistory.Clear();
 
-            // v1.7.0 (Current Release)
+            // v1.8.0 (Current Release)
+            var rel180 = new ChangelogRelease
+            {
+                Version = "v1.8.0",
+                ReleaseDate = "September 2026",
+                IsCurrentRelease = true,
+                StatusBadge = "Current Release",
+                Summary = "Comprehensive 29+ video format remuxing engine with MP4 default, dedicated IDM Downloads & Browser Module tab, interactive draggable floating video grabber, high-speed parallel MTProto Telegram acceleration, live media converter inspector, zero-trace uninstaller, and complete privacy hardening.",
+                IsExpanded = true,
+                Items = new System.Collections.Generic.List<ChangelogItem>
+                {
+                    new() { Category = "Features", Description = "29+ Video Format Engine: Full format selector supporting MP4 (High Compatibility, default), MKV, WebM, AVI, MOV, FLV, F4V, VOB, OGV, Dirac, GIFV, MNG, MTS/TS, WMV, YUV, RM, RMVB, VIV, ASF, AMV, MPEG-1, MPEG-2, M4V, SVI, 3GP, 3G2, MXF, ROQ, and NSV with lossless stream-copy remuxing.", CategoryBadgeColor = "#0078D4", CategoryBgColor = "#200078D4" },
+                    new() { Category = "Features", Description = "Dedicated IDM Downloads Tab: Standalone navigation hub displaying all browser-intercepted downloads, floating grabber media, native messaging status, and extension controls.", CategoryBadgeColor = "#0078D4", CategoryBgColor = "#200078D4" },
+                    new() { Category = "Features", Description = "Interactive Draggable Floating Video Grabber: Freely drag and position the video download button anywhere across web pages with coordinate persistence and inline audio/video format conversion.", CategoryBadgeColor = "#0078D4", CategoryBgColor = "#200078D4" },
+                    new() { Category = "Performance", Description = "Accelerated Parallel MTProto Engine: Multi-worker chunk pipelining over Telegram MTProto protocol achieves 50-100+ MB/s line speed for multi-gigabyte media files.", CategoryBadgeColor = "#8764B8", CategoryBgColor = "#208764B8" },
+                    new() { Category = "Features", Description = "Media Converter Technical Inspector: Live media preview player and technical probe displaying audio/video codec, bitrate, dimensions, and duration, restricted to internet downloads.", CategoryBadgeColor = "#0078D4", CategoryBgColor = "#200078D4" },
+                    new() { Category = "Performance", Description = "Instant Launch Fast-Path: Cold start latency reduced to <150ms for native messaging download dialogs with lazy-loaded main window navigation tabs.", CategoryBadgeColor = "#8764B8", CategoryBgColor = "#208764B8" },
+                    new() { Category = "Security", Description = "Zero-Trace Clean Uninstallation: Forcefully terminates running IDM/engine processes and completely wipes all AppData and legacy registry footprints to eliminate history resurrection.", CategoryBadgeColor = "#107C41", CategoryBgColor = "#20107C41" },
+                    new() { Category = "Privacy", Description = "Zero Private Data Footprint: 100% elimination of all hardcoded personal paths, user profiles, and private IPs from binaries, manifests, and scripts.", CategoryBadgeColor = "#107C41", CategoryBgColor = "#20107C41" }
+                }
+            };
+
+            // v1.7.0
             var rel170 = new ChangelogRelease
             {
                 Version = "v1.7.0",
                 ReleaseDate = "September 2026",
-                IsCurrentRelease = true,
-                StatusBadge = "Current Release",
+                IsCurrentRelease = false,
+                StatusBadge = "Previous Release",
                 Summary = "Dynamic 32-stream segmented Telegram acceleration engine, background system tray synchronization with task hydration on startup, Windows DPAPI client security vault, and end-to-end edge anti-abuse security.",
-                IsExpanded = true,
+                IsExpanded = false,
                 Items = new System.Collections.Generic.List<ChangelogItem>
                 {
                     new() { Category = "Features", Description = "Dynamic 32-Stream Telegram Acceleration: Unifies Telegram download pipeline with standard segmented multi-stream engine, rendering real-time blue connection thread blocks, dynamic throughput counters, and resolving direct CDN streams.", CategoryBadgeColor = "#0078D4", CategoryBgColor = "#200078D4" },
@@ -926,6 +957,7 @@ namespace PRRX.IDM.ViewModels
                 }
             };
 
+            ChangelogHistory.Add(rel180);
             ChangelogHistory.Add(rel170);
             ChangelogHistory.Add(rel160);
             ChangelogHistory.Add(rel150);

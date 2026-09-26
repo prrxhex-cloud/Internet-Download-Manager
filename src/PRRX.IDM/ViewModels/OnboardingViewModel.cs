@@ -94,10 +94,16 @@ namespace PRRX.IDM.ViewModels
                 var baseDir = AppDomain.CurrentDomain.BaseDirectory;
                 var extDir = Path.Combine(baseDir, "extension");
                 if (Directory.Exists(extDir)) return extDir;
-                var devExt = @"D:\Internet Download Manager\extension";
-                if (Directory.Exists(devExt)) return devExt;
-                var pubExt = @"D:\Internet Download Manager\publish\extension";
-                if (Directory.Exists(pubExt)) return pubExt;
+
+                var cur = new DirectoryInfo(baseDir);
+                for (int i = 0; i < 5 && cur != null; i++)
+                {
+                    var candidate = Path.Combine(cur.FullName, "extension");
+                    if (Directory.Exists(candidate)) return candidate;
+                    var pubCandidate = Path.Combine(cur.FullName, "publish", "extension");
+                    if (Directory.Exists(pubCandidate)) return pubCandidate;
+                    cur = cur.Parent;
+                }
                 return extDir;
             }
         }

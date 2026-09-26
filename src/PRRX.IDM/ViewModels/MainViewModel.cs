@@ -18,14 +18,32 @@ namespace PRRX.IDM.ViewModels
         private readonly IThumbnailService _thumbnailService;
         private readonly IUpdateService _updateService;
         private readonly IHistoryService _historyService;
+        private readonly IBrowserIntegrationService _browserService;
 
         private ViewModelBase _currentTabViewModel;
         private string _selectedTabKey = "Video";
 
-        public VideoDownloaderViewModel VideoViewModel { get; }
-        public AudioConverterViewModel AudioViewModel { get; }
-        public ThumbnailViewModel ThumbnailViewModel { get; }
-        public SettingsViewModel SettingsViewModel { get; }
+        // Lazy-loaded tab view models for instant cold start
+        private VideoDownloaderViewModel? _videoViewModel;
+        private IdmDownloadsViewModel? _idmDownloadsViewModel;
+        private AudioConverterViewModel? _audioViewModel;
+        private ThumbnailViewModel? _thumbnailViewModel;
+        private SettingsViewModel? _settingsViewModel;
+
+        public VideoDownloaderViewModel VideoViewModel =>
+            _videoViewModel ??= new VideoDownloaderViewModel(_mediaEngine, _configService, _historyService);
+
+        public IdmDownloadsViewModel IdmDownloadsViewModel =>
+            _idmDownloadsViewModel ??= new IdmDownloadsViewModel(_configService, _historyService, _browserService);
+
+        public AudioConverterViewModel AudioViewModel =>
+            _audioViewModel ??= new AudioConverterViewModel(_mediaEngine, _configService);
+
+        public ThumbnailViewModel ThumbnailViewModel =>
+            _thumbnailViewModel ??= new ThumbnailViewModel(_thumbnailService, _configService);
+
+        public SettingsViewModel SettingsViewModel =>
+            _settingsViewModel ??= new SettingsViewModel(_configService, _themeService, _updateService, _mediaEngine);
 
         public ViewModelBase CurrentTabViewModel
         {
@@ -47,7 +65,8 @@ namespace PRRX.IDM.ViewModels
             IMediaEngineService mediaEngine,
             IThumbnailService thumbnailService,
             IUpdateService updateService,
-            IHistoryService historyService)
+            IHistoryService historyService,
+            IBrowserIntegrationService browserService)
         {
             _configService = configService;
             _themeService = themeService;
@@ -55,12 +74,9 @@ namespace PRRX.IDM.ViewModels
             _thumbnailService = thumbnailService;
             _updateService = updateService;
             _historyService = historyService;
+            _browserService = browserService;
 
-            VideoViewModel = new VideoDownloaderViewModel(_mediaEngine, _configService, _historyService);
-            AudioViewModel = new AudioConverterViewModel(_mediaEngine, _configService);
-            ThumbnailViewModel = new ThumbnailViewModel(_thumbnailService, _configService);
-            SettingsViewModel = new SettingsViewModel(_configService, _themeService, _updateService, _mediaEngine);
-
+            // Start with VideoViewModel as default active tab
             _currentTabViewModel = VideoViewModel;
 
             NavigateTabCommand = new RelayCommand(param =>
@@ -71,6 +87,7 @@ namespace PRRX.IDM.ViewModels
                     var prevTab = CurrentTabViewModel;
                     CurrentTabViewModel = tabKey switch
                     {
+                        "IdmDownloads" => IdmDownloadsViewModel,
                         "Video" => VideoViewModel,
                         "Audio" => AudioViewModel,
                         "Thumbnail" => ThumbnailViewModel,

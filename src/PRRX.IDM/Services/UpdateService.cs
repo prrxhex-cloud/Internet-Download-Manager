@@ -74,7 +74,7 @@ namespace PRRX.IDM.Services
             var client = new HttpClient { Timeout = TimeSpan.FromSeconds(35) };
             var asm = typeof(App).Assembly;
             var ver = asm.GetName().Version;
-            var verStr = ver != null ? $"{ver.Major}.{ver.Minor}.{Math.Max(0, ver.Build)}" : "1.7.0";
+            var verStr = ver != null ? $"{ver.Major}.{ver.Minor}.{Math.Max(0, ver.Build)}" : "1.8.0";
             client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("PRRX-IDM", verStr));
             client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github.v3+json"));
             return client;
@@ -109,7 +109,7 @@ namespace PRRX.IDM.Services
                 }
                 catch { }
 
-                return new Version(1, 7, 0);
+                return new Version(1, 8, 0);
             }
         }
 
@@ -326,12 +326,24 @@ namespace PRRX.IDM.Services
             try
             {
                 // Look for local manifest in dist folder or base directory for offline/internal environments
-                var candidates = new[]
+                var baseDir = AppDomain.CurrentDomain.BaseDirectory;
+                var candidates = new List<string>
                 {
-                    @"D:\Internet Download Manager\dist\manifest.json",
-                    Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "dist", "manifest.json"),
-                    Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "manifest.json")
+                    Path.Combine(baseDir, "dist", "manifest.json"),
+                    Path.Combine(baseDir, "manifest.json"),
+                    Path.Combine(AppContext.BaseDirectory, "dist", "manifest.json"),
+                    Path.Combine(AppContext.BaseDirectory, "manifest.json")
                 };
+
+                var cur = new DirectoryInfo(baseDir);
+                for (int i = 0; i < 5 && cur != null; i++)
+                {
+                    var cand1 = Path.Combine(cur.FullName, "dist", "manifest.json");
+                    if (File.Exists(cand1) && !candidates.Contains(cand1)) candidates.Add(cand1);
+                    var cand2 = Path.Combine(cur.FullName, "manifest.json");
+                    if (File.Exists(cand2) && !candidates.Contains(cand2)) candidates.Add(cand2);
+                    cur = cur.Parent;
+                }
 
                 foreach (var path in candidates)
                 {
@@ -493,15 +505,20 @@ namespace PRRX.IDM.Services
                     }
                     catch { }
 
-                    var localFallbacks = new[]
+                    var localFallbacks = new List<string>
                     {
-                        Path.Combine(@"D:\Internet Download Manager\dist", candidateFileName),
-                        Path.Combine(@"D:\Internet Download Manager\dist", "PRRX_Internet_Download_Manager_v1.3.0_Portable.zip"),
-                        Path.Combine(@"D:\Internet Download Manager\dist", "PRRX_Internet_Download_Manager_v1.2.0_Portable.zip"),
                         Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "dist", candidateFileName),
                         Path.Combine(AppDomain.CurrentDomain.BaseDirectory, candidateFileName),
                         Path.Combine(AppContext.BaseDirectory, "dist", candidateFileName)
                     };
+
+                    var curDir = new DirectoryInfo(AppDomain.CurrentDomain.BaseDirectory);
+                    for (int i = 0; i < 5 && curDir != null; i++)
+                    {
+                        var cand = Path.Combine(curDir.FullName, "dist", candidateFileName);
+                        if (File.Exists(cand) && !localFallbacks.Contains(cand)) localFallbacks.Add(cand);
+                        curDir = curDir.Parent;
+                    }
 
                     foreach (var fb in localFallbacks)
                     {

@@ -24,6 +24,9 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
         ExtendsContentIntoTitleBar="True">
 
     <ui:FluentWindow.Resources>
+        <DataTemplate DataType="{x:Type vm:IdmDownloadsViewModel}">
+            <tabs:IdmDownloadsTab/>
+        </DataTemplate>
         <DataTemplate DataType="{x:Type vm:VideoDownloaderViewModel}">
             <tabs:VideoDownloaderTab/>
         </DataTemplate>
@@ -70,6 +73,11 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
 
                 <!-- Navigation Buttons (Fluent 2 Micro-interactions & Clear Icons) -->
                 <StackPanel Grid.Row="1">
+                    <ui:Button Content="IDM Downloads" Icon="{ui:SymbolIcon Symbol=GlobeArrowDownload24}"
+                               Command="{Binding NavigateTabCommand}" CommandParameter="IdmDownloads"
+                               HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                               Height="44" Margin="0,0,0,8" Padding="16,0" CornerRadius="8"/>
+
                     <ui:Button Content="Video Downloader" Icon="{ui:SymbolIcon Symbol=Video24}"
                                Command="{Binding NavigateTabCommand}" CommandParameter="Video"
                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"

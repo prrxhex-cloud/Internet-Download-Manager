@@ -8,8 +8,8 @@
 ; Professional Inno Setup Script
 
 #define MyAppName "PRRX Internet Download Manager"
-#define MyAppVersion "1.7.0"
-; Version Lineage: 1.5.0 -> 1.6.0 -> 1.7.0
+#define MyAppVersion "1.8.0"
+; Version Lineage: 1.5.0 -> 1.6.0 -> 1.7.0 -> 1.8.0
 #define MyAppPublisher "PRRX Cooperation"
 #define MyAppURL "https://github.com/prrxhex-cloud/Internet-Download-Manager"
 #define MyAppExeName "PRRX.InternetDownloadManager.exe"
@@ -38,11 +38,11 @@ PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 
 ; Output Configuration
-OutputDir=D:\Internet Download Manager\dist
+OutputDir=dist
 OutputBaseFilename=PRRX_Internet_Download_Manager_v{#MyAppVersion}_Setup
-SetupIconFile=D:\Internet Download Manager\src\PRRX.IDM\Assets\app_icon.ico
+SetupIconFile=src\PRRX.IDM\Assets\app_icon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
-LicenseFile=D:\Internet Download Manager\LICENSE.txt
+LicenseFile=LICENSE.txt
 
 ; Modern Wizard Styling & Ultra Compression
 WizardStyle=modern
@@ -60,14 +60,14 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 
 [Files]
 ; Main Executable
-Source: "D:\Internet Download Manager\publish\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
-Source: "D:\Internet Download Manager\publish\*cor3.dll"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "publish\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "publish\*cor3.dll"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 
 ; Bundled Media Engines and Tools
-Source: "D:\Internet Download Manager\publish\bin\*"; DestDir: "{app}\bin"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "publish\bin\*"; DestDir: "{app}\bin"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; Bundled Browser Extension
-Source: "D:\Internet Download Manager\publish\extension\*"; DestDir: "{app}\extension"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "publish\extension\*"; DestDir: "{app}\extension"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\{#MyAppExeName}"
@@ -95,6 +95,10 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"
 Type: filesandordirs; Name: "{localappdata}\PRRX Cooperation\NativeMessaging"
+Type: filesandordirs; Name: "{userappdata}\PRRX Cooperation"
+Type: filesandordirs; Name: "{localappdata}\PRRX Cooperation"
+Type: filesandordirs; Name: "{userappdata}\PRRX_IDM"
+Type: filesandordirs; Name: "{localappdata}\PRRX_IDM"
 
 [Code]
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -145,6 +149,8 @@ procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   AppDataPath: String;
   LocalDataPath: String;
+  LegacyAppData: String;
+  LegacyLocalData: String;
   NativeMessagingDir: String;
   MsgResult: Integer;
   PowerShellCmd: String;
@@ -152,6 +158,11 @@ var
 begin
   if CurUninstallStep = usUninstall then
   begin
+    // 0. Force terminate all running PRRX IDM processes and download engines
+    Exec('taskkill.exe', '/F /IM PRRX.InternetDownloadManager.exe /T', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec('taskkill.exe', '/F /IM aria2c.exe /T', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec('taskkill.exe', '/F /IM yt-dlp.exe /T', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
     // 1. Remove all registry keys for Chrome & Edge extensions and NativeMessaging hosts
     PowerShellCmd := 
       '-NoProfile -ExecutionPolicy Bypass -Command "' +
@@ -180,11 +191,13 @@ begin
     if DirExists(NativeMessagingDir) then
       DelTree(NativeMessagingDir, True, True, True);
 
-    // 3. User prompt for user settings / download history purge
+    // 3. User prompt for user settings / download history purge (Zero resurrection)
     AppDataPath := ExpandConstant('{userappdata}\PRRX Cooperation');
     LocalDataPath := ExpandConstant('{localappdata}\PRRX Cooperation');
+    LegacyAppData := ExpandConstant('{userappdata}\PRRX_IDM');
+    LegacyLocalData := ExpandConstant('{localappdata}\PRRX_IDM');
 
-    if DirExists(AppDataPath) or DirExists(LocalDataPath) then
+    if DirExists(AppDataPath) or DirExists(LocalDataPath) or DirExists(LegacyAppData) or DirExists(LegacyLocalData) then
     begin
       MsgResult := SuppressibleMsgBox(
         'Do you also want to permanently delete all PRRX user settings, download history, and temporary cache?' + #13#10 + #13#10 +
@@ -198,6 +211,10 @@ begin
           DelTree(AppDataPath, True, True, True);
         if DirExists(LocalDataPath) then
           DelTree(LocalDataPath, True, True, True);
+        if DirExists(LegacyAppData) then
+          DelTree(LegacyAppData, True, True, True);
+        if DirExists(LegacyLocalData) then
+          DelTree(LegacyLocalData, True, True, True);
       end;
     end;
   end;

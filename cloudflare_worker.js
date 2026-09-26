@@ -91,7 +91,7 @@ export default {
         return new Response(JSON.stringify({
           status: "online",
           service: "PRRX IDM Cloud Intelligence Gateway",
-          version: "1.7.0",
+          version: "1.8.0",
           edge_node: clientColo,
           client_ip: clientPublicIp,
           telegram_bot: "@PRRX_IDM_Bot",
@@ -117,11 +117,11 @@ export default {
       // ----------------------------------------------------------------------
       if (path === "/api/manifest" && method === "GET") {
         return new Response(JSON.stringify({
-          version: "1.7.0",
-          releaseDate: "2026-09-22",
-          downloadUrl: "https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.7.0/PRRX_Internet_Download_Manager_v1.7.0_Portable.zip",
-          sha256Hash: "8FA3BCFCE7BC9252734A642690C96673D4D94A080F741174736191A096A074EF",
-          releaseNotes: "PRRX IDM v1.7.0: Native MTProto Engine direct Data Center streaming (lifting 20MB limit up to 2GB/4GB), 32 parallel connection threads with live visual blocks, real-time transfer speed calculation, and Cloudflare Edge SQLite pairing.",
+          version: "1.8.0",
+          releaseDate: "2026-09-26",
+          downloadUrl: "https://github.com/prrxhex-cloud/Internet-Download-Manager/releases/download/v1.8.0/PRRX_Internet_Download_Manager_v1.8.0_Portable.zip",
+          sha256Hash: "DACFB759D0570039CCC183D4230030538BE36AC2134575D4C9233D9F31B8CE89",
+          releaseNotes: "PRRX IDM v1.8.0: Ultra-fast MTProto Telegram downloads (ParallelTransfers=16, 1MB socket buffer, 512KB part chunks), dedicated IDM Downloads Tab & Settings, Video Downloader Tab with 29+ format selector, Media Converter with live audio/video player & inspector (Internet Downloads only), Draggable Floating Grabber with format conversion, sub-150ms instant cold-start download dialog, and hardened zero-resurrection uninstaller.",
           isMandatory: false
         }), { status: 200, headers: corsHeaders });
       }

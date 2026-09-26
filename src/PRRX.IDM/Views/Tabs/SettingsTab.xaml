@@ -390,46 +390,7 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
                 </StackPanel>
             </Border>
 
-            <!-- Browser Integration & Extension Card -->
-            <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" 
-                    CornerRadius="12" Padding="20" Margin="0,0,0,18"
-                    BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1">
-                <StackPanel>
-                    <Grid Margin="0,0,0,10">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
 
-                        <StackPanel>
-                            <TextBlock Text="Browser Integration Module (Chrome / Edge / Brave)" FontSize="16" FontWeight="SemiBold"/>
-                            <TextBlock Text="Intercept browser downloads, grab video/audio with floating player button, and download with 32 streams." 
-                                       Opacity="0.7" FontSize="12" Margin="0,2,0,0"/>
-                        </StackPanel>
-
-                        <Border Grid.Column="1" Background="#2000E5FF" BorderBrush="#4000E5FF" BorderThickness="1" CornerRadius="8" Padding="10,4" VerticalAlignment="Center">
-                            <TextBlock Text="Native Host Active" FontWeight="Bold" FontSize="11" Foreground="#00E5FF"/>
-                        </Border>
-                    </Grid>
-
-                    <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="14,10" Margin="0,0,0,12">
-                        <StackPanel Orientation="Horizontal">
-                            <ui:SymbolIcon Symbol="Link24" Margin="0,0,10,0" VerticalAlignment="Center"/>
-                            <TextBlock Text="{Binding BrowserStatusMessage}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
-                        </StackPanel>
-                    </Border>
-
-                    <StackPanel Orientation="Horizontal">
-                        <ui:Button Content="Register Browser Integration Host" Icon="{ui:SymbolIcon Symbol=Checkmark24}"
-                                   Appearance="Primary" Command="{Binding InstallBrowserExtensionCommand}" 
-                                   Height="40" Margin="0,0,10,0" Padding="16,0"/>
-
-                        <ui:Button Content="Open Extension Folder" Icon="{ui:SymbolIcon Symbol=FolderOpen24}"
-                                   Appearance="Secondary" Command="{Binding OpenExtensionFolderCommand}" 
-                                   Height="40" Padding="16,0"/>
-                    </StackPanel>
-                </StackPanel>
-            </Border>
 
             <!-- Telegram Bot Remote Downloader (@PRRX_IDM_Bot) Card -->
             <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" 

@@ -39,12 +39,31 @@ namespace PRRX.IDM.Services
                 if (_client != null) return _client;
 
                 var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-                var sessionDir = Path.Combine(appData, "PRRX_IDM");
+                var sessionDir = Path.Combine(appData, "PRRX Cooperation");
                 Directory.CreateDirectory(sessionDir);
                 var sessionPath = Path.Combine(sessionDir, "tg_bot_session.dat");
 
-                var client = new Client(ApiId, ApiHash, sessionPath);
+                var client = new Client(ApiId, ApiHash, sessionPath)
+                {
+                    TcpHandler = async (host, port) =>
+                    {
+                        var tcp = new System.Net.Sockets.TcpClient();
+                        tcp.NoDelay = true;
+                        tcp.SendBufferSize = 1024 * 1024;
+                        tcp.ReceiveBufferSize = 1024 * 1024;
+                        await tcp.ConnectAsync(host, port);
+                        return tcp;
+                    },
+                    FilePartSize = 512 * 1024
+                };
+
                 await client.LoginBotIfNeeded(BotToken);
+
+                try
+                {
+                    client.ParallelTransfers = 16;
+                }
+                catch { }
 
                 _client = client;
                 return _client;
