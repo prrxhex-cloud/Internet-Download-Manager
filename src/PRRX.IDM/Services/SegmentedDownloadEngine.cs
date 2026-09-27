@@ -188,6 +188,87 @@ namespace PRRX.IDM.Services
                     }
                 }
 
+                // Streaming Media Provider Integration (YouTube, TikTok, Instagram, Twitter/X, SoundCloud, etc.)
+                if (MediaEngineService.IsStreamingUrl(url))
+                {
+                    var mediaEngine = new MediaEngineService();
+                    if (mediaEngine.IsEngineAvailable)
+                    {
+                        var ext = Path.GetExtension(destinationFilePath).TrimStart('.').ToLowerInvariant();
+                        var isAudio = ext is "mp3" or "wav" or "m4a" or "flac" or "ogg" or "aac" or "opus" or "wma";
+
+                        var progressReporter = new Progress<DownloadProgressReport>(report =>
+                        {
+                            var totalBytesEst = _totalBytes > 0 ? _totalBytes : (isAudio ? 15 * 1024 * 1024 : 45 * 1024 * 1024);
+                            var currentBytes = report.Percentage > 0 ? (long)(report.Percentage / 100.0 * totalBytesEst) : 0;
+                            ProgressChanged?.Invoke(this, new SegmentProgressEventArgs
+                            {
+                                OverallPercentage = report.Percentage,
+                                TotalBytes = _totalBytes > 0 ? _totalBytes : -1,
+                                DownloadedBytes = currentBytes,
+                                TransferRateFormatted = string.IsNullOrWhiteSpace(report.Speed) ? "Streaming..." : report.Speed,
+                                TimeLeftFormatted = string.IsNullOrWhiteSpace(report.Eta) ? "--:--" : report.Eta,
+                                StatusMessage = string.IsNullOrWhiteSpace(report.StatusMessage) ? (isAudio ? "Extracting audio stream..." : "Downloading media stream...") : report.StatusMessage,
+                                IsResumeSupported = false,
+                                Threads = new List<DownloadConnectionThread>()
+                            });
+                        });
+
+                        var outDir = Path.GetDirectoryName(destinationFilePath);
+                        if (string.IsNullOrWhiteSpace(outDir)) outDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                        Directory.CreateDirectory(outDir);
+
+                        bool success;
+                        if (isAudio)
+                        {
+                            var audioFmt = string.IsNullOrWhiteSpace(ext) ? "mp3" : ext;
+                            success = await mediaEngine.ConvertAudioAsync(url, audioFmt, "320k", outDir, false, progressReporter, _cts.Token, destinationFilePath);
+                        }
+                        else
+                        {
+                            var videoFmt = string.IsNullOrWhiteSpace(ext) ? "mp4" : ext;
+                            success = await mediaEngine.DownloadVideoAsync(url, "bestvideo+bestaudio/best", outDir, progressReporter, _cts.Token, videoFmt, destinationFilePath);
+                        }
+
+                        IsRunning = false;
+                        if (success)
+                        {
+                            // Verify output file exists and is not empty
+                            if (File.Exists(destinationFilePath) && new FileInfo(destinationFilePath).Length > 0)
+                            {
+                                PRRX.IDM.Security.SecurityGuard.ApplyMarkOfTheWeb(destinationFilePath, url, referer);
+                                ReportProgress("Complete - Downloaded successfully");
+                                DownloadCompleted?.Invoke(this, destinationFilePath);
+                                return true;
+                            }
+                            else
+                            {
+                                var baseName = Path.GetFileNameWithoutExtension(destinationFilePath);
+                                if (Directory.Exists(outDir))
+                                {
+                                    var match = Directory.GetFiles(outDir, $"{baseName}.*")
+                                        .OrderByDescending(f => File.GetLastWriteTimeUtc(f))
+                                        .FirstOrDefault();
+                                    if (match != null && new FileInfo(match).Length > 0)
+                                    {
+                                        try { File.Move(match, destinationFilePath, true); } catch { }
+                                        if (File.Exists(destinationFilePath))
+                                        {
+                                            PRRX.IDM.Security.SecurityGuard.ApplyMarkOfTheWeb(destinationFilePath, url, referer);
+                                            ReportProgress("Complete - Downloaded successfully");
+                                            DownloadCompleted?.Invoke(this, destinationFilePath);
+                                            return true;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        DownloadFailed?.Invoke(this, "Media stream download failed. Please verify that the media is available.");
+                        return false;
+                    }
+                }
+
                 _threads.Clear();
                 _totalDownloadedBytes = 0;
                 _speedStopwatch.Restart();
@@ -366,6 +447,12 @@ namespace PRRX.IDM.Services
                     {
                         System.Buffers.ArrayPool<byte>.Shared.Return(copyBuffer);
                     }
+                }
+
+                if (_totalBytes <= 0 && File.Exists(destinationFilePath))
+                {
+                    _totalBytes = new FileInfo(destinationFilePath).Length;
+                    _totalDownloadedBytes = _totalBytes;
                 }
 
                 IsRunning = false;

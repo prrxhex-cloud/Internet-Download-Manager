@@ -175,7 +175,17 @@ namespace PRRX.IDM.ViewModels
                 {
                     if (vm.DialogResult == DownloadDialogResult.StartNow)
                     {
-                        var activeVm = new ActiveDownloadViewModel(vm.Url, vm.SaveAsFullPath);
+                        var activeVm = new ActiveDownloadViewModel(
+                            vm.Url,
+                            vm.SaveAsFullPath,
+                            null,
+                            null,
+                            null,
+                            vm.Referer,
+                            vm.UserAgent,
+                            vm.Cookies,
+                            vm.CustomHeaders,
+                            _historyService);
                         var activeWin = new Views.ActiveDownloadWindow(activeVm);
                         activeWin.Show();
                     }

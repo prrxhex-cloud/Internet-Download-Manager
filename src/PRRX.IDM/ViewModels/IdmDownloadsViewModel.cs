@@ -28,6 +28,7 @@ namespace PRRX.IDM.ViewModels
         private string _searchFilter = string.Empty;
 
         public ObservableCollection<DownloadItem> BrowserDownloads { get; } = new();
+        public bool HasDownloads => BrowserDownloads.Count > 0;
 
         public string BrowserStatusMessage
         {
@@ -230,6 +231,7 @@ namespace PRRX.IDM.ViewModels
             {
                 BrowserDownloads.Add(item);
             }
+            OnPropertyChanged(nameof(HasDownloads));
         }
     }
 }

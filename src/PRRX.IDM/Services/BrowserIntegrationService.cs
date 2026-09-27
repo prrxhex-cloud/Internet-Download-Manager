@@ -877,7 +877,8 @@ namespace PRRX.IDM.Services
                             vm.Referer,
                             vm.UserAgent,
                             vm.Cookies,
-                            vm.CustomHeaders);
+                            vm.CustomHeaders,
+                            _historyService);
 
                         var activeWin = new ActiveDownloadWindow(activeVm);
                         activeWin.Closed += (_, _) => MemoryOptimizer.TrimMemory();

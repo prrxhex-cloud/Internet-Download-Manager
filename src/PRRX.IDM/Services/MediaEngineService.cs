@@ -44,13 +44,15 @@ namespace PRRX.IDM.Services
             string outputDirectory,
             IProgress<DownloadProgressReport>? progress = null,
             CancellationToken cancellationToken = default,
-            string? targetContainer = null);
+            string? targetContainer = null,
+            string? destinationFilePath = null);
         Task<bool> ConvertToMp3Async(
             string sourceUrlOrPath,
             string bitrate,
             string outputDirectory,
             IProgress<DownloadProgressReport>? progress = null,
-            CancellationToken cancellationToken = default);
+            CancellationToken cancellationToken = default,
+            string? destinationFilePath = null);
         Task<bool> ConvertAudioAsync(
             string sourceUrlOrPath,
             string targetFormat,
@@ -58,7 +60,8 @@ namespace PRRX.IDM.Services
             string outputDirectory,
             bool trimRingtone = false,
             IProgress<DownloadProgressReport>? progress = null,
-            CancellationToken cancellationToken = default);
+            CancellationToken cancellationToken = default,
+            string? destinationFilePath = null);
         Task<(bool Success, string Message)> UpdateEngineAsync(CancellationToken cancellationToken = default);
     }
 
@@ -156,12 +159,90 @@ namespace PRRX.IDM.Services
             return null;
         }
 
+        private static string? _cachedNodePath;
+        private static bool _nodePathChecked;
+
+        public static string? FindNodeJsExecutable()
+        {
+            if (_nodePathChecked) return _cachedNodePath;
+            _nodePathChecked = true;
+
+            try
+            {
+                var standardPaths = new[]
+                {
+                    @"C:\Program Files\nodejs\node.exe",
+                    @"C:\Program Files (x86)\nodejs\node.exe",
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Programs\node\node.exe")
+                };
+
+                foreach (var p in standardPaths)
+                {
+                    if (File.Exists(p))
+                    {
+                        _cachedNodePath = p;
+                        return p;
+                    }
+                }
+
+                var pathEnv = Environment.GetEnvironmentVariable("PATH");
+                if (!string.IsNullOrWhiteSpace(pathEnv))
+                {
+                    var dirs = pathEnv.Split(';', StringSplitOptions.RemoveEmptyEntries);
+                    foreach (var dir in dirs)
+                    {
+                        var candidate = Path.Combine(dir.Trim(), "node.exe");
+                        if (File.Exists(candidate))
+                        {
+                            _cachedNodePath = candidate;
+                            return candidate;
+                        }
+                    }
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        public static bool IsStreamingUrl(string? url)
+        {
+            if (string.IsNullOrWhiteSpace(url)) return false;
+            if (url.StartsWith("tg://", StringComparison.OrdinalIgnoreCase)) return false;
+
+            try
+            {
+                if (Uri.TryCreate(url, UriKind.Absolute, out var uri))
+                {
+                    var host = uri.Host.ToLowerInvariant();
+                    if (host.Contains("youtube.com") || host.Contains("youtu.be") ||
+                        host.Contains("tiktok.com") || host.Contains("instagram.com") ||
+                        host.Contains("facebook.com") || host.Contains("fb.watch") ||
+                        host.Contains("twitter.com") || host.Contains("x.com") ||
+                        host.Contains("vimeo.com") || host.Contains("soundcloud.com") ||
+                        host.Contains("bilibili.com") || host.Contains("dailymotion.com") ||
+                        host.Contains("twitch.tv") || host.Contains("reddit.com"))
+                    {
+                        return true;
+                    }
+                }
+            }
+            catch { }
+            return false;
+        }
+
         private void AttachCommonArguments(ProcessStartInfo startInfo)
         {
             if (!string.IsNullOrWhiteSpace(FfmpegDirectoryPath))
             {
                 startInfo.ArgumentList.Add("--ffmpeg-location");
                 startInfo.ArgumentList.Add(FfmpegDirectoryPath);
+            }
+
+            var nodeExe = FindNodeJsExecutable();
+            if (!string.IsNullOrWhiteSpace(nodeExe))
+            {
+                startInfo.ArgumentList.Add("--js-runtimes");
+                startInfo.ArgumentList.Add($"node:{nodeExe}");
             }
 
             // Modern tokenless / client emulation extractor arguments to bypass YouTube bot detection without requiring cookies
@@ -395,7 +476,8 @@ namespace PRRX.IDM.Services
             string outputDirectory,
             IProgress<DownloadProgressReport>? progress = null,
             CancellationToken cancellationToken = default,
-            string? targetContainer = null)
+            string? targetContainer = null,
+            string? destinationFilePath = null)
         {
             if (!SecurityGuard.ValidateUrl(url, out var safeUrl, out var error))
             {
@@ -404,7 +486,9 @@ namespace PRRX.IDM.Services
             }
 
             Directory.CreateDirectory(outputDirectory);
-            var outputTemplate = Path.Combine(outputDirectory, "%(title)s.%(ext)s");
+            var outputTemplate = !string.IsNullOrWhiteSpace(destinationFilePath)
+                ? Path.Combine(outputDirectory, Path.GetFileNameWithoutExtension(destinationFilePath) + ".%(ext)s")
+                : Path.Combine(outputDirectory, "%(title)s.%(ext)s");
 
             var startInfo = new ProcessStartInfo
             {
@@ -469,6 +553,27 @@ namespace PRRX.IDM.Services
             process.BeginErrorReadLine();
 
             await process.WaitForExitAsync(cancellationToken);
+
+            if (process.ExitCode == 0 && !string.IsNullOrWhiteSpace(destinationFilePath) && !File.Exists(destinationFilePath))
+            {
+                try
+                {
+                    var baseName = Path.GetFileNameWithoutExtension(destinationFilePath);
+                    var dir = Path.GetDirectoryName(destinationFilePath) ?? outputDirectory;
+                    if (Directory.Exists(dir))
+                    {
+                        var match = Directory.GetFiles(dir, $"{baseName}.*")
+                            .OrderByDescending(f => File.GetLastWriteTimeUtc(f))
+                            .FirstOrDefault();
+                        if (match != null && !string.Equals(match, destinationFilePath, StringComparison.OrdinalIgnoreCase))
+                        {
+                            File.Move(match, destinationFilePath, true);
+                        }
+                    }
+                }
+                catch { }
+            }
+
             MemoryOptimizer.TrimMemory();
             return process.ExitCode == 0;
         }
@@ -478,9 +583,10 @@ namespace PRRX.IDM.Services
             string bitrate,
             string outputDirectory,
             IProgress<DownloadProgressReport>? progress = null,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            string? destinationFilePath = null)
         {
-            return await ConvertAudioAsync(sourceUrlOrPath, "mp3", bitrate, outputDirectory, false, progress, cancellationToken);
+            return await ConvertAudioAsync(sourceUrlOrPath, "mp3", bitrate, outputDirectory, false, progress, cancellationToken, destinationFilePath);
         }
 
         public async Task<bool> ConvertAudioAsync(
@@ -490,7 +596,8 @@ namespace PRRX.IDM.Services
             string outputDirectory,
             bool trimRingtone = false,
             IProgress<DownloadProgressReport>? progress = null,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            string? destinationFilePath = null)
         {
             Directory.CreateDirectory(outputDirectory);
             var normalizedFormat = targetFormat.ToLowerInvariant().TrimStart('.');
@@ -513,13 +620,35 @@ namespace PRRX.IDM.Services
                     progress,
                     cancellationToken);
 
+                if (localSuccess && !string.IsNullOrWhiteSpace(destinationFilePath) && !File.Exists(destinationFilePath))
+                {
+                    try
+                    {
+                        var baseName = Path.GetFileNameWithoutExtension(destinationFilePath);
+                        var dir = Path.GetDirectoryName(destinationFilePath) ?? outputDirectory;
+                        if (Directory.Exists(dir))
+                        {
+                            var match = Directory.GetFiles(dir, $"{baseName}.*")
+                                .OrderByDescending(f => File.GetLastWriteTimeUtc(f))
+                                .FirstOrDefault();
+                            if (match != null && !string.Equals(match, destinationFilePath, StringComparison.OrdinalIgnoreCase))
+                            {
+                                File.Move(match, destinationFilePath, true);
+                            }
+                        }
+                    }
+                    catch { }
+                }
+
                 MemoryOptimizer.TrimMemory();
                 return localSuccess;
             }
 
             // Otherwise, use yt-dlp to extract online stream or convert
             var outputExt = normalizedFormat == "m4r" ? "m4a" : normalizedFormat;
-            var outputTemplate = Path.Combine(outputDirectory, "%(title)s.%(ext)s");
+            var outputTemplate = !string.IsNullOrWhiteSpace(destinationFilePath)
+                ? Path.Combine(outputDirectory, Path.GetFileNameWithoutExtension(destinationFilePath) + ".%(ext)s")
+                : Path.Combine(outputDirectory, "%(title)s.%(ext)s");
 
             var startInfo = new ProcessStartInfo
             {
@@ -589,6 +718,26 @@ namespace PRRX.IDM.Services
             process.BeginErrorReadLine();
 
             await process.WaitForExitAsync(cancellationToken);
+
+            if (process.ExitCode == 0 && !string.IsNullOrWhiteSpace(destinationFilePath) && !File.Exists(destinationFilePath))
+            {
+                try
+                {
+                    var baseName = Path.GetFileNameWithoutExtension(destinationFilePath);
+                    var dir = Path.GetDirectoryName(destinationFilePath) ?? outputDirectory;
+                    if (Directory.Exists(dir))
+                    {
+                        var match = Directory.GetFiles(dir, $"{baseName}.*")
+                            .OrderByDescending(f => File.GetLastWriteTimeUtc(f))
+                            .FirstOrDefault();
+                        if (match != null && !string.Equals(match, destinationFilePath, StringComparison.OrdinalIgnoreCase))
+                        {
+                            File.Move(match, destinationFilePath, true);
+                        }
+                    }
+                }
+                catch { }
+            }
 
             // If user requested m4r (iPhone Ringtone), rename/remux the downloaded m4a to m4r
             if (process.ExitCode == 0 && normalizedFormat == "m4r")

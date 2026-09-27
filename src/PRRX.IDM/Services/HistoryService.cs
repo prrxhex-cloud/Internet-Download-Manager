@@ -25,6 +25,7 @@ namespace PRRX.IDM.Services
         void OpenFile(DownloadItem item);
         void OpenFolder(DownloadItem item);
         void SaveHistory();
+        void UpdateItemCompleted(string targetFilePath, string? url = null, long? actualSizeBytes = null);
     }
 
     public class HistoryService : IHistoryService
@@ -267,6 +268,42 @@ namespace PRRX.IDM.Services
             {
                 // Ignore folder launch errors
             }
+        }
+
+        public void UpdateItemCompleted(string targetFilePath, string? url = null, long? actualSizeBytes = null)
+        {
+            try
+            {
+                var match = System.Linq.Enumerable.FirstOrDefault(HistoryItems, i =>
+                    (!string.IsNullOrEmpty(targetFilePath) && string.Equals(i.TargetFilePath, targetFilePath, StringComparison.OrdinalIgnoreCase)) ||
+                    (!string.IsNullOrEmpty(url) && string.Equals(i.Url, url, StringComparison.OrdinalIgnoreCase)));
+
+                if (match != null)
+                {
+                    match.Status = DownloadStatus.Completed;
+                    match.CompletedAt = DateTime.UtcNow;
+                    if (actualSizeBytes.HasValue && actualSizeBytes.Value > 0)
+                    {
+                        match.FileSizeFormatted = FormatBytes(actualSizeBytes.Value);
+                    }
+                    else if (File.Exists(targetFilePath))
+                    {
+                        var len = new FileInfo(targetFilePath).Length;
+                        if (len > 0) match.FileSizeFormatted = FormatBytes(len);
+                    }
+                    SaveHistory();
+                }
+            }
+            catch { }
+        }
+
+        private static string FormatBytes(long bytes)
+        {
+            if (bytes <= 0) return "Unknown size";
+            if (bytes >= 1024 * 1024 * 1024) return $"{(bytes / (1024.0 * 1024.0 * 1024.0)):F2} GB";
+            if (bytes >= 1024 * 1024) return $"{(bytes / (1024.0 * 1024.0)):F2} MB";
+            if (bytes >= 1024) return $"{(bytes / 1024.0):F1} KB";
+            return $"{bytes} B";
         }
     }
 }

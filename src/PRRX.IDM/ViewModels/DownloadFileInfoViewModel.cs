@@ -35,8 +35,8 @@ namespace PRRX.IDM.ViewModels
             PooledConnectionLifetime = TimeSpan.FromMinutes(5),
             AllowAutoRedirect = true,
             AutomaticDecompression = System.Net.DecompressionMethods.None,
-            ConnectTimeout = TimeSpan.FromSeconds(2)
-        }) { Timeout = TimeSpan.FromSeconds(5) };
+            ConnectTimeout = TimeSpan.FromSeconds(4)
+        }) { Timeout = TimeSpan.FromSeconds(10) };
 
         private readonly ICloudIntelligenceService _cloudService;
 
@@ -745,6 +745,90 @@ namespace PRRX.IDM.ViewModels
                 }
             }
 
+            if (MediaEngineService.IsStreamingUrl(url))
+            {
+                lock (_probeLock)
+                {
+                    if (_activeProbeTask != null && !_activeProbeTask.IsCompleted && _activeProbeUrl == url)
+                    {
+                        return _activeProbeTask;
+                    }
+
+                    _probeCts?.Cancel();
+                    var cts = new CancellationTokenSource();
+                    _probeCts = cts;
+                    _activeProbeUrl = url;
+
+                    _activeProbeTask = Task.Run(async () =>
+                    {
+                        DispatchToUi(() =>
+                        {
+                            FileSizeFormatted = "Analyzing stream...";
+                            IsProbing = true;
+                        });
+
+                        var mediaEngine = new MediaEngineService();
+                        var (probeResult, error) = await mediaEngine.ProbeMediaAsync(url, cts.Token);
+                        if (probeResult != null && !cts.IsCancellationRequested)
+                        {
+                            DispatchToUi(() =>
+                            {
+                                if (!string.IsNullOrWhiteSpace(probeResult.Title) &&
+                                    (FileName.StartsWith("download_") || FileName == "download.bin" || FileName.EndsWith(".bin") || FileName.Contains("YouTube") || FileName.Length < 10))
+                                {
+                                    var currentExt = Path.GetExtension(FileName);
+                                    if (string.IsNullOrWhiteSpace(currentExt) || currentExt == ".bin")
+                                    {
+                                        currentExt = probeResult.IsMusic ? ".mp3" : ".mp4";
+                                    }
+                                    FileName = SanitizeFileName(probeResult.Title + currentExt);
+                                    SelectedCategory = probeResult.IsMusic ? FileCategory.Music : FileCategory.Video;
+                                }
+
+                                if (probeResult.Formats.Count > 0 && !string.IsNullOrWhiteSpace(probeResult.Formats[0].EstimatedSizeFormatted))
+                                {
+                                    FileSizeFormatted = probeResult.Formats[0].EstimatedSizeFormatted;
+                                    if (probeResult.DurationSeconds > 0)
+                                    {
+                                        _detectedBytes = (long)(probeResult.DurationSeconds * (SelectedCategory == FileCategory.Music ? 320 * 1024 / 8 : 2.5 * 1024 * 1024 / 8));
+                                    }
+                                }
+                                else if (probeResult.DurationSeconds > 0)
+                                {
+                                    var approxMb = probeResult.DurationSeconds * (SelectedCategory == FileCategory.Music ? 0.32 / 8.0 : 1.8 / 8.0);
+                                    FileSizeFormatted = $"~ {approxMb:F1} MB";
+                                    _detectedBytes = (long)(approxMb * 1024 * 1024);
+                                }
+                                else
+                                {
+                                    FileSizeFormatted = "Dynamic Stream (Ready)";
+                                }
+
+                                AutoPopulateDescription(probeResult.Title);
+                                IsProbing = false;
+                            });
+                        }
+                        else
+                        {
+                            DispatchToUi(() =>
+                            {
+                                if (!string.IsNullOrWhiteSpace(error) && error.Contains("unavailable", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    FileSizeFormatted = "Unavailable on server";
+                                }
+                                else
+                                {
+                                    FileSizeFormatted = "Dynamic Media Stream";
+                                }
+                                IsProbing = false;
+                            });
+                        }
+                    }, cts.Token);
+
+                    return _activeProbeTask;
+                }
+            }
+
             lock (_probeLock)
             {
                 if (_activeProbeTask != null && !_activeProbeTask.IsCompleted && _activeProbeUrl == url)
@@ -779,11 +863,11 @@ namespace PRRX.IDM.ViewModels
             string? detectedName = null;
             string? detectedMime = null;
 
-            // 1. Try HEAD request with 1.5-second fast timeout
+            // 1. Try HEAD request with 3.5-second timeout
             try
             {
                 using var headCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
-                headCts.CancelAfter(TimeSpan.FromSeconds(1.5));
+                headCts.CancelAfter(TimeSpan.FromSeconds(3.5));
 
                 using var headReq = new HttpRequestMessage(HttpMethod.Head, url);
                 SegmentedDownloadEngine.ApplyStandardHeaders(headReq, url, Referer, UserAgent, Cookies, CustomHeaders);
@@ -822,7 +906,7 @@ namespace PRRX.IDM.ViewModels
                 try
                 {
                     using var getCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
-                    getCts.CancelAfter(TimeSpan.FromSeconds(2.0));
+                    getCts.CancelAfter(TimeSpan.FromSeconds(4.5));
 
                     using var getReq = new HttpRequestMessage(HttpMethod.Get, url);
                     SegmentedDownloadEngine.ApplyStandardHeaders(getReq, url, Referer, UserAgent, Cookies, CustomHeaders);

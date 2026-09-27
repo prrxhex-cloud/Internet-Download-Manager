@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // Copyright (c) 2026 PRRX Cooperation. All Rights Reserved.
 // PRRX IDM (TM) - Intelligent Download Manager Engine
 // Watermark: PRRX-IDM-CORE-WATERMARK-SECURE-VAULT-2026
@@ -19,6 +19,18 @@ namespace PRRX.IDM.Converters
             {
                 return b ? Visibility.Visible : Visibility.Collapsed;
             }
+            if (value is int i)
+            {
+                return i > 0 ? Visibility.Visible : Visibility.Collapsed;
+            }
+            if (value is long l)
+            {
+                return l > 0 ? Visibility.Visible : Visibility.Collapsed;
+            }
+            if (value is System.Collections.ICollection c)
+            {
+                return c.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+            }
             return Visibility.Collapsed;
         }
 
@@ -35,6 +47,18 @@ namespace PRRX.IDM.Converters
             if (value is bool b)
             {
                 return b ? Visibility.Collapsed : Visibility.Visible;
+            }
+            if (value is int i)
+            {
+                return i == 0 ? Visibility.Visible : Visibility.Collapsed;
+            }
+            if (value is long l)
+            {
+                return l == 0 ? Visibility.Visible : Visibility.Collapsed;
+            }
+            if (value is System.Collections.ICollection c)
+            {
+                return c.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
             }
             return Visibility.Visible;
         }

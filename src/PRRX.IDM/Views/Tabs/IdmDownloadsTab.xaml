@@ -145,7 +145,7 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
 
                     <!-- Empty State -->
                     <StackPanel Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,40"
-                                Visibility="{Binding BrowserDownloads.Count, Converter={StaticResource InvBoolToVis}}">
+                                Visibility="{Binding HasDownloads, Converter={StaticResource InvBoolToVis}}">
                         <Border Background="#100078D4" Width="64" Height="64" CornerRadius="32" HorizontalAlignment="Center" Margin="0,0,0,12">
                             <ui:SymbolIcon Symbol="ArrowDownload24" FontSize="30" Foreground="{DynamicResource SystemAccentColorPrimaryBrush}"/>
                         </Border>
@@ -156,6 +156,7 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
 
                     <!-- DataGrid of Browser Downloads -->
                     <DataGrid Grid.Row="1" ItemsSource="{Binding BrowserDownloads}" AutoGenerateColumns="False"
+                              Visibility="{Binding HasDownloads, Converter={StaticResource BoolToVis}}"
                               IsReadOnly="True" CanUserAddRows="False" CanUserDeleteRows="False"
                               Background="Transparent" BorderThickness="0" GridLinesVisibility="Horizontal"
                               RowHeight="44" HeadersVisibility="Column" SelectionMode="Single"

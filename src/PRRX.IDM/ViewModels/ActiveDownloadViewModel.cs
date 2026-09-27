@@ -19,6 +19,7 @@ namespace PRRX.IDM.ViewModels
         private readonly ISegmentedDownloadEngine _downloadEngine;
         private readonly ISystemPowerService _powerService;
         private readonly ICloudIntelligenceService _cloudService;
+        private readonly IHistoryService? _historyService;
 
         private string _url = string.Empty;
         private string _fileName = string.Empty;
@@ -167,7 +168,8 @@ namespace PRRX.IDM.ViewModels
             string? referer = null,
             string? userAgent = null,
             string? cookies = null,
-            Dictionary<string, string>? customHeaders = null)
+            Dictionary<string, string>? customHeaders = null,
+            IHistoryService? historyService = null)
         {
             _url = url;
             _destinationFilePath = destinationFilePath;
@@ -175,6 +177,7 @@ namespace PRRX.IDM.ViewModels
             _downloadEngine = downloadEngine ?? new MultiSegmentDownloader();
             _powerService = powerService ?? new SystemPowerService();
             _cloudService = cloudService ?? new CloudIntelligenceService();
+            _historyService = historyService;
 
             Referer = referer ?? string.Empty;
             UserAgent = userAgent ?? string.Empty;
@@ -314,6 +317,16 @@ namespace PRRX.IDM.ViewModels
 
         private void OnEngineDownloadCompleted(object? sender, string finalPath)
         {
+            long fileLen = 0;
+            try
+            {
+                if (File.Exists(finalPath))
+                {
+                    fileLen = new FileInfo(finalPath).Length;
+                }
+            }
+            catch { }
+
             DispatchToUi(() =>
             {
                 IsCompleted = true;
@@ -321,6 +334,11 @@ namespace PRRX.IDM.ViewModels
                 OverallPercentage = 100.0;
                 TransferRateFormatted = "Finished";
                 TimeLeftFormatted = "00:00";
+                if (fileLen > 0)
+                {
+                    TotalBytes = fileLen;
+                    FileSizeFormatted = FormatBytes(fileLen);
+                }
                 DownloadedFormatted = $"{FileSizeFormatted} ( 100.00 % )";
 
                 foreach (var t in ConnectionThreads)
@@ -345,6 +363,16 @@ namespace PRRX.IDM.ViewModels
                     _powerService.ExecuteCompletionAction(CompletionAction.ExitApplication);
                 }
             });
+
+            // Update history service with accurate completed file size
+            if (fileLen > 0)
+            {
+                try
+                {
+                    _historyService?.UpdateItemCompleted(finalPath, Url, fileLen);
+                }
+                catch { }
+            }
 
             // Post-download community reputation reporting (non-blocking)
             _ = Task.Run(async () =>
