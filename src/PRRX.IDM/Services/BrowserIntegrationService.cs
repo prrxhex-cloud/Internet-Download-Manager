@@ -801,7 +801,7 @@ namespace PRRX.IDM.Services
             {
                 if (!string.IsNullOrWhiteSpace(payload.Cookies))
                 {
-                    MediaEngineService.SaveCachedCookies(payload.Cookies);
+                    MediaEngineService.SaveCachedCookies(payload.Cookies, payload.Url);
                 }
 
                 var vm = new DownloadFileInfoViewModel(

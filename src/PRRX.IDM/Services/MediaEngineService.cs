@@ -10,6 +10,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -99,15 +100,126 @@ namespace PRRX.IDM.Services
         public bool IsCookiesConfigured => !string.IsNullOrWhiteSpace(ActiveCookiesPath) && File.Exists(ActiveCookiesPath);
         public bool IsEngineAvailable => File.Exists(EngineExecutablePath);
 
-        public static void SaveCachedCookies(string cookies)
+        public static string? EnsureNetscapeCookieFormat(string? rawCookieData, string? targetUrl = null)
+        {
+            if (string.IsNullOrWhiteSpace(rawCookieData)) return null;
+
+            var trimmed = rawCookieData.Trim();
+            if (trimmed.StartsWith("# Netscape HTTP Cookie File", StringComparison.OrdinalIgnoreCase) ||
+                trimmed.StartsWith("# HTTP Cookie File", StringComparison.OrdinalIgnoreCase))
+            {
+                return trimmed;
+            }
+
+            // Determine target domain from URL
+            var domain = ".youtube.com";
+            if (!string.IsNullOrWhiteSpace(targetUrl))
+            {
+                try
+                {
+                    if (Uri.TryCreate(targetUrl, UriKind.Absolute, out var uri))
+                    {
+                        var h = uri.Host.TrimStart('.');
+                        if (!string.IsNullOrEmpty(h)) domain = "." + h;
+                    }
+                }
+                catch { }
+            }
+
+            var sb = new StringBuilder();
+            sb.AppendLine("# Netscape HTTP Cookie File");
+            sb.AppendLine("# http://curl.haxx.se/rfc/cookie_spec.html");
+            sb.AppendLine("# Automatically formatted by PRRX IDM");
+            sb.AppendLine();
+
+            var lines = trimmed.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            bool hasValidTabs = lines.Any(l => !l.StartsWith("#") && l.Contains('\t') && l.Split('\t').Length >= 7);
+            if (hasValidTabs)
+            {
+                foreach (var line in lines)
+                {
+                    if (line.StartsWith("#")) continue;
+                    var parts = line.Split('\t');
+                    if (parts.Length >= 7)
+                    {
+                        sb.AppendLine(line);
+                    }
+                }
+                return sb.ToString();
+            }
+
+            // Parse key-value cookie pairs: "name=val; name2=val2" or newline-separated pairs
+            var pairs = trimmed.Split(new[] { ';', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var pair in pairs)
+            {
+                var p = pair.Trim();
+                if (string.IsNullOrWhiteSpace(p) || p.StartsWith("#")) continue;
+
+                var eqIdx = p.IndexOf('=');
+                if (eqIdx <= 0) continue;
+
+                var name = p.Substring(0, eqIdx).Trim();
+                var val = p.Substring(eqIdx + 1).Trim();
+
+                if (string.IsNullOrEmpty(name)) continue;
+
+                if (seen.Add(name))
+                {
+                    sb.AppendLine($"{domain}\tTRUE\t/\tTRUE\t2147483647\t{name}\t{val}");
+                    if (domain.Contains("youtube.com"))
+                    {
+                        sb.AppendLine($".google.com\tTRUE\t/\tTRUE\t2147483647\t{name}\t{val}");
+                    }
+                }
+            }
+
+            if (seen.Count == 0) return null;
+            return sb.ToString();
+        }
+
+        public static void SaveCachedCookies(string cookies, string? targetUrl = null)
         {
             if (string.IsNullOrWhiteSpace(cookies)) return;
             try
             {
+                var netscape = EnsureNetscapeCookieFormat(cookies, targetUrl);
+                if (string.IsNullOrWhiteSpace(netscape)) return;
+
                 var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PRRX.IDM");
                 Directory.CreateDirectory(dir);
                 var cookieFile = Path.Combine(dir, "youtube_cookies.txt");
-                File.WriteAllText(cookieFile, cookies);
+                File.WriteAllText(cookieFile, netscape, Encoding.UTF8);
+            }
+            catch { }
+        }
+
+        private static void ValidateOrRepairCookieFile(string filePath)
+        {
+            try
+            {
+                if (!File.Exists(filePath)) return;
+                var firstLine = "";
+                using (var reader = new StreamReader(filePath, Encoding.UTF8))
+                {
+                    firstLine = reader.ReadLine() ?? "";
+                }
+
+                if (!firstLine.StartsWith("# Netscape", StringComparison.OrdinalIgnoreCase) &&
+                    !firstLine.StartsWith("# HTTP Cookie", StringComparison.OrdinalIgnoreCase))
+                {
+                    var raw = File.ReadAllText(filePath, Encoding.UTF8);
+                    var converted = EnsureNetscapeCookieFormat(raw);
+                    if (!string.IsNullOrWhiteSpace(converted))
+                    {
+                        File.WriteAllText(filePath, converted, Encoding.UTF8);
+                    }
+                    else
+                    {
+                        try { File.Delete(filePath); } catch { }
+                    }
+                }
             }
             catch { }
         }
@@ -117,16 +229,32 @@ namespace PRRX.IDM.Services
             try
             {
                 var appData = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PRRX.IDM", "youtube_cookies.txt");
-                if (File.Exists(appData) && new FileInfo(appData).Length > 0) return appData;
+                if (File.Exists(appData) && new FileInfo(appData).Length > 0)
+                {
+                    ValidateOrRepairCookieFile(appData);
+                    if (File.Exists(appData)) return appData;
+                }
 
                 var appDataAlt = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PRRX.IDM", "cookies.txt");
-                if (File.Exists(appDataAlt) && new FileInfo(appDataAlt).Length > 0) return appDataAlt;
+                if (File.Exists(appDataAlt) && new FileInfo(appDataAlt).Length > 0)
+                {
+                    ValidateOrRepairCookieFile(appDataAlt);
+                    if (File.Exists(appDataAlt)) return appDataAlt;
+                }
 
                 var baseDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "cookies.txt");
-                if (File.Exists(baseDir) && new FileInfo(baseDir).Length > 0) return baseDir;
+                if (File.Exists(baseDir) && new FileInfo(baseDir).Length > 0)
+                {
+                    ValidateOrRepairCookieFile(baseDir);
+                    if (File.Exists(baseDir)) return baseDir;
+                }
 
                 var downloads = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads", "cookies.txt");
-                if (File.Exists(downloads) && new FileInfo(downloads).Length > 0) return downloads;
+                if (File.Exists(downloads) && new FileInfo(downloads).Length > 0)
+                {
+                    ValidateOrRepairCookieFile(downloads);
+                    if (File.Exists(downloads)) return downloads;
+                }
             }
             catch { }
             return null;
@@ -136,18 +264,23 @@ namespace PRRX.IDM.Services
             ProcessStartInfo startInfo,
             string? cookies,
             string? userAgent,
-            out string? tempCookiePath)
+            out string? tempCookiePath,
+            string? targetUrl = null)
         {
             tempCookiePath = null;
             if (!string.IsNullOrWhiteSpace(cookies))
             {
                 try
                 {
-                    tempCookiePath = Path.Combine(Path.GetTempPath(), $"prrx_cookie_{Guid.NewGuid():N}.txt");
-                    File.WriteAllText(tempCookiePath, cookies);
-                    startInfo.ArgumentList.Add("--cookies");
-                    startInfo.ArgumentList.Add(tempCookiePath);
-                    SaveCachedCookies(cookies);
+                    var netscape = EnsureNetscapeCookieFormat(cookies, targetUrl);
+                    if (!string.IsNullOrWhiteSpace(netscape))
+                    {
+                        tempCookiePath = Path.Combine(Path.GetTempPath(), $"prrx_cookie_{Guid.NewGuid():N}.txt");
+                        File.WriteAllText(tempCookiePath, netscape, Encoding.UTF8);
+                        startInfo.ArgumentList.Add("--cookies");
+                        startInfo.ArgumentList.Add(tempCookiePath);
+                        SaveCachedCookies(netscape, targetUrl);
+                    }
                 }
                 catch { }
             }
@@ -327,6 +460,11 @@ namespace PRRX.IDM.Services
                 startInfo.ArgumentList.Add("--js-runtimes");
                 startInfo.ArgumentList.Add($"node:{nodeExe}");
             }
+            else
+            {
+                startInfo.ArgumentList.Add("--js-runtimes");
+                startInfo.ArgumentList.Add("node");
+            }
 
             // Approximate date for tab playlists
             startInfo.ArgumentList.Add("--extractor-args");
@@ -428,9 +566,9 @@ namespace PRRX.IDM.Services
             startInfo.ArgumentList.Add("--no-warnings");
             startInfo.ArgumentList.Add("--no-check-certificates");
             startInfo.ArgumentList.Add("--socket-timeout");
-            startInfo.ArgumentList.Add("4");
+            startInfo.ArgumentList.Add("10");
             startInfo.ArgumentList.Add("--retries");
-            startInfo.ArgumentList.Add("2");
+            startInfo.ArgumentList.Add("3");
 
             if (!string.IsNullOrWhiteSpace(FfmpegDirectoryPath))
             {
@@ -444,17 +582,22 @@ namespace PRRX.IDM.Services
                 startInfo.ArgumentList.Add("--js-runtimes");
                 startInfo.ArgumentList.Add($"node:{nodeExe}");
             }
+            else
+            {
+                startInfo.ArgumentList.Add("--js-runtimes");
+                startInfo.ArgumentList.Add("node");
+            }
 
             startInfo.ArgumentList.Add("--extractor-args");
             startInfo.ArgumentList.Add("youtubetab:approximate_date");
 
             string? tempCookiePath = null;
-            AttachCookiesAndUserAgent(startInfo, cookies, userAgent, out tempCookiePath);
+            AttachCookiesAndUserAgent(startInfo, cookies, userAgent, out tempCookiePath, safeUrl);
 
             startInfo.ArgumentList.Add(safeUrl);
 
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            linkedCts.CancelAfter(TimeSpan.FromMilliseconds(8000));
+            linkedCts.CancelAfter(TimeSpan.FromMilliseconds(15000));
 
             using var process = new Process { StartInfo = startInfo };
             process.Start();
@@ -708,7 +851,7 @@ namespace PRRX.IDM.Services
             AttachCommonArguments(startInfo);
 
             string? tempCookiePath = null;
-            AttachCookiesAndUserAgent(startInfo, cookies, userAgent, out tempCookiePath);
+            AttachCookiesAndUserAgent(startInfo, cookies, userAgent, out tempCookiePath, safeUrl);
 
             startInfo.ArgumentList.Add("-o");
             startInfo.ArgumentList.Add(outputTemplate);
@@ -886,7 +1029,7 @@ namespace PRRX.IDM.Services
             AttachCommonArguments(startInfo);
 
             string? tempCookiePath = null;
-            AttachCookiesAndUserAgent(startInfo, cookies, userAgent, out tempCookiePath);
+            AttachCookiesAndUserAgent(startInfo, cookies, userAgent, out tempCookiePath, isLocalFile ? null : sourceUrlOrPath);
 
             startInfo.ArgumentList.Add("-o");
             startInfo.ArgumentList.Add(outputTemplate);
