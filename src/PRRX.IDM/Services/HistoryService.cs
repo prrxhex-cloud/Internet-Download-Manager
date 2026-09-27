@@ -274,23 +274,49 @@ namespace PRRX.IDM.Services
         {
             try
             {
+                var targetName = Path.GetFileName(targetFilePath);
+                var targetBase = Path.GetFileNameWithoutExtension(targetFilePath);
+
                 var match = System.Linq.Enumerable.FirstOrDefault(HistoryItems, i =>
                     (!string.IsNullOrEmpty(targetFilePath) && string.Equals(i.TargetFilePath, targetFilePath, StringComparison.OrdinalIgnoreCase)) ||
-                    (!string.IsNullOrEmpty(url) && string.Equals(i.Url, url, StringComparison.OrdinalIgnoreCase)));
+                    (!string.IsNullOrEmpty(url) && string.Equals(i.Url, url, StringComparison.OrdinalIgnoreCase)) ||
+                    (!string.IsNullOrEmpty(i.TargetFilePath) && !string.IsNullOrEmpty(targetName) && string.Equals(Path.GetFileName(i.TargetFilePath), targetName, StringComparison.OrdinalIgnoreCase)) ||
+                    (!string.IsNullOrEmpty(i.TargetFilePath) && !string.IsNullOrEmpty(targetBase) && string.Equals(Path.GetFileNameWithoutExtension(i.TargetFilePath), targetBase, StringComparison.OrdinalIgnoreCase)));
+
+                long resolvedSize = actualSizeBytes ?? 0;
+                if (resolvedSize <= 0 && File.Exists(targetFilePath))
+                {
+                    try { resolvedSize = new FileInfo(targetFilePath).Length; } catch { }
+                }
 
                 if (match != null)
                 {
                     match.Status = DownloadStatus.Completed;
                     match.CompletedAt = DateTime.UtcNow;
-                    if (actualSizeBytes.HasValue && actualSizeBytes.Value > 0)
+                    if (resolvedSize > 0)
                     {
-                        match.FileSizeFormatted = FormatBytes(actualSizeBytes.Value);
+                        match.FileSizeFormatted = FormatBytes(resolvedSize);
                     }
-                    else if (File.Exists(targetFilePath))
+                    if (File.Exists(targetFilePath))
                     {
-                        var len = new FileInfo(targetFilePath).Length;
-                        if (len > 0) match.FileSizeFormatted = FormatBytes(len);
+                        match.TargetFilePath = targetFilePath;
                     }
+                    SaveHistory();
+                }
+                else if (File.Exists(targetFilePath))
+                {
+                    var item = new DownloadItem
+                    {
+                        Title = Path.GetFileName(targetFilePath),
+                        Url = url ?? string.Empty,
+                        TargetFilePath = targetFilePath,
+                        FileSizeFormatted = resolvedSize > 0 ? FormatBytes(resolvedSize) : "Completed",
+                        Status = DownloadStatus.Completed,
+                        CompletedAt = DateTime.UtcNow,
+                        CreatedAt = DateTime.UtcNow,
+                        Type = FileCategoryHelper.DetectMediaType(targetFilePath)
+                    };
+                    HistoryItems.Insert(0, item);
                     SaveHistory();
                 }
             }

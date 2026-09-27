@@ -199,12 +199,24 @@ namespace PRRX.IDM.Services
 
                         var progressReporter = new Progress<DownloadProgressReport>(report =>
                         {
-                            var totalBytesEst = _totalBytes > 0 ? _totalBytes : (isAudio ? 15 * 1024 * 1024 : 45 * 1024 * 1024);
+                            var totalBytesEst = _totalBytes > 0 ? _totalBytes : (isAudio ? 18_500_000L : 42_000_000L);
+                            if (!string.IsNullOrWhiteSpace(report.TotalSize))
+                            {
+                                var parsed = ParseSizeStringToBytes(report.TotalSize);
+                                if (parsed > 0)
+                                {
+                                    totalBytesEst = parsed;
+                                    _totalBytes = parsed;
+                                }
+                            }
+
                             var currentBytes = report.Percentage > 0 ? (long)(report.Percentage / 100.0 * totalBytesEst) : 0;
+                            _totalDownloadedBytes = currentBytes;
+
                             ProgressChanged?.Invoke(this, new SegmentProgressEventArgs
                             {
                                 OverallPercentage = report.Percentage,
-                                TotalBytes = _totalBytes > 0 ? _totalBytes : -1,
+                                TotalBytes = totalBytesEst,
                                 DownloadedBytes = currentBytes,
                                 TransferRateFormatted = string.IsNullOrWhiteSpace(report.Speed) ? "Streaming..." : report.Speed,
                                 TimeLeftFormatted = string.IsNullOrWhiteSpace(report.Eta) ? "--:--" : report.Eta,
@@ -233,34 +245,37 @@ namespace PRRX.IDM.Services
                         IsRunning = false;
                         if (success)
                         {
-                            // Verify output file exists and is not empty
-                            if (File.Exists(destinationFilePath) && new FileInfo(destinationFilePath).Length > 0)
-                            {
-                                PRRX.IDM.Security.SecurityGuard.ApplyMarkOfTheWeb(destinationFilePath, url, referer);
-                                ReportProgress("Complete - Downloaded successfully");
-                                DownloadCompleted?.Invoke(this, destinationFilePath);
-                                return true;
-                            }
-                            else
+                            var finalPath = File.Exists(destinationFilePath) && new FileInfo(destinationFilePath).Length > 0
+                                ? destinationFilePath
+                                : null;
+
+                            if (finalPath == null && Directory.Exists(outDir))
                             {
                                 var baseName = Path.GetFileNameWithoutExtension(destinationFilePath);
-                                if (Directory.Exists(outDir))
+                                var match = Directory.GetFiles(outDir, $"{baseName}.*")
+                                    .OrderByDescending(f => File.GetLastWriteTimeUtc(f))
+                                    .FirstOrDefault();
+                                if (match != null && new FileInfo(match).Length > 0)
                                 {
-                                    var match = Directory.GetFiles(outDir, $"{baseName}.*")
-                                        .OrderByDescending(f => File.GetLastWriteTimeUtc(f))
-                                        .FirstOrDefault();
-                                    if (match != null && new FileInfo(match).Length > 0)
-                                    {
-                                        try { File.Move(match, destinationFilePath, true); } catch { }
-                                        if (File.Exists(destinationFilePath))
-                                        {
-                                            PRRX.IDM.Security.SecurityGuard.ApplyMarkOfTheWeb(destinationFilePath, url, referer);
-                                            ReportProgress("Complete - Downloaded successfully");
-                                            DownloadCompleted?.Invoke(this, destinationFilePath);
-                                            return true;
-                                        }
-                                    }
+                                    try { File.Move(match, destinationFilePath, true); } catch { }
+                                    if (File.Exists(destinationFilePath)) finalPath = destinationFilePath;
+                                    else finalPath = match;
                                 }
+                            }
+
+                            if (finalPath != null && File.Exists(finalPath))
+                            {
+                                var fi = new FileInfo(finalPath);
+                                if (fi.Length > 0)
+                                {
+                                    _totalBytes = fi.Length;
+                                    _totalDownloadedBytes = fi.Length;
+                                }
+
+                                PRRX.IDM.Security.SecurityGuard.ApplyMarkOfTheWeb(finalPath, url, referer);
+                                ReportProgress("Complete - Downloaded successfully");
+                                DownloadCompleted?.Invoke(this, finalPath);
+                                return true;
                             }
                         }
 
@@ -702,6 +717,42 @@ namespace PRRX.IDM.Services
                     }
                 }
             }
+        }
+
+        private static long ParseSizeStringToBytes(string sizeStr)
+        {
+            if (string.IsNullOrWhiteSpace(sizeStr)) return 0;
+            try
+            {
+                var clean = sizeStr.Trim();
+                double multiplier = 1;
+                if (clean.EndsWith("GiB", StringComparison.OrdinalIgnoreCase) || clean.EndsWith("GB", StringComparison.OrdinalIgnoreCase))
+                {
+                    multiplier = 1024.0 * 1024.0 * 1024.0;
+                    clean = clean.Replace("GiB", "", StringComparison.OrdinalIgnoreCase).Replace("GB", "", StringComparison.OrdinalIgnoreCase).Trim();
+                }
+                else if (clean.EndsWith("MiB", StringComparison.OrdinalIgnoreCase) || clean.EndsWith("MB", StringComparison.OrdinalIgnoreCase))
+                {
+                    multiplier = 1024.0 * 1024.0;
+                    clean = clean.Replace("MiB", "", StringComparison.OrdinalIgnoreCase).Replace("MB", "", StringComparison.OrdinalIgnoreCase).Trim();
+                }
+                else if (clean.EndsWith("KiB", StringComparison.OrdinalIgnoreCase) || clean.EndsWith("KB", StringComparison.OrdinalIgnoreCase))
+                {
+                    multiplier = 1024.0;
+                    clean = clean.Replace("KiB", "", StringComparison.OrdinalIgnoreCase).Replace("KB", "", StringComparison.OrdinalIgnoreCase).Trim();
+                }
+                else if (clean.EndsWith("B", StringComparison.OrdinalIgnoreCase))
+                {
+                    clean = clean.Replace("B", "", StringComparison.OrdinalIgnoreCase).Trim();
+                }
+
+                if (double.TryParse(clean, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var num))
+                {
+                    return (long)(num * multiplier);
+                }
+            }
+            catch { }
+            return 0;
         }
 
         private static string FormatBytes(long bytes)

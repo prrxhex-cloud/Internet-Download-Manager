@@ -33,6 +33,7 @@ namespace PRRX.IDM
         private IHistoryService? _historyService;
         private IBrowserIntegrationService? _browserService;
         private ITelegramBotSyncService? _telegramBotSyncService;
+        private int _deferredServicesInitialized = 0;
 
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         private static extern bool SetForegroundWindow(IntPtr hWnd);
@@ -203,45 +204,8 @@ namespace PRRX.IDM
                     }), DispatcherPriority.Send);
                 };
 
-                _ = System.Threading.Tasks.Task.Run(async () =>
-                {
-                    try
-                    {
-                        await _telegramBotSyncService.InitializeAsync();
-                        if (_configService.CurrentConfig.IsTelegramBotSyncEnabled)
-                        {
-                            _telegramBotSyncService.Start();
-                            await _telegramBotSyncService.HydratePendingTasksAsync();
-                        }
-                    }
-                    catch { }
-                });
-
-                // Auto-register Chrome and Edge Native Messaging in background to prevent startup I/O lag
-                _ = System.Threading.Tasks.Task.Run(() =>
-                {
-                    try { _browserService.RegisterBrowserHost(); } catch { }
-                });
-                _browserService.StartIpcServer();
-
-                // Auto-clean post-update cache, temp build archives, and stale binary swap files in background
-                _ = System.Threading.Tasks.Task.Run(async () =>
-                {
-                    try
-                    {
-                        await _updateService.CleanupPostUpdateArtifactsAsync();
-                    }
-                    catch
-                    {
-                        // Non-critical background cleanup
-                    }
-                });
-
                 // Initial global theme application
                 _themeService.ApplyTheme(_configService.CurrentConfig.ThemeMode);
-
-                // Initialize continuous memory trimming & working set compaction
-                MemoryOptimizer.InitializeAutoTrimmer();
 
                 // Detect any startup payload or URL from command line
                 string? pendingPayloadJson = null;
@@ -309,42 +273,7 @@ namespace PRRX.IDM
                     }
                 }
 
-                // Onboarding Wizard check on first run
-                if (!_configService.CurrentConfig.IsOnboardingCompleted)
-                {
-                    if (!hasStartupPayload && !isSilentLaunch)
-                    {
-                        var onboardingVm = new OnboardingViewModel(_configService, _themeService, _browserService);
-                        var onboardingWindow = new OnboardingWindow(onboardingVm);
-
-                        _themeService.ApplyTheme(_configService.CurrentConfig.ThemeMode, onboardingWindow);
-
-                        onboardingWindow.ShowDialog();
-
-                        _configService.CurrentConfig.IsOnboardingCompleted = true;
-                        _configService.CurrentConfig.HasCompletedQuickTour = true;
-                        _configService.SaveConfig();
-                    }
-                }
-
-                // First-time Interactive Quick Tour / Setup Guide check
-                if (!_configService.CurrentConfig.HasCompletedQuickTour)
-                {
-                    if (!hasStartupPayload && !isSilentLaunch)
-                    {
-                        var tourVm = new QuickTourViewModel(_configService, _themeService);
-                        var tourWindow = new QuickTourWindow(tourVm);
-
-                        _themeService.ApplyTheme(_configService.CurrentConfig.ThemeMode, tourWindow);
-
-                        tourWindow.ShowDialog();
-
-                        _configService.CurrentConfig.HasCompletedQuickTour = true;
-                        _configService.SaveConfig();
-                    }
-                }
-
-                // Launch Main Application Window
+                // Launch Main Application Window instantly (<150ms)
                 var mainVm = new MainViewModel(
                     _configService,
                     _themeService,
@@ -386,6 +315,16 @@ namespace PRRX.IDM
 
                 _themeService.ApplyTheme(_configService.CurrentConfig.ThemeMode, mainWindow);
 
+                // Defer heavy background services (LAN P2P, update checks, Telegram bot sync, Native messaging host validation)
+                // so they initialize strictly AFTER the main window renders (<150ms instant display)
+                mainWindow.ContentRendered += (_, _) =>
+                {
+                    Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        InitializeDeferredServices(hasStartupPayload, isSilentLaunch);
+                    }), DispatcherPriority.Background);
+                };
+
                 if (!hasStartupPayload && !isSilentLaunch)
                 {
                     mainWindow.Show();
@@ -396,6 +335,7 @@ namespace PRRX.IDM
                     mainWindow.Visibility = Visibility.Hidden;
                     mainWindow.ShowInTaskbar = false;
                     System.Threading.Tasks.Task.Delay(600).ContinueWith(_ => MemoryOptimizer.TrimMemory());
+                    InitializeDeferredServices(hasStartupPayload, isSilentLaunch);
                 }
             }
             catch (Exception ex)
@@ -434,6 +374,127 @@ namespace PRRX.IDM
                     "PRRX IDM Critical Notice",
                     MessageBoxButton.OK,
                     MessageBoxImage.Error);
+            }
+        }
+
+        private void InitializeDeferredServices(bool hasStartupPayload, bool isSilentLaunch)
+        {
+            if (System.Threading.Interlocked.Exchange(ref _deferredServicesInitialized, 1) != 0)
+            {
+                return;
+            }
+
+            // 1. Start IPC Server for browser extension communications
+            try
+            {
+                _browserService?.StartIpcServer();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Deferred Services] IPC Server start error: {ex.Message}");
+            }
+
+            // 2. Initialize continuous memory trimming & working set compaction
+            try
+            {
+                MemoryOptimizer.InitializeAutoTrimmer();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Deferred Services] Memory trimmer error: {ex.Message}");
+            }
+
+            // 3. Register Browser Native Messaging Host in background
+            _ = System.Threading.Tasks.Task.Run(() =>
+            {
+                try
+                {
+                    _browserService?.RegisterBrowserHost();
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[Deferred Services] Browser host registration error: {ex.Message}");
+                }
+            });
+
+            // 4. Telegram Bot Sync Service initialization and pending task hydration
+            _ = System.Threading.Tasks.Task.Run(async () =>
+            {
+                try
+                {
+                    if (_telegramBotSyncService != null)
+                    {
+                        await _telegramBotSyncService.InitializeAsync();
+                        if (_configService?.CurrentConfig.IsTelegramBotSyncEnabled == true)
+                        {
+                            _telegramBotSyncService.Start();
+                            await _telegramBotSyncService.HydratePendingTasksAsync();
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[Deferred Services] Telegram sync error: {ex.Message}");
+                }
+            });
+
+            // 5. Post-update artifacts cleanup in background
+            _ = System.Threading.Tasks.Task.Run(async () =>
+            {
+                try
+                {
+                    if (_updateService != null)
+                    {
+                        await _updateService.CleanupPostUpdateArtifactsAsync();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[Deferred Services] Cleanup error: {ex.Message}");
+                }
+            });
+
+            // 6. Onboarding Wizard & Quick Tour on first run (UI thread idle)
+            if (!hasStartupPayload && !isSilentLaunch && _configService != null)
+            {
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    try
+                    {
+                        if (!_configService.CurrentConfig.IsOnboardingCompleted)
+                        {
+                            if (_themeService != null && _browserService != null)
+                            {
+                                var onboardingVm = new OnboardingViewModel(_configService, _themeService, _browserService);
+                                var onboardingWindow = new OnboardingWindow(onboardingVm);
+                                _themeService.ApplyTheme(_configService.CurrentConfig.ThemeMode, onboardingWindow);
+                                onboardingWindow.ShowDialog();
+
+                                _configService.CurrentConfig.IsOnboardingCompleted = true;
+                                _configService.CurrentConfig.HasCompletedQuickTour = true;
+                                _configService.SaveConfig();
+                            }
+                        }
+
+                        if (!_configService.CurrentConfig.HasCompletedQuickTour)
+                        {
+                            if (_themeService != null)
+                            {
+                                var tourVm = new QuickTourViewModel(_configService, _themeService);
+                                var tourWindow = new QuickTourWindow(tourVm);
+                                _themeService.ApplyTheme(_configService.CurrentConfig.ThemeMode, tourWindow);
+                                tourWindow.ShowDialog();
+
+                                _configService.CurrentConfig.HasCompletedQuickTour = true;
+                                _configService.SaveConfig();
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"[Deferred Services] Onboarding/Tour error: {ex.Message}");
+                    }
+                }), DispatcherPriority.ApplicationIdle);
             }
         }
 

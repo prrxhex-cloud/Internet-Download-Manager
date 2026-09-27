@@ -177,7 +177,7 @@ namespace PRRX.IDM.ViewModels
             _downloadEngine = downloadEngine ?? new MultiSegmentDownloader();
             _powerService = powerService ?? new SystemPowerService();
             _cloudService = cloudService ?? new CloudIntelligenceService();
-            _historyService = historyService;
+            _historyService = historyService ?? new HistoryService();
 
             Referer = referer ?? string.Empty;
             UserAgent = userAgent ?? string.Empty;

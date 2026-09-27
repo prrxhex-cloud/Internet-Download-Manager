@@ -195,16 +195,25 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
                             <DataGridTemplateColumn Header="Actions" Width="130">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
-                                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                                            <ui:Button Icon="{ui:SymbolIcon Symbol=Play24}" Height="28" Width="28" Margin="0,0,4,0"
+                                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                            <ui:Button Width="32" Height="30" Padding="0" Margin="0,0,4,0"
+                                                       Appearance="Secondary"
                                                        Command="{Binding DataContext.PlayFileCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
-                                                       CommandParameter="{Binding}" ToolTip="Open Downloaded File"/>
-                                            <ui:Button Icon="{ui:SymbolIcon Symbol=FolderOpen24}" Height="28" Width="28" Margin="0,0,4,0"
+                                                       CommandParameter="{Binding}" ToolTip="Open File">
+                                                <ui:SymbolIcon Symbol="FolderOpen24" FontSize="15"/>
+                                            </ui:Button>
+                                            <ui:Button Width="32" Height="30" Padding="0" Margin="0,0,4,0"
+                                                       Appearance="Secondary"
                                                        Command="{Binding DataContext.ShowInFolderCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
-                                                       CommandParameter="{Binding}" ToolTip="Open Containing Folder"/>
-                                            <ui:Button Icon="{ui:SymbolIcon Symbol=Delete24}" Height="28" Width="28"
+                                                       CommandParameter="{Binding}" ToolTip="Open Containing Folder">
+                                                <ui:SymbolIcon Symbol="Folder24" FontSize="15"/>
+                                            </ui:Button>
+                                            <ui:Button Width="32" Height="30" Padding="0"
+                                                       Appearance="Danger"
                                                        Command="{Binding DataContext.DeleteHistoryItemCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
-                                                       CommandParameter="{Binding}" ToolTip="Remove From History"/>
+                                                       CommandParameter="{Binding}" ToolTip="Delete from History">
+                                                <ui:SymbolIcon Symbol="Delete24" FontSize="15"/>
+                                            </ui:Button>
                                         </StackPanel>
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>

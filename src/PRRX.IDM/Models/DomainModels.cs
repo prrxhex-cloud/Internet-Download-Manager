@@ -310,6 +310,12 @@ namespace PRRX.IDM.Models
                 _ => FileCategory.General
             };
         }
+
+        public static MediaType DetectMediaType(string fileNameOrUrl)
+        {
+            var cat = DetectCategory(fileNameOrUrl);
+            return cat == FileCategory.Music ? MediaType.Audio : MediaType.Video;
+        }
     }
 
     public enum CompletionAction

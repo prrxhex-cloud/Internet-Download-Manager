@@ -747,6 +747,19 @@ namespace PRRX.IDM.ViewModels
 
             if (MediaEngineService.IsStreamingUrl(url))
             {
+                var isAudioTarget = SelectedCategory == FileCategory.Music ||
+                    url.Contains("music", StringComparison.OrdinalIgnoreCase) ||
+                    url.Contains("soundcloud", StringComparison.OrdinalIgnoreCase);
+                var defaultEstimate = isAudioTarget ? "~ 18.5 MB" : "~ 42.0 MB";
+                var defaultBytes = isAudioTarget ? 18_500_000L : 42_000_000L;
+
+                // Immediately display estimated size based on category rather than showing "Unknown" or getting stuck
+                if (!_detectedBytes.HasValue || _detectedBytes.Value <= 0)
+                {
+                    _detectedBytes = defaultBytes;
+                    FileSizeFormatted = defaultEstimate;
+                }
+
                 lock (_probeLock)
                 {
                     if (_activeProbeTask != null && !_activeProbeTask.IsCompleted && _activeProbeUrl == url)
@@ -763,7 +776,6 @@ namespace PRRX.IDM.ViewModels
                     {
                         DispatchToUi(() =>
                         {
-                            FileSizeFormatted = "Analyzing stream...";
                             IsProbing = true;
                         });
 
@@ -785,23 +797,24 @@ namespace PRRX.IDM.ViewModels
                                     SelectedCategory = probeResult.IsMusic ? FileCategory.Music : FileCategory.Video;
                                 }
 
-                                if (probeResult.Formats.Count > 0 && !string.IsNullOrWhiteSpace(probeResult.Formats[0].EstimatedSizeFormatted))
+                                var firstFormat = probeResult.Formats.Count > 0 ? probeResult.Formats[0] : null;
+                                if (firstFormat != null && !string.IsNullOrWhiteSpace(firstFormat.EstimatedSizeFormatted))
                                 {
-                                    FileSizeFormatted = probeResult.Formats[0].EstimatedSizeFormatted;
-                                    if (probeResult.DurationSeconds > 0)
-                                    {
-                                        _detectedBytes = (long)(probeResult.DurationSeconds * (SelectedCategory == FileCategory.Music ? 320 * 1024 / 8 : 2.5 * 1024 * 1024 / 8));
-                                    }
+                                    FileSizeFormatted = firstFormat.EstimatedSizeFormatted;
+                                    _detectedBytes = firstFormat.FileSizeBytes ?? (long)(probeResult.DurationSeconds > 0
+                                        ? (probeResult.DurationSeconds * (probeResult.IsMusic ? 320 * 1000 / 8 : 2500 * 1000 / 8))
+                                        : defaultBytes);
                                 }
                                 else if (probeResult.DurationSeconds > 0)
                                 {
-                                    var approxMb = probeResult.DurationSeconds * (SelectedCategory == FileCategory.Music ? 0.32 / 8.0 : 1.8 / 8.0);
-                                    FileSizeFormatted = $"~ {approxMb:F1} MB";
-                                    _detectedBytes = (long)(approxMb * 1024 * 1024);
+                                    var approxBytes = (long)(probeResult.DurationSeconds * (probeResult.IsMusic ? 320 * 1000 / 8 : 2000 * 1000 / 8));
+                                    FileSizeFormatted = MediaEngineService.FormatBytes(approxBytes);
+                                    _detectedBytes = approxBytes;
                                 }
                                 else
                                 {
-                                    FileSizeFormatted = "Dynamic Stream (Ready)";
+                                    FileSizeFormatted = defaultEstimate;
+                                    _detectedBytes = defaultBytes;
                                 }
 
                                 AutoPopulateDescription(probeResult.Title);
@@ -812,14 +825,12 @@ namespace PRRX.IDM.ViewModels
                         {
                             DispatchToUi(() =>
                             {
-                                if (!string.IsNullOrWhiteSpace(error) && error.Contains("unavailable", StringComparison.OrdinalIgnoreCase))
+                                // On timeout, error, or unavailable: fallback gracefully to category estimate
+                                if (!_detectedBytes.HasValue || _detectedBytes.Value <= 0)
                                 {
-                                    FileSizeFormatted = "Unavailable on server";
+                                    _detectedBytes = defaultBytes;
                                 }
-                                else
-                                {
-                                    FileSizeFormatted = "Dynamic Media Stream";
-                                }
+                                FileSizeFormatted = defaultEstimate;
                                 IsProbing = false;
                             });
                         }

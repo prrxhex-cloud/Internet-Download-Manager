@@ -262,8 +262,6 @@ namespace PRRX.IDM.Services
 
             startInfo.ArgumentList.Add("--hls-use-mpegts"); // Seamless fragment demuxing without MP4 container lock delays
             startInfo.ArgumentList.Add("--no-part"); // Direct streaming into destination without locking .part files
-            startInfo.ArgumentList.Add("--file-allocation");
-            startInfo.ArgumentList.Add("none"); // Eliminates Windows file-allocation pauses
 
             startInfo.ArgumentList.Add("--buffer-size");
             startInfo.ArgumentList.Add("8M"); // 8MB high-throughput buffer
@@ -276,6 +274,17 @@ namespace PRRX.IDM.Services
             startInfo.ArgumentList.Add("10");
             startInfo.ArgumentList.Add("--fragment-retries");
             startInfo.ArgumentList.Add("10");
+            startInfo.ArgumentList.Add("--no-warnings");
+            startInfo.ArgumentList.Add("--no-check-certificates");
+        }
+
+        public static string FormatBytes(long bytes)
+        {
+            if (bytes <= 0) return "Unknown";
+            if (bytes >= 1024L * 1024L * 1024L) return $"~ {(bytes / (1024.0 * 1024.0 * 1024.0)):F1} GB";
+            if (bytes >= 1024L * 1024L) return $"~ {(bytes / (1024.0 * 1024.0)):F1} MB";
+            if (bytes >= 1024L) return $"~ {(bytes / 1024.0):F1} KB";
+            return $"{bytes} B";
         }
 
         public async Task<(MediaProbeResult? Result, string? ErrorMessage)> ProbeMediaAsync(string url, CancellationToken cancellationToken = default)
@@ -334,20 +343,60 @@ namespace PRRX.IDM.Services
                 CreateNoWindow = true
             };
 
-            startInfo.ArgumentList.Add("--dump-single-json");
-            startInfo.ArgumentList.Add("--no-warnings");
+            startInfo.ArgumentList.Add("--dump-json");
             startInfo.ArgumentList.Add("--no-playlist");
-            
-            AttachCommonArguments(startInfo);
+            startInfo.ArgumentList.Add("--skip-download");
+            startInfo.ArgumentList.Add("--no-warnings");
+            startInfo.ArgumentList.Add("--no-check-certificates");
+            startInfo.ArgumentList.Add("--socket-timeout");
+            startInfo.ArgumentList.Add("3");
+            startInfo.ArgumentList.Add("--retries");
+            startInfo.ArgumentList.Add("2");
+
+            if (!string.IsNullOrWhiteSpace(FfmpegDirectoryPath))
+            {
+                startInfo.ArgumentList.Add("--ffmpeg-location");
+                startInfo.ArgumentList.Add(FfmpegDirectoryPath);
+            }
+
+            var nodeExe = FindNodeJsExecutable();
+            if (!string.IsNullOrWhiteSpace(nodeExe))
+            {
+                startInfo.ArgumentList.Add("--js-runtimes");
+                startInfo.ArgumentList.Add($"node:{nodeExe}");
+            }
+
+            startInfo.ArgumentList.Add("--extractor-args");
+            startInfo.ArgumentList.Add("youtube:player_client=android,ios,web_creator");
+            startInfo.ArgumentList.Add("--extractor-args");
+            startInfo.ArgumentList.Add("youtubetab:approximate_date");
+
             startInfo.ArgumentList.Add(safeUrl);
+
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            linkedCts.CancelAfter(TimeSpan.FromMilliseconds(3500));
 
             using var process = new Process { StartInfo = startInfo };
             process.Start();
 
-            var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-            var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
+            var outputTask = process.StandardOutput.ReadToEndAsync(linkedCts.Token);
+            var errorTask = process.StandardError.ReadToEndAsync(linkedCts.Token);
 
-            await process.WaitForExitAsync(cancellationToken);
+            try
+            {
+                await process.WaitForExitAsync(linkedCts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                try { if (!process.HasExited) process.Kill(true); } catch { }
+                return (null, "Probe timed out after 3.5s");
+            }
+            catch (Exception ex)
+            {
+                try { if (!process.HasExited) process.Kill(true); } catch { }
+                return (null, ex.Message);
+            }
+
             var json = await outputTask;
             var err = await errorTask;
 
@@ -395,6 +444,29 @@ namespace PRRX.IDM.Services
                 var durSeconds = root.TryGetProperty("duration", out var durProp) ? durProp.GetDouble() : 0;
                 var durFormatted = FormatDuration(durSeconds);
 
+                // Filesize or approximate filesize at root
+                long rootFileSize = 0;
+                if (root.TryGetProperty("filesize", out var fsProp) && fsProp.ValueKind == JsonValueKind.Number)
+                {
+                    rootFileSize = fsProp.GetInt64();
+                }
+                else if (root.TryGetProperty("filesize_approx", out var fsaProp) && fsaProp.ValueKind == JsonValueKind.Number)
+                {
+                    rootFileSize = fsaProp.GetInt64();
+                }
+
+                // Bitrate (tbr / abr / vbr in kbps)
+                double rootTbr = 0;
+                if (root.TryGetProperty("tbr", out var tbrProp) && tbrProp.ValueKind == JsonValueKind.Number)
+                {
+                    rootTbr = tbrProp.GetDouble();
+                }
+
+                if (rootFileSize <= 0 && durSeconds > 0 && rootTbr > 0)
+                {
+                    rootFileSize = (long)(durSeconds * (rootTbr * 1000.0 / 8.0));
+                }
+
                 // Description
                 var description = root.TryGetProperty("description", out var descProp) ? descProp.GetString() ?? "" : "";
                 if (description.Length > 280)
@@ -436,13 +508,35 @@ namespace PRRX.IDM.Services
                 };
 
                 // Standard available resolutions with estimated file sizes
-                var baseDur = durSeconds > 0 ? durSeconds : 200.0;
-                result.Formats.Add(new MediaFormat { FormatId = "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best", Resolution = "1080p Full HD", Extension = "mp4", EstimatedSizeFormatted = $"~ {(baseDur * 2.8 / 8.0):F1} MB", HasVideo = true, HasAudio = true });
-                result.Formats.Add(new MediaFormat { FormatId = "bestvideo[height<=720]+bestaudio/best[height<=720]/best", Resolution = "720p HD", Extension = "mp4", EstimatedSizeFormatted = $"~ {(baseDur * 1.5 / 8.0):F1} MB", HasVideo = true, HasAudio = true });
-                result.Formats.Add(new MediaFormat { FormatId = "bestvideo[height<=480]+bestaudio/best[height<=480]/best", Resolution = "480p", Extension = "mp4", EstimatedSizeFormatted = $"~ {(baseDur * 0.8 / 8.0):F1} MB", HasVideo = true, HasAudio = true });
-                result.Formats.Add(new MediaFormat { FormatId = "bestvideo[height<=360]+bestaudio/best[height<=360]/best", Resolution = "360p", Extension = "mp4", EstimatedSizeFormatted = $"~ {(baseDur * 0.45 / 8.0):F1} MB", HasVideo = true, HasAudio = true });
-                result.Formats.Add(new MediaFormat { FormatId = "bestvideo[height<=240]+bestaudio/best[height<=240]/best", Resolution = "240p", Extension = "mp4", EstimatedSizeFormatted = $"~ {(baseDur * 0.25 / 8.0):F1} MB", HasVideo = true, HasAudio = true });
-                result.Formats.Add(new MediaFormat { FormatId = "bestvideo[height<=144]+bestaudio/best[height<=144]/best", Resolution = "144p", Extension = "mp4", EstimatedSizeFormatted = $"~ {(baseDur * 0.12 / 8.0):F1} MB", HasVideo = true, HasAudio = true });
+                var baseDur = durSeconds > 0 ? durSeconds : (isMusic ? 210.0 : 240.0);
+                long size1080 = rootFileSize > 0 ? rootFileSize : (long)(baseDur * 2.8 * 1024 * 1024 / 8.0);
+                long size720 = (long)(baseDur * 1.5 * 1024 * 1024 / 8.0);
+                long size480 = (long)(baseDur * 0.8 * 1024 * 1024 / 8.0);
+                long size360 = (long)(baseDur * 0.45 * 1024 * 1024 / 8.0);
+                long size240 = (long)(baseDur * 0.25 * 1024 * 1024 / 8.0);
+                long size144 = (long)(baseDur * 0.12 * 1024 * 1024 / 8.0);
+                long sizeAudio = (long)(baseDur * 0.32 * 1024 * 1024 / 8.0);
+
+                if (isMusic)
+                {
+                    result.Formats.Add(new MediaFormat
+                    {
+                        FormatId = "ba/b",
+                        Resolution = "High Quality Audio (320 kbps)",
+                        Extension = "mp3",
+                        FileSizeBytes = sizeAudio,
+                        EstimatedSizeFormatted = FormatBytes(sizeAudio),
+                        HasVideo = false,
+                        HasAudio = true
+                    });
+                }
+
+                result.Formats.Add(new MediaFormat { FormatId = "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best", Resolution = "1080p Full HD", Extension = "mp4", FileSizeBytes = size1080, EstimatedSizeFormatted = FormatBytes(size1080), HasVideo = true, HasAudio = true });
+                result.Formats.Add(new MediaFormat { FormatId = "bestvideo[height<=720]+bestaudio/best[height<=720]/best", Resolution = "720p HD", Extension = "mp4", FileSizeBytes = size720, EstimatedSizeFormatted = FormatBytes(size720), HasVideo = true, HasAudio = true });
+                result.Formats.Add(new MediaFormat { FormatId = "bestvideo[height<=480]+bestaudio/best[height<=480]/best", Resolution = "480p", Extension = "mp4", FileSizeBytes = size480, EstimatedSizeFormatted = FormatBytes(size480), HasVideo = true, HasAudio = true });
+                result.Formats.Add(new MediaFormat { FormatId = "bestvideo[height<=360]+bestaudio/best[height<=360]/best", Resolution = "360p", Extension = "mp4", FileSizeBytes = size360, EstimatedSizeFormatted = FormatBytes(size360), HasVideo = true, HasAudio = true });
+                result.Formats.Add(new MediaFormat { FormatId = "bestvideo[height<=240]+bestaudio/best[height<=240]/best", Resolution = "240p", Extension = "mp4", FileSizeBytes = size240, EstimatedSizeFormatted = FormatBytes(size240), HasVideo = true, HasAudio = true });
+                result.Formats.Add(new MediaFormat { FormatId = "bestvideo[height<=144]+bestaudio/best[height<=144]/best", Resolution = "144p", Extension = "mp4", FileSizeBytes = size144, EstimatedSizeFormatted = FormatBytes(size144), HasVideo = true, HasAudio = true });
 
                 MemoryOptimizer.TrimMemory();
                 return (result, null);
