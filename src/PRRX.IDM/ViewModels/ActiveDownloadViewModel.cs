@@ -202,11 +202,15 @@ namespace PRRX.IDM.ViewModels
                 {
                     _downloadEngine.Resume();
                     IsPaused = false;
+                    StatusText = "Resuming download...";
                 }
                 else
                 {
                     _downloadEngine.Pause();
                     IsPaused = true;
+                    StatusText = "Paused";
+                    TransferRateFormatted = "0 KB/s";
+                    TimeLeftFormatted = "--:--";
                 }
             });
 
@@ -278,6 +282,13 @@ namespace PRRX.IDM.ViewModels
             DispatchToUi(() =>
             {
                 if (IsCompleted) return;
+                if (IsPaused)
+                {
+                    StatusText = "Paused";
+                    TransferRateFormatted = "0 KB/s";
+                    TimeLeftFormatted = "--:--";
+                    return;
+                }
 
                 OverallPercentage = e.OverallPercentage;
                 TotalBytes = e.TotalBytes > 0 ? e.TotalBytes : 1;
@@ -424,6 +435,7 @@ namespace PRRX.IDM.ViewModels
         {
             DispatchToUi(() =>
             {
+                if (IsPaused || IsCompleted) return;
                 StatusText = $"Error: {error}";
             });
         }

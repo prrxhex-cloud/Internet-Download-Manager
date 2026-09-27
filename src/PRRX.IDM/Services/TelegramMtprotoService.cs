@@ -56,8 +56,8 @@ namespace PRRX.IDM.Services
                     {
                         var tcp = new System.Net.Sockets.TcpClient();
                         tcp.NoDelay = true;
-                        tcp.SendBufferSize = 1024 * 1024;
-                        tcp.ReceiveBufferSize = 1024 * 1024;
+                        tcp.SendBufferSize = 2 * 1024 * 1024;
+                        tcp.ReceiveBufferSize = 2 * 1024 * 1024;
                         await tcp.ConnectAsync(host, port);
                         return tcp;
                     },
@@ -68,7 +68,7 @@ namespace PRRX.IDM.Services
 
                 try
                 {
-                    client.ParallelTransfers = 16;
+                    client.ParallelTransfers = 32;
                 }
                 catch { }
 

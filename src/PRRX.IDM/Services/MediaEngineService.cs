@@ -108,7 +108,23 @@ namespace PRRX.IDM.Services
             if (trimmed.StartsWith("# Netscape HTTP Cookie File", StringComparison.OrdinalIgnoreCase) ||
                 trimmed.StartsWith("# HTTP Cookie File", StringComparison.OrdinalIgnoreCase))
             {
-                return trimmed;
+                var nLines = trimmed.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                var validLines = new StringBuilder();
+                validLines.AppendLine("# Netscape HTTP Cookie File");
+                validLines.AppendLine("# http://curl.haxx.se/rfc/cookie_spec.html");
+                validLines.AppendLine();
+                int validCount = 0;
+                foreach (var line in nLines)
+                {
+                    if (line.StartsWith("#")) continue;
+                    var parts = line.Split('\t');
+                    if (parts.Length >= 7)
+                    {
+                        validLines.AppendLine(line);
+                        validCount++;
+                    }
+                }
+                return validCount > 0 ? validLines.ToString() : null;
             }
 
             // Determine target domain from URL
@@ -120,7 +136,14 @@ namespace PRRX.IDM.Services
                     if (Uri.TryCreate(targetUrl, UriKind.Absolute, out var uri))
                     {
                         var h = uri.Host.TrimStart('.');
-                        if (!string.IsNullOrEmpty(h)) domain = "." + h;
+                        if (h.EndsWith("youtube.com", StringComparison.OrdinalIgnoreCase))
+                        {
+                            domain = ".youtube.com";
+                        }
+                        else if (!string.IsNullOrEmpty(h))
+                        {
+                            domain = "." + h;
+                        }
                     }
                 }
                 catch { }
@@ -136,6 +159,7 @@ namespace PRRX.IDM.Services
             bool hasValidTabs = lines.Any(l => !l.StartsWith("#") && l.Contains('\t') && l.Split('\t').Length >= 7);
             if (hasValidTabs)
             {
+                int validCount = 0;
                 foreach (var line in lines)
                 {
                     if (line.StartsWith("#")) continue;
@@ -143,9 +167,10 @@ namespace PRRX.IDM.Services
                     if (parts.Length >= 7)
                     {
                         sb.AppendLine(line);
+                        validCount++;
                     }
                 }
-                return sb.ToString();
+                return validCount > 0 ? sb.ToString() : null;
             }
 
             // Parse key-value cookie pairs: "name=val; name2=val2" or newline-separated pairs
@@ -160,8 +185,8 @@ namespace PRRX.IDM.Services
                 var eqIdx = p.IndexOf('=');
                 if (eqIdx <= 0) continue;
 
-                var name = p.Substring(0, eqIdx).Trim();
-                var val = p.Substring(eqIdx + 1).Trim();
+                var name = p.Substring(0, eqIdx).Trim().Replace("\t", "").Replace("\r", "").Replace("\n", "");
+                var val = p.Substring(eqIdx + 1).Trim().Replace("\t", "").Replace("\r", "").Replace("\n", "");
 
                 if (string.IsNullOrEmpty(name)) continue;
 
@@ -179,6 +204,8 @@ namespace PRRX.IDM.Services
             return sb.ToString();
         }
 
+        private static readonly Encoding Utf8NoBom = new UTF8Encoding(false);
+
         public static void SaveCachedCookies(string cookies, string? targetUrl = null)
         {
             if (string.IsNullOrWhiteSpace(cookies)) return;
@@ -190,7 +217,7 @@ namespace PRRX.IDM.Services
                 var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PRRX.IDM");
                 Directory.CreateDirectory(dir);
                 var cookieFile = Path.Combine(dir, "youtube_cookies.txt");
-                File.WriteAllText(cookieFile, netscape, Encoding.UTF8);
+                File.WriteAllText(cookieFile, netscape, Utf8NoBom);
             }
             catch { }
         }
@@ -200,25 +227,36 @@ namespace PRRX.IDM.Services
             try
             {
                 if (!File.Exists(filePath)) return;
-                var firstLine = "";
-                using (var reader = new StreamReader(filePath, Encoding.UTF8))
+                var rawBytes = File.ReadAllBytes(filePath);
+                if (rawBytes.Length == 0) return;
+
+                // Strip UTF-8 BOM if present (0xEF, 0xBB, 0xBF)
+                int startOffset = 0;
+                if (rawBytes.Length >= 3 && rawBytes[0] == 0xEF && rawBytes[1] == 0xBB && rawBytes[2] == 0xBF)
                 {
-                    firstLine = reader.ReadLine() ?? "";
+                    startOffset = 3;
                 }
+
+                var text = Utf8NoBom.GetString(rawBytes, startOffset, rawBytes.Length - startOffset);
+                var firstLine = text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? "";
 
                 if (!firstLine.StartsWith("# Netscape", StringComparison.OrdinalIgnoreCase) &&
                     !firstLine.StartsWith("# HTTP Cookie", StringComparison.OrdinalIgnoreCase))
                 {
-                    var raw = File.ReadAllText(filePath, Encoding.UTF8);
-                    var converted = EnsureNetscapeCookieFormat(raw);
+                    var converted = EnsureNetscapeCookieFormat(text);
                     if (!string.IsNullOrWhiteSpace(converted))
                     {
-                        File.WriteAllText(filePath, converted, Encoding.UTF8);
+                        File.WriteAllText(filePath, converted, Utf8NoBom);
                     }
                     else
                     {
                         try { File.Delete(filePath); } catch { }
                     }
+                }
+                else if (startOffset > 0)
+                {
+                    // Re-save without BOM
+                    File.WriteAllText(filePath, text, Utf8NoBom);
                 }
             }
             catch { }
@@ -265,9 +303,20 @@ namespace PRRX.IDM.Services
             string? cookies,
             string? userAgent,
             out string? tempCookiePath,
-            string? targetUrl = null)
+            string? targetUrl = null,
+            bool bypassCookies = false)
         {
             tempCookiePath = null;
+            if (bypassCookies || string.Equals(cookies, "NONE", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!string.IsNullOrWhiteSpace(userAgent))
+                {
+                    startInfo.ArgumentList.Add("--user-agent");
+                    startInfo.ArgumentList.Add(userAgent);
+                }
+                return;
+            }
+
             if (!string.IsNullOrWhiteSpace(cookies))
             {
                 try
@@ -276,7 +325,7 @@ namespace PRRX.IDM.Services
                     if (!string.IsNullOrWhiteSpace(netscape))
                     {
                         tempCookiePath = Path.Combine(Path.GetTempPath(), $"prrx_cookie_{Guid.NewGuid():N}.txt");
-                        File.WriteAllText(tempCookiePath, netscape, Encoding.UTF8);
+                        File.WriteAllText(tempCookiePath, netscape, Utf8NoBom);
                         startInfo.ArgumentList.Add("--cookies");
                         startInfo.ArgumentList.Add(tempCookiePath);
                         SaveCachedCookies(netscape, targetUrl);
@@ -466,9 +515,9 @@ namespace PRRX.IDM.Services
                 startInfo.ArgumentList.Add("node");
             }
 
-            // Approximate date for tab playlists
+            // Multi-client extraction (Android, Web, TV, iOS) to bypass bot blocks and SABR issues
             startInfo.ArgumentList.Add("--extractor-args");
-            startInfo.ArgumentList.Add("youtubetab:approximate_date");
+            startInfo.ArgumentList.Add("youtube:player_client=android,web,tv,ios;youtubetab:approximate_date");
 
             // Multi-Connection Turbo Speed Acceleration
             var connections = Math.Clamp(_configService?.CurrentConfig.TurboConnectionCount ?? 32, 8, 64);
@@ -551,89 +600,63 @@ namespace PRRX.IDM.Services
                 }
             }
 
-            var startInfo = new ProcessStartInfo
-            {
-                FileName = EngineExecutablePath,
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true
-            };
-
-            startInfo.ArgumentList.Add("--dump-json");
-            startInfo.ArgumentList.Add("--no-playlist");
-            startInfo.ArgumentList.Add("--skip-download");
-            startInfo.ArgumentList.Add("--no-warnings");
-            startInfo.ArgumentList.Add("--no-check-certificates");
-            startInfo.ArgumentList.Add("--socket-timeout");
-            startInfo.ArgumentList.Add("10");
-            startInfo.ArgumentList.Add("--retries");
-            startInfo.ArgumentList.Add("3");
-
-            if (!string.IsNullOrWhiteSpace(FfmpegDirectoryPath))
-            {
-                startInfo.ArgumentList.Add("--ffmpeg-location");
-                startInfo.ArgumentList.Add(FfmpegDirectoryPath);
-            }
-
-            var nodeExe = FindNodeJsExecutable();
-            if (!string.IsNullOrWhiteSpace(nodeExe))
-            {
-                startInfo.ArgumentList.Add("--js-runtimes");
-                startInfo.ArgumentList.Add($"node:{nodeExe}");
-            }
-            else
-            {
-                startInfo.ArgumentList.Add("--js-runtimes");
-                startInfo.ArgumentList.Add("node");
-            }
-
-            startInfo.ArgumentList.Add("--extractor-args");
-            startInfo.ArgumentList.Add("youtubetab:approximate_date");
-
-            string? tempCookiePath = null;
-            AttachCookiesAndUserAgent(startInfo, cookies, userAgent, out tempCookiePath, safeUrl);
-
-            startInfo.ArgumentList.Add(safeUrl);
-
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            linkedCts.CancelAfter(TimeSpan.FromMilliseconds(15000));
+            linkedCts.CancelAfter(TimeSpan.FromMilliseconds(25000));
 
-            using var process = new Process { StartInfo = startInfo };
-            process.Start();
-
-            var outputTask = process.StandardOutput.ReadToEndAsync(linkedCts.Token);
-            var errorTask = process.StandardError.ReadToEndAsync(linkedCts.Token);
+            string json = "";
+            string err = "";
+            int exitCode = -1;
 
             try
             {
-                await process.WaitForExitAsync(linkedCts.Token);
+                var extract = await ExecuteYtDlpJsonExtractionAsync(safeUrl, cookies, userAgent, linkedCts.Token, bypassCookies: false);
+                json = extract.Json;
+                err = extract.Error;
+                exitCode = extract.ExitCode;
             }
             catch (OperationCanceledException)
             {
-                try { if (!process.HasExited) process.Kill(true); } catch { }
-                return (null, "Probe timed out after 8s");
+                return (null, "Probe timed out after 25s");
             }
             catch (Exception ex)
             {
-                try { if (!process.HasExited) process.Kill(true); } catch { }
                 return (null, ex.Message);
             }
-            finally
+
+            // Automatic fallback without cookies if cookie/bot check caused failure
+            if ((string.IsNullOrWhiteSpace(json) || exitCode != 0) && (!string.IsNullOrWhiteSpace(cookies) || IsCookiesConfigured) && !linkedCts.IsCancellationRequested)
             {
-                try { if (!string.IsNullOrWhiteSpace(tempCookiePath) && File.Exists(tempCookiePath)) File.Delete(tempCookiePath); } catch { }
+                try
+                {
+                    var fallback = await ExecuteYtDlpJsonExtractionAsync(safeUrl, null, userAgent, linkedCts.Token, bypassCookies: true);
+                    if (!string.IsNullOrWhiteSpace(fallback.Json) && fallback.ExitCode == 0)
+                    {
+                        json = fallback.Json;
+                        err = fallback.Error;
+                        exitCode = fallback.ExitCode;
+
+                        // Clean up bad cookie file
+                        try
+                        {
+                            var cached = GetBestAvailableCookiesFile();
+                            if (!string.IsNullOrWhiteSpace(cached) && File.Exists(cached))
+                            {
+                                File.Delete(cached);
+                            }
+                        }
+                        catch { }
+                    }
+                }
+                catch { }
             }
 
-            var json = await outputTask;
-            var err = await errorTask;
-
-            if (string.IsNullOrWhiteSpace(json) || process.ExitCode != 0)
+            if (string.IsNullOrWhiteSpace(json) || exitCode != 0)
             {
                 var cleanErr = !string.IsNullOrWhiteSpace(err) ? err.Trim() : "Could not retrieve media details.";
                 if (cleanErr.Contains("Sign in to confirm you're not a bot", StringComparison.OrdinalIgnoreCase) || 
                     cleanErr.Contains("LOGIN_REQUIRED", StringComparison.OrdinalIgnoreCase))
                 {
-                    cleanErr = "YouTube Bot Protection: Click 'Export All Cookies' in extension and load in Settings.";
+                    cleanErr = "YouTube Bot Protection: Video requires fresh verification cookies.";
                 }
                 else if (cleanErr.Contains("ERROR: ", StringComparison.OrdinalIgnoreCase))
                 {
@@ -710,8 +733,8 @@ namespace PRRX.IDM.Services
 
                 var isMusic = !string.IsNullOrWhiteSpace(artist) || !string.IsNullOrWhiteSpace(track) || 
                               title.Contains("remix", StringComparison.OrdinalIgnoreCase) || 
-                              title.Contains("official music video", StringComparison.OrdinalIgnoreCase) ||
-                              title.Contains("song", StringComparison.OrdinalIgnoreCase) ||
+                              title.Contains("official music video", StringComparison.OrdinalIgnoreCase) || 
+                              title.Contains("song", StringComparison.OrdinalIgnoreCase) || 
                               title.Contains("audio", StringComparison.OrdinalIgnoreCase);
 
                 var musicianName = !string.IsNullOrWhiteSpace(artist) ? artist : (!string.IsNullOrWhiteSpace(creator) ? creator : publisherName);
@@ -734,36 +757,31 @@ namespace PRRX.IDM.Services
                     Genre = genre ?? (isMusic ? "Music / Entertainment" : "Video")
                 };
 
-                // Standard available resolutions with estimated file sizes
-                var baseDur = durSeconds > 0 ? durSeconds : (isMusic ? 210.0 : 240.0);
-                long size1080 = rootFileSize > 0 ? rootFileSize : (long)(baseDur * 2.8 * 1024 * 1024 / 8.0);
-                long size720 = (long)(baseDur * 1.5 * 1024 * 1024 / 8.0);
-                long size480 = (long)(baseDur * 0.8 * 1024 * 1024 / 8.0);
-                long size360 = (long)(baseDur * 0.45 * 1024 * 1024 / 8.0);
-                long size240 = (long)(baseDur * 0.25 * 1024 * 1024 / 8.0);
-                long size144 = (long)(baseDur * 0.12 * 1024 * 1024 / 8.0);
-                long sizeAudio = (long)(baseDur * 0.32 * 1024 * 1024 / 8.0);
+                // Compute real format sizes directly from yt-dlp formats metadata
+                var (bestAudioSize, bestAudioBitrate) = ExtractBestAudioMetrics(root, durSeconds);
+                var realFormats = ExtractFormatsWithRealSizes(root, durSeconds, isMusic, bestAudioSize, bestAudioBitrate, rootFileSize);
 
-                if (isMusic)
+                if (realFormats.Count > 0)
                 {
-                    result.Formats.Add(new MediaFormat
+                    foreach (var rf in realFormats)
                     {
-                        FormatId = "ba/b",
-                        Resolution = "High Quality Audio (320 kbps)",
-                        Extension = "mp3",
-                        FileSizeBytes = sizeAudio,
-                        EstimatedSizeFormatted = FormatBytes(sizeAudio),
-                        HasVideo = false,
-                        HasAudio = true
-                    });
+                        result.Formats.Add(rf);
+                    }
                 }
+                else
+                {
+                    // Fallback to reasonable bitrates if formats array empty
+                    var baseDur = durSeconds > 0 ? durSeconds : (isMusic ? 210.0 : 240.0);
+                    long size1080 = rootFileSize > 0 ? rootFileSize : (long)(baseDur * 2.8 * 1024 * 1024 / 8.0);
+                    long size720 = (long)(baseDur * 1.5 * 1024 * 1024 / 8.0);
+                    long size480 = (long)(baseDur * 0.8 * 1024 * 1024 / 8.0);
+                    long size360 = (long)(baseDur * 0.45 * 1024 * 1024 / 8.0);
 
-                result.Formats.Add(new MediaFormat { FormatId = "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best", Resolution = "1080p Full HD", Extension = "mp4", FileSizeBytes = size1080, EstimatedSizeFormatted = FormatBytes(size1080), HasVideo = true, HasAudio = true });
-                result.Formats.Add(new MediaFormat { FormatId = "bestvideo[height<=720]+bestaudio/best[height<=720]/best", Resolution = "720p HD", Extension = "mp4", FileSizeBytes = size720, EstimatedSizeFormatted = FormatBytes(size720), HasVideo = true, HasAudio = true });
-                result.Formats.Add(new MediaFormat { FormatId = "bestvideo[height<=480]+bestaudio/best[height<=480]/best", Resolution = "480p", Extension = "mp4", FileSizeBytes = size480, EstimatedSizeFormatted = FormatBytes(size480), HasVideo = true, HasAudio = true });
-                result.Formats.Add(new MediaFormat { FormatId = "bestvideo[height<=360]+bestaudio/best[height<=360]/best", Resolution = "360p", Extension = "mp4", FileSizeBytes = size360, EstimatedSizeFormatted = FormatBytes(size360), HasVideo = true, HasAudio = true });
-                result.Formats.Add(new MediaFormat { FormatId = "bestvideo[height<=240]+bestaudio/best[height<=240]/best", Resolution = "240p", Extension = "mp4", FileSizeBytes = size240, EstimatedSizeFormatted = FormatBytes(size240), HasVideo = true, HasAudio = true });
-                result.Formats.Add(new MediaFormat { FormatId = "bestvideo[height<=144]+bestaudio/best[height<=144]/best", Resolution = "144p", Extension = "mp4", FileSizeBytes = size144, EstimatedSizeFormatted = FormatBytes(size144), HasVideo = true, HasAudio = true });
+                    result.Formats.Add(new MediaFormat { FormatId = "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best", Resolution = "1080p Full HD", Extension = "mp4", FileSizeBytes = size1080, EstimatedSizeFormatted = FormatBytes(size1080), HasVideo = true, HasAudio = true });
+                    result.Formats.Add(new MediaFormat { FormatId = "bestvideo[height<=720]+bestaudio/best[height<=720]/best", Resolution = "720p HD", Extension = "mp4", FileSizeBytes = size720, EstimatedSizeFormatted = FormatBytes(size720), HasVideo = true, HasAudio = true });
+                    result.Formats.Add(new MediaFormat { FormatId = "bestvideo[height<=480]+bestaudio/best[height<=480]/best", Resolution = "480p", Extension = "mp4", FileSizeBytes = size480, EstimatedSizeFormatted = FormatBytes(size480), HasVideo = true, HasAudio = true });
+                    result.Formats.Add(new MediaFormat { FormatId = "bestvideo[height<=360]+bestaudio/best[height<=360]/best", Resolution = "360p", Extension = "mp4", FileSizeBytes = size360, EstimatedSizeFormatted = FormatBytes(size360), HasVideo = true, HasAudio = true });
+                }
 
                 MemoryOptimizer.TrimMemory();
                 return (result, null);
@@ -772,6 +790,273 @@ namespace PRRX.IDM.Services
             {
                 return (null, ex.Message);
             }
+        }
+
+        private async Task<(string Json, string Error, int ExitCode)> ExecuteYtDlpJsonExtractionAsync(
+            string safeUrl,
+            string? cookiesToUse,
+            string? userAgentToUse,
+            CancellationToken token,
+            bool bypassCookies = false)
+        {
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = EngineExecutablePath,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            };
+
+            startInfo.ArgumentList.Add("--dump-json");
+            startInfo.ArgumentList.Add("--no-playlist");
+            startInfo.ArgumentList.Add("--skip-download");
+            startInfo.ArgumentList.Add("--no-warnings");
+            startInfo.ArgumentList.Add("--no-check-certificates");
+            startInfo.ArgumentList.Add("--socket-timeout");
+            startInfo.ArgumentList.Add("10");
+            startInfo.ArgumentList.Add("--retries");
+            startInfo.ArgumentList.Add("3");
+
+            if (!string.IsNullOrWhiteSpace(FfmpegDirectoryPath))
+            {
+                startInfo.ArgumentList.Add("--ffmpeg-location");
+                startInfo.ArgumentList.Add(FfmpegDirectoryPath);
+            }
+
+            var nodeExe = FindNodeJsExecutable();
+            if (!string.IsNullOrWhiteSpace(nodeExe))
+            {
+                startInfo.ArgumentList.Add("--js-runtimes");
+                startInfo.ArgumentList.Add($"node:{nodeExe}");
+            }
+            else
+            {
+                startInfo.ArgumentList.Add("--js-runtimes");
+                startInfo.ArgumentList.Add("node");
+            }
+
+            // Multi-client extraction (Android, Web, TV, iOS) to bypass bot blocks and SABR issues
+            startInfo.ArgumentList.Add("--extractor-args");
+            startInfo.ArgumentList.Add("youtube:player_client=android,web,tv,ios;youtubetab:approximate_date");
+
+            string? tempCookiePath = null;
+            AttachCookiesAndUserAgent(startInfo, cookiesToUse, userAgentToUse, out tempCookiePath, safeUrl, bypassCookies);
+
+            startInfo.ArgumentList.Add(safeUrl);
+
+            using var process = new Process { StartInfo = startInfo };
+            process.Start();
+
+            var outputTask = process.StandardOutput.ReadToEndAsync(token);
+            var errorTask = process.StandardError.ReadToEndAsync(token);
+
+            try
+            {
+                await process.WaitForExitAsync(token);
+            }
+            catch
+            {
+                try { if (!process.HasExited) process.Kill(true); } catch { }
+                throw;
+            }
+            finally
+            {
+                try { if (!string.IsNullOrWhiteSpace(tempCookiePath) && File.Exists(tempCookiePath)) File.Delete(tempCookiePath); } catch { }
+            }
+
+            return (await outputTask, await errorTask, process.ExitCode);
+        }
+
+        private static (long AudioSize, double AudioBitrate) ExtractBestAudioMetrics(JsonElement root, double durSeconds)
+        {
+            long maxAudioSize = 0;
+            double maxAudioBitrate = 0;
+
+            if (root.TryGetProperty("formats", out var formatsProp) && formatsProp.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var fmt in formatsProp.EnumerateArray())
+                {
+                    var vcodec = fmt.TryGetProperty("vcodec", out var vc) ? vc.GetString() : null;
+                    var acodec = fmt.TryGetProperty("acodec", out var ac) ? ac.GetString() : null;
+
+                    bool isAudioOnly = (string.Equals(vcodec, "none", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(vcodec)) &&
+                                       !string.Equals(acodec, "none", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(acodec);
+
+                    if (isAudioOnly)
+                    {
+                        long size = 0;
+                        if (fmt.TryGetProperty("filesize", out var fs) && fs.ValueKind == JsonValueKind.Number && fs.GetInt64() > 0)
+                        {
+                            size = fs.GetInt64();
+                        }
+                        else if (fmt.TryGetProperty("filesize_approx", out var fsa) && fsa.ValueKind == JsonValueKind.Number && fsa.GetInt64() > 0)
+                        {
+                            size = fsa.GetInt64();
+                        }
+
+                        double abr = 0;
+                        if (fmt.TryGetProperty("abr", out var abProp) && abProp.ValueKind == JsonValueKind.Number)
+                        {
+                            abr = abProp.GetDouble();
+                        }
+                        else if (fmt.TryGetProperty("tbr", out var tbProp) && tbProp.ValueKind == JsonValueKind.Number)
+                        {
+                            abr = tbProp.GetDouble();
+                        }
+
+                        if (size <= 0 && abr > 0 && durSeconds > 0)
+                        {
+                            size = (long)(durSeconds * abr * 1000.0 / 8.0);
+                        }
+
+                        if (size > maxAudioSize) maxAudioSize = size;
+                        if (abr > maxAudioBitrate) maxAudioBitrate = abr;
+                    }
+                }
+            }
+
+            if (maxAudioSize <= 0 && durSeconds > 0)
+            {
+                maxAudioBitrate = 128.0;
+                maxAudioSize = (long)(durSeconds * 128.0 * 1000.0 / 8.0);
+            }
+
+            return (maxAudioSize, maxAudioBitrate);
+        }
+
+        private static List<MediaFormat> ExtractFormatsWithRealSizes(
+            JsonElement root,
+            double durSeconds,
+            bool isMusic,
+            long bestAudioSize,
+            double bestAudioBitrate,
+            long rootFileSize)
+        {
+            var results = new List<MediaFormat>();
+            var targetResolutions = new[] { 2160, 1440, 1080, 720, 480, 360, 240, 144 };
+
+            if (isMusic || bestAudioSize > 0)
+            {
+                var audioBytes = bestAudioSize > 0 ? bestAudioSize : (durSeconds > 0 ? (long)(durSeconds * 320 * 1000 / 8.0) : 10_000_000L);
+                results.Add(new MediaFormat
+                {
+                    FormatId = "ba/b",
+                    Resolution = "High Quality Audio (320 kbps)",
+                    Extension = "mp3",
+                    FileSizeBytes = audioBytes,
+                    EstimatedSizeFormatted = FormatBytes(audioBytes),
+                    HasVideo = false,
+                    HasAudio = true
+                });
+            }
+
+            if (root.TryGetProperty("formats", out var formatsProp) && formatsProp.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var targetH in targetResolutions)
+                {
+                    long bestStreamSize = 0;
+                    bool matched = false;
+
+                    foreach (var fmt in formatsProp.EnumerateArray())
+                    {
+                        int height = 0;
+                        if (fmt.TryGetProperty("height", out var hProp) && hProp.ValueKind == JsonValueKind.Number)
+                        {
+                            height = hProp.GetInt32();
+                        }
+
+                        if (height <= 0) continue;
+
+                        if (Math.Abs(height - targetH) <= 8 || (targetH == 720 && height is >= 700 and <= 720) || (targetH == 1080 && height is >= 1000 and <= 1080))
+                        {
+                            matched = true;
+                            var vcodec = fmt.TryGetProperty("vcodec", out var vc) ? vc.GetString() : null;
+                            var acodec = fmt.TryGetProperty("acodec", out var ac) ? ac.GetString() : null;
+
+                            bool isVideoOnly = !string.Equals(vcodec, "none", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(vcodec) &&
+                                               (string.Equals(acodec, "none", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(acodec));
+
+                            long fmtSize = 0;
+                            if (fmt.TryGetProperty("filesize", out var fs) && fs.ValueKind == JsonValueKind.Number && fs.GetInt64() > 0)
+                            {
+                                fmtSize = fs.GetInt64();
+                            }
+                            else if (fmt.TryGetProperty("filesize_approx", out var fsa) && fsa.ValueKind == JsonValueKind.Number && fsa.GetInt64() > 0)
+                            {
+                                fmtSize = fsa.GetInt64();
+                            }
+
+                            double vbr = 0;
+                            if (fmt.TryGetProperty("vbr", out var vbProp) && vbProp.ValueKind == JsonValueKind.Number)
+                            {
+                                vbr = vbProp.GetDouble();
+                            }
+                            else if (fmt.TryGetProperty("tbr", out var tbProp) && tbProp.ValueKind == JsonValueKind.Number)
+                            {
+                                vbr = tbProp.GetDouble();
+                            }
+
+                            if (fmtSize <= 0 && vbr > 0 && durSeconds > 0)
+                            {
+                                fmtSize = (long)(durSeconds * vbr * 1000.0 / 8.0);
+                            }
+
+                            if (isVideoOnly && fmtSize > 0)
+                            {
+                                fmtSize += bestAudioSize;
+                            }
+
+                            if (fmtSize > bestStreamSize)
+                            {
+                                bestStreamSize = fmtSize;
+                            }
+                        }
+                    }
+
+                    if (matched || targetH is 1080 or 720 or 480 or 360)
+                    {
+                        if (bestStreamSize <= 0)
+                        {
+                            var baseDur = durSeconds > 0 ? durSeconds : 240.0;
+                            double bitrateKbps = targetH switch
+                            {
+                                2160 => 9000,
+                                1440 => 5500,
+                                1080 => 2800,
+                                720 => 1600,
+                                480 => 850,
+                                360 => 450,
+                                240 => 250,
+                                _ => 120
+                            };
+                            bestStreamSize = (long)(baseDur * bitrateKbps * 1000.0 / 8.0);
+                        }
+
+                        var label = targetH switch
+                        {
+                            2160 => "4K UHD (2160p)",
+                            1440 => "2K QHD (1440p)",
+                            1080 => "1080p Full HD",
+                            720 => "720p HD",
+                            _ => $"{targetH}p"
+                        };
+
+                        results.Add(new MediaFormat
+                        {
+                            FormatId = $"bestvideo[height<={targetH}]+bestaudio/best[height<={targetH}]/best",
+                            Resolution = label,
+                            Extension = "mp4",
+                            FileSizeBytes = bestStreamSize,
+                            EstimatedSizeFormatted = FormatBytes(bestStreamSize),
+                            HasVideo = true,
+                            HasAudio = true
+                        });
+                    }
+                }
+            }
+
+            return results;
         }
 
         private static string FormatViewCount(long views)
@@ -887,7 +1172,15 @@ namespace PRRX.IDM.Services
                 process.BeginOutputReadLine();
                 process.BeginErrorReadLine();
 
-                await process.WaitForExitAsync(cancellationToken);
+                try
+                {
+                    await process.WaitForExitAsync(cancellationToken);
+                }
+                catch
+                {
+                    try { if (!process.HasExited) process.Kill(true); } catch { }
+                    throw;
+                }
 
                 if (process.ExitCode == 0 && !string.IsNullOrWhiteSpace(destinationFilePath) && !File.Exists(destinationFilePath))
                 {
@@ -912,6 +1205,36 @@ namespace PRRX.IDM.Services
                         }
                     }
                     catch { }
+                }
+
+                if (process.ExitCode != 0 && !cancellationToken.IsCancellationRequested && (!string.IsNullOrWhiteSpace(cookies) || IsCookiesConfigured))
+                {
+                    try
+                    {
+                        var cached = GetBestAvailableCookiesFile();
+                        if (!string.IsNullOrWhiteSpace(cached) && File.Exists(cached))
+                        {
+                            File.Delete(cached);
+                        }
+                    }
+                    catch { }
+
+                    progress?.Report(new DownloadProgressReport
+                    {
+                        Percentage = 5.0,
+                        StatusMessage = "Retrying download with multi-client bypass (no cookies)..."
+                    });
+
+                    return await DownloadVideoAsync(
+                        url,
+                        formatId,
+                        outputDirectory,
+                        progress,
+                        cancellationToken,
+                        targetContainer,
+                        destinationFilePath,
+                        cookies: "NONE",
+                        userAgent: userAgent);
                 }
 
                 MemoryOptimizer.TrimMemory();
@@ -1078,7 +1401,15 @@ namespace PRRX.IDM.Services
                 process.BeginOutputReadLine();
                 process.BeginErrorReadLine();
 
-                await process.WaitForExitAsync(cancellationToken);
+                try
+                {
+                    await process.WaitForExitAsync(cancellationToken);
+                }
+                catch
+                {
+                    try { if (!process.HasExited) process.Kill(true); } catch { }
+                    throw;
+                }
 
                 if (process.ExitCode == 0 && !string.IsNullOrWhiteSpace(destinationFilePath) && !File.Exists(destinationFilePath))
                 {
@@ -1127,6 +1458,37 @@ namespace PRRX.IDM.Services
                     {
                         // Fall through
                     }
+                }
+
+                if (process.ExitCode != 0 && !cancellationToken.IsCancellationRequested && !isLocalFile && (!string.IsNullOrWhiteSpace(cookies) || IsCookiesConfigured))
+                {
+                    try
+                    {
+                        var cached = GetBestAvailableCookiesFile();
+                        if (!string.IsNullOrWhiteSpace(cached) && File.Exists(cached))
+                        {
+                            File.Delete(cached);
+                        }
+                    }
+                    catch { }
+
+                    progress?.Report(new DownloadProgressReport
+                    {
+                        Percentage = 5.0,
+                        StatusMessage = "Retrying audio extraction with multi-client bypass (no cookies)..."
+                    });
+
+                    return await ConvertAudioAsync(
+                        sourceUrlOrPath,
+                        targetFormat,
+                        qualityOrBitrate,
+                        outputDirectory,
+                        trimRingtone,
+                        progress,
+                        cancellationToken,
+                        destinationFilePath,
+                        cookies: "NONE",
+                        userAgent: userAgent);
                 }
 
                 MemoryOptimizer.TrimMemory();
@@ -1266,7 +1628,15 @@ namespace PRRX.IDM.Services
             using var process = new Process { StartInfo = startInfo };
             process.Start();
 
-            await process.WaitForExitAsync(cancellationToken);
+            try
+            {
+                await process.WaitForExitAsync(cancellationToken);
+            }
+            catch
+            {
+                try { if (!process.HasExited) process.Kill(true); } catch { }
+                throw;
+            }
 
             if (process.ExitCode == 0)
             {
@@ -1383,7 +1753,15 @@ namespace PRRX.IDM.Services
                 var outTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
                 var errTask = process.StandardError.ReadToEndAsync(cancellationToken);
 
-                await process.WaitForExitAsync(cancellationToken);
+                try
+                {
+                    await process.WaitForExitAsync(cancellationToken);
+                }
+                catch
+                {
+                    try { if (!process.HasExited) process.Kill(true); } catch { }
+                    throw;
+                }
 
                 var output = (await outTask).Trim();
                 var error = (await errTask).Trim();

@@ -61,9 +61,10 @@ namespace PRRX.IDM.Services
 
         private static readonly HttpClient HttpClient = new(new SocketsHttpHandler
         {
+            ConnectTimeout = TimeSpan.FromSeconds(15),
             PooledConnectionLifetime = TimeSpan.FromMinutes(15),
             PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2),
-            MaxConnectionsPerServer = 128,
+            MaxConnectionsPerServer = 64,
             EnableMultipleHttp2Connections = true,
             InitialHttp2StreamWindowSize = 8 * 1024 * 1024,
             AutomaticDecompression = System.Net.DecompressionMethods.None,
@@ -82,12 +83,22 @@ namespace PRRX.IDM.Services
 
         private CancellationTokenSource? _cts;
         private ManualResetEventSlim _pauseEvent = new(true);
+        private readonly SemaphoreSlim _downloadLock = new(1, 1);
         private readonly List<DownloadConnectionThread> _threads = new();
         private long _totalBytes;
         private long _totalDownloadedBytes;
         private Stopwatch _speedStopwatch = new();
         private long _lastBytesMeasured;
         private Timer? _progressTimer;
+
+        // Saved parameters for seamless resume
+        private string? _currentUrl;
+        private string? _currentDestPath;
+        private int _currentThreadCount = 16;
+        private string? _currentReferer;
+        private string? _currentUserAgent;
+        private string? _currentCookies;
+        private Dictionary<string, string>? _currentHeaders;
 
         public void SetSpeedLimit(bool isEnabled, int maxSpeedKbps)
         {
@@ -101,9 +112,17 @@ namespace PRRX.IDM.Services
             {
                 IsPaused = true;
                 _pauseEvent.Reset();
+
+                // Immediately cancel CTS to abort all active network sockets and child processes!
+                try { _cts?.Cancel(); } catch { }
+
                 foreach (var t in _threads)
                 {
-                    if (t.IsActive) t.StatusInfo = "Paused";
+                    if (t.IsActive)
+                    {
+                        t.StatusInfo = "Paused";
+                        t.IsActive = false;
+                    }
                 }
                 ReportProgress("Paused by user");
             }
@@ -111,25 +130,44 @@ namespace PRRX.IDM.Services
 
         public void Resume()
         {
-            if (IsRunning && IsPaused)
+            if (IsPaused)
             {
                 IsPaused = false;
                 _pauseEvent.Set();
-                foreach (var t in _threads)
-                {
-                    if (t.IsActive) t.StatusInfo = "Receiving data...";
-                }
                 ReportProgress("Resuming download...");
+
+                if (!string.IsNullOrWhiteSpace(_currentUrl) && !string.IsNullOrWhiteSpace(_currentDestPath))
+                {
+                    _ = Task.Run(() => StartDownloadAsync(
+                        _currentUrl,
+                        _currentDestPath,
+                        _currentThreadCount,
+                        default,
+                        _currentReferer,
+                        _currentUserAgent,
+                        _currentCookies,
+                        _currentHeaders));
+                }
             }
         }
 
         public void Cancel()
         {
-            _cts?.Cancel();
-            _pauseEvent.Set();
             IsRunning = false;
             IsPaused = false;
+            try { _cts?.Cancel(); } catch { }
+            _pauseEvent.Set();
             _progressTimer?.Dispose();
+            _progressTimer = null;
+
+            if (!string.IsNullOrWhiteSpace(_currentDestPath))
+            {
+                var partsDir = _currentDestPath + ".prrx_parts";
+                if (Directory.Exists(partsDir))
+                {
+                    try { Directory.Delete(partsDir, true); } catch { }
+                }
+            }
         }
 
         public async Task<bool> StartDownloadAsync(
@@ -142,13 +180,24 @@ namespace PRRX.IDM.Services
             string? cookies = null,
             Dictionary<string, string>? customHeaders = null)
         {
-            string? tempDir = null;
+            await _downloadLock.WaitAsync();
             try
             {
-                IsRunning = true;
-                IsPaused = false;
-                _pauseEvent.Set();
-                _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                _currentUrl = url;
+                _currentDestPath = destinationFilePath;
+                _currentThreadCount = threadCount;
+                _currentReferer = referer;
+                _currentUserAgent = userAgent;
+                _currentCookies = cookies;
+                _currentHeaders = customHeaders;
+
+                bool downloadSucceeded = false;
+                try
+                {
+                    IsRunning = true;
+                    IsPaused = false;
+                    _pauseEvent.Set();
+                    _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
                 // Telegram Provider Integration (Handle Telegram files of ANY size up to 4GB)
                 if (TelegramDownloadProvider.Current.CanHandle(url))
@@ -169,13 +218,17 @@ namespace PRRX.IDM.Services
                             IsRunning = false;
                             if (success)
                             {
+                                downloadSucceeded = true;
                                 PRRX.IDM.Security.SecurityGuard.ApplyMarkOfTheWeb(destinationFilePath, url);
                                 DownloadCompleted?.Invoke(this, destinationFilePath);
                                 return true;
                             }
                             else
                             {
-                                DownloadFailed?.Invoke(this, "Telegram stream download cancelled or failed: stream endpoint not reachable.");
+                                if (!IsPaused && (_cts == null || !_cts.IsCancellationRequested))
+                                {
+                                    DownloadFailed?.Invoke(this, "Telegram stream download cancelled or failed: stream endpoint not reachable.");
+                                }
                                 return false;
                             }
                         }
@@ -199,7 +252,7 @@ namespace PRRX.IDM.Services
 
                         var progressReporter = new Progress<DownloadProgressReport>(report =>
                         {
-                            var totalBytesEst = _totalBytes > 0 ? _totalBytes : (isAudio ? 18_500_000L : 42_000_000L);
+                            var totalBytesEst = _totalBytes > 0 ? _totalBytes : 0;
                             if (!string.IsNullOrWhiteSpace(report.TotalSize))
                             {
                                 var parsed = ParseSizeStringToBytes(report.TotalSize);
@@ -221,7 +274,7 @@ namespace PRRX.IDM.Services
                                 TransferRateFormatted = string.IsNullOrWhiteSpace(report.Speed) ? "Streaming..." : report.Speed,
                                 TimeLeftFormatted = string.IsNullOrWhiteSpace(report.Eta) ? "--:--" : report.Eta,
                                 StatusMessage = string.IsNullOrWhiteSpace(report.StatusMessage) ? (isAudio ? "Extracting audio stream..." : "Downloading media stream...") : report.StatusMessage,
-                                IsResumeSupported = false,
+                                IsResumeSupported = true,
                                 Threads = new List<DownloadConnectionThread>()
                             });
                         });
@@ -277,6 +330,7 @@ namespace PRRX.IDM.Services
                                     _totalDownloadedBytes = fi.Length;
                                 }
 
+                                downloadSucceeded = true;
                                 PRRX.IDM.Security.SecurityGuard.ApplyMarkOfTheWeb(finalPath, url, referer);
                                 ReportProgress("Complete - Downloaded successfully");
                                 DownloadCompleted?.Invoke(this, finalPath);
@@ -284,10 +338,13 @@ namespace PRRX.IDM.Services
                             }
                         }
 
-                        var errMsg = !string.IsNullOrWhiteSpace(mediaEngine.LastErrorMessage)
-                            ? mediaEngine.LastErrorMessage
-                            : "Media stream download failed. Please verify that the media is available.";
-                        DownloadFailed?.Invoke(this, errMsg);
+                        if (!IsPaused && (_cts == null || !_cts.IsCancellationRequested))
+                        {
+                            var errMsg = !string.IsNullOrWhiteSpace(mediaEngine.LastErrorMessage)
+                                ? mediaEngine.LastErrorMessage
+                                : "Media stream download failed. Please verify that the media is available.";
+                            DownloadFailed?.Invoke(this, errMsg);
+                        }
                         return false;
                     }
                 }
@@ -377,8 +434,8 @@ namespace PRRX.IDM.Services
                 var targetDir = Path.GetDirectoryName(destinationFilePath);
                 if (!string.IsNullOrWhiteSpace(targetDir)) Directory.CreateDirectory(targetDir);
 
-                tempDir = Path.Combine(targetDir ?? ".", $".prrx_tmp_{Guid.NewGuid():N}");
-                Directory.CreateDirectory(tempDir);
+                var partsDir = destinationFilePath + ".prrx_parts";
+                Directory.CreateDirectory(partsDir);
 
                 // Initialize Threads and Byte Ranges
                 var segmentSize = _totalBytes > 0 ? Math.Max(1, _totalBytes / threadCount) : -1;
@@ -387,17 +444,31 @@ namespace PRRX.IDM.Services
                     long start = _totalBytes > 0 ? (i * segmentSize) : 0;
                     long end = _totalBytes > 0 ? ((i == threadCount - 1) ? _totalBytes - 1 : (start + segmentSize - 1)) : -1;
 
-                    _threads.Add(new DownloadConnectionThread
+                    var partFile = Path.Combine(partsDir, $"part_{i}.tmp");
+                    long alreadyDownloaded = 0;
+                    if (File.Exists(partFile))
+                    {
+                        alreadyDownloaded = new FileInfo(partFile).Length;
+                    }
+
+                    long threadTotal = (end >= start && start >= 0) ? (end - start + 1) : -1;
+                    bool isDone = threadTotal > 0 && alreadyDownloaded >= threadTotal;
+
+                    _totalDownloadedBytes += alreadyDownloaded;
+
+                    var t = new DownloadConnectionThread
                     {
                         ThreadId = i + 1,
                         StartByte = start,
                         EndByte = end,
-                        CurrentByte = start,
-                        DownloadedBytes = 0,
-                        StatusInfo = "Connecting...",
-                        ProgressPercentage = 0,
-                        IsActive = true
-                    });
+                        CurrentByte = start + alreadyDownloaded,
+                        DownloadedBytes = alreadyDownloaded,
+                        StatusInfo = isDone ? "Complete" : (alreadyDownloaded > 0 ? "Resuming..." : "Connecting..."),
+                        ProgressPercentage = threadTotal > 0 ? Math.Min(100.0, (alreadyDownloaded / (double)threadTotal) * 100.0) : 0,
+                        IsActive = !isDone
+                    };
+                    t.FormattedDownloaded = FormatBytes(t.DownloadedBytes);
+                    _threads.Add(t);
                 }
 
                 // Start live 100ms UI ticker
@@ -409,7 +480,7 @@ namespace PRRX.IDM.Services
                     }
                 }, null, 100, 100);
 
-                // Launch parallel segment download workers
+                // Launch parallel segment download workers with smooth ramp-up to eliminate network/router socket stalls
                 var tasks = new List<Task>();
                 for (int i = 0; i < threadCount; i++)
                 {
@@ -417,12 +488,18 @@ namespace PRRX.IDM.Services
                     tasks.Add(Task.Run(() => DownloadSegmentWorkerAsync(
                         url,
                         _threads[index],
-                        Path.Combine(tempDir, $"part_{index}.tmp"),
+                        Path.Combine(partsDir, $"part_{index}.tmp"),
                         _cts.Token,
                         referer,
                         userAgent,
                         cookies,
                         customHeaders)));
+
+                    // Smooth ramp-up: Stagger TCP connection start by 25ms to prevent NAT/router packet flooding
+                    if (i < threadCount - 1 && !_cts.IsCancellationRequested)
+                    {
+                        try { await Task.Delay(35, _cts.Token); } catch { }
+                    }
                 }
 
                 await Task.WhenAll(tasks);
@@ -446,7 +523,7 @@ namespace PRRX.IDM.Services
                     {
                         for (int i = 0; i < threadCount; i++)
                         {
-                            var partPath = Path.Combine(tempDir, $"part_{i}.tmp");
+                            var partPath = Path.Combine(partsDir, $"part_{i}.tmp");
                             if (File.Exists(partPath))
                             {
                                 using (var partStream = new FileStream(partPath, FileMode.Open, FileAccess.Read, FileShare.Read, HighSpeedBufferSize, FileOptions.Asynchronous | FileOptions.SequentialScan))
@@ -457,7 +534,6 @@ namespace PRRX.IDM.Services
                                         await outputStream.WriteAsync(copyBuffer.AsMemory(0, read), _cts.Token);
                                     }
                                 }
-                                try { File.Delete(partPath); } catch { } // Free disk space immediately
                             }
                         }
                         if (outputStream.Position != outputStream.Length)
@@ -478,6 +554,7 @@ namespace PRRX.IDM.Services
                     _totalDownloadedBytes = _totalBytes;
                 }
 
+                downloadSucceeded = true;
                 IsRunning = false;
                 ReportProgress("Complete - Downloaded successfully");
                 PRRX.IDM.Security.SecurityGuard.ApplyMarkOfTheWeb(destinationFilePath, url, referer);
@@ -488,27 +565,43 @@ namespace PRRX.IDM.Services
             catch (OperationCanceledException)
             {
                 IsRunning = false;
-                ReportProgress("Download Cancelled");
+                if (!IsPaused)
+                {
+                    ReportProgress("Download Cancelled");
+                }
                 return false;
             }
             catch (Exception ex)
             {
                 IsRunning = false;
-                DownloadFailed?.Invoke(this, ex.Message);
+                if (!IsPaused && (_cts == null || !_cts.IsCancellationRequested))
+                {
+                    DownloadFailed?.Invoke(this, ex.Message);
+                }
                 return false;
             }
             finally
             {
                 _progressTimer?.Dispose();
                 _progressTimer = null;
-                if (!string.IsNullOrWhiteSpace(tempDir) && Directory.Exists(tempDir))
+                // Only clean up parts directory if download succeeded or was explicitly cancelled
+                if (downloadSucceeded && !string.IsNullOrWhiteSpace(destinationFilePath))
                 {
-                    try { Directory.Delete(tempDir, true); } catch { }
+                    var partsDir = destinationFilePath + ".prrx_parts";
+                    if (Directory.Exists(partsDir))
+                    {
+                        try { Directory.Delete(partsDir, true); } catch { }
+                    }
                 }
             }
         }
+        finally
+        {
+            _downloadLock.Release();
+        }
+    }
 
-        private async Task DownloadSegmentWorkerAsync(
+    private async Task DownloadSegmentWorkerAsync(
             string url,
             DownloadConnectionThread thread,
             string tempPartPath,
@@ -518,97 +611,172 @@ namespace PRRX.IDM.Services
             string? cookies = null,
             Dictionary<string, string>? customHeaders = null)
         {
-            try
+            const int maxRetries = 5;
+            int retryCount = 0;
+
+            while (true)
             {
-                using var request = new HttpRequestMessage(HttpMethod.Get, url);
-                ApplyStandardHeaders(request, url, referer, userAgent, cookies, customHeaders);
-
-                if (thread.StartByte >= 0 && thread.EndByte >= thread.StartByte)
-                {
-                    request.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(thread.StartByte, thread.EndByte);
-                }
-
-                thread.StatusInfo = "Send GET...";
-                using var response = await HttpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
-                response.EnsureSuccessStatusCode();
-
-                // If total file size was not resolved during initial probing, capture it now from the actual GET response
-                if (_totalBytes <= 0)
-                {
-                    if (response.Content.Headers.ContentRange?.Length.HasValue == true)
-                    {
-                        _totalBytes = response.Content.Headers.ContentRange.Length.Value;
-                    }
-                    else if (response.Content.Headers.ContentLength.HasValue && response.Content.Headers.ContentLength.Value > 0)
-                    {
-                        _totalBytes = response.Content.Headers.ContentLength.Value;
-                    }
-
-                    if (_totalBytes > 0 && (thread.EndByte < thread.StartByte || thread.EndByte <= 0))
-                    {
-                        thread.EndByte = _totalBytes - 1;
-                    }
-                }
-
-                thread.StatusInfo = "Receiving data...";
-                using var contentStream = await response.Content.ReadAsStreamAsync(token);
-                using var fileStream = new FileStream(tempPartPath, FileMode.Create, FileAccess.Write, FileShare.None, HighSpeedBufferSize, FileOptions.Asynchronous | FileOptions.SequentialScan);
-
-                var buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(HighSpeedBufferSize);
                 try
                 {
-                    int bytesRead;
+                    long segmentTotal = (thread.EndByte >= thread.StartByte && thread.StartByte >= 0)
+                        ? (thread.EndByte - thread.StartByte + 1)
+                        : -1;
 
-                    while ((bytesRead = await contentStream.ReadAsync(buffer.AsMemory(0, HighSpeedBufferSize), token)) > 0)
+                    long existingBytes = 0;
+                    if (File.Exists(tempPartPath))
                     {
-                        _pauseEvent.Wait(token);
+                        existingBytes = new FileInfo(tempPartPath).Length;
+                    }
 
-                        await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead), token);
-                        thread.DownloadedBytes += bytesRead;
-                        thread.CurrentByte += bytesRead;
-                        Interlocked.Add(ref _totalDownloadedBytes, bytesRead);
+                    // Keep thread downloaded count in sync with physical disk bytes
+                    var byteDelta = existingBytes - thread.DownloadedBytes;
+                    if (byteDelta != 0)
+                    {
+                        thread.DownloadedBytes = existingBytes;
+                        thread.CurrentByte = thread.StartByte + existingBytes;
+                        Interlocked.Add(ref _totalDownloadedBytes, byteDelta);
+                    }
 
-                        long threadTotal = (thread.EndByte >= thread.StartByte && thread.StartByte >= 0)
-                            ? (thread.EndByte - thread.StartByte + 1)
-                            : -1;
+                    if (segmentTotal > 0 && existingBytes >= segmentTotal)
+                    {
+                        thread.DownloadedBytes = segmentTotal;
+                        thread.CurrentByte = thread.EndByte + 1;
+                        thread.ProgressPercentage = 100.0;
+                        thread.StatusInfo = "Complete";
+                        thread.IsActive = false;
+                        return;
+                    }
 
-                        if (threadTotal > 0)
-                        {
-                            thread.ProgressPercentage = Math.Min(100.0, (thread.DownloadedBytes / (double)threadTotal) * 100.0);
-                        }
+                    long reqStart = thread.StartByte + existingBytes;
+                    long reqEnd = thread.EndByte;
+
+                    using var request = new HttpRequestMessage(HttpMethod.Get, url);
+                    ApplyStandardHeaders(request, url, referer, userAgent, cookies, customHeaders);
+
+                    if (reqStart >= 0 && (reqEnd < 0 || reqEnd >= reqStart))
+                    {
+                        if (reqEnd > 0)
+                            request.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(reqStart, reqEnd);
                         else
-                        {
-                            thread.ProgressPercentage = 0.0;
-                        }
-                        thread.FormattedDownloaded = FormatBytes(thread.DownloadedBytes);
+                            request.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(reqStart, null);
+                    }
 
-                        // Speed limiter throttling (delay injection per block)
-                        if (SpeedLimiter.IsEnabled && SpeedLimiter.MaxSpeedKbps > 0)
+                    thread.StatusInfo = retryCount > 0 ? $"Retry {retryCount}/{maxRetries}..." : "Connecting...";
+                    thread.IsActive = true;
+
+                    using var response = await HttpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
+
+                    if (response.StatusCode == System.Net.HttpStatusCode.RequestedRangeNotSatisfiable)
+                    {
+                        thread.ProgressPercentage = 100.0;
+                        thread.StatusInfo = "Complete";
+                        thread.IsActive = false;
+                        return;
+                    }
+
+                    response.EnsureSuccessStatusCode();
+
+                    // Check if server accepted the byte range or sent the entire body from offset 0
+                    bool isPartial = response.StatusCode == System.Net.HttpStatusCode.PartialContent;
+                    if (!isPartial && reqStart > 0)
+                    {
+                        // Server ignored Range header and returned full payload from byte 0!
+                        // Truncate part and restart from byte 0 to prevent appending duplicate data
+                        Interlocked.Add(ref _totalDownloadedBytes, -thread.DownloadedBytes);
+                        existingBytes = 0;
+                        thread.DownloadedBytes = 0;
+                        thread.CurrentByte = thread.StartByte;
+                    }
+
+                    // If total file size was not resolved during initial probing, capture it now
+                    if (_totalBytes <= 0)
+                    {
+                        if (response.Content.Headers.ContentRange?.Length.HasValue == true)
                         {
-                            var maxBytesPerSec = SpeedLimiter.MaxSpeedKbps * 1024L;
-                            var targetDelayMs = (bytesRead * 1000L) / Math.Max(1000L, maxBytesPerSec);
-                            if (targetDelayMs > 0)
-                            {
-                                await Task.Delay((int)targetDelayMs, token);
-                            }
+                            _totalBytes = response.Content.Headers.ContentRange.Length.Value;
+                        }
+                        else if (response.Content.Headers.ContentLength.HasValue && response.Content.Headers.ContentLength.Value > 0)
+                        {
+                            _totalBytes = response.Content.Headers.ContentLength.Value;
+                        }
+
+                        if (_totalBytes > 0 && (thread.EndByte < thread.StartByte || thread.EndByte <= 0))
+                        {
+                            thread.EndByte = _totalBytes - 1;
+                            segmentTotal = thread.EndByte - thread.StartByte + 1;
                         }
                     }
-                    await fileStream.FlushAsync(token);
-                }
-                finally
-                {
-                    System.Buffers.ArrayPool<byte>.Shared.Return(buffer);
-                }
 
-                thread.StatusInfo = "Segment Merged";
-                thread.ProgressPercentage = 100.0;
-                thread.IsActive = false;
-            }
-            catch (Exception ex)
-            {
-                thread.StatusInfo = token.IsCancellationRequested ? "Cancelled" : $"Error: {ex.Message}";
-                thread.IsActive = false;
-                throw;
+                    thread.StatusInfo = "Receiving data...";
+                    using var contentStream = await response.Content.ReadAsStreamAsync(token);
+                    var fileMode = existingBytes > 0 && isPartial ? FileMode.Append : FileMode.Create;
+                    using var fileStream = new FileStream(tempPartPath, fileMode, FileAccess.Write, FileShare.None, HighSpeedBufferSize, FileOptions.Asynchronous | FileOptions.SequentialScan);
+
+                    var buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(HighSpeedBufferSize);
+                    try
+                    {
+                        int bytesRead;
+                        while ((bytesRead = await contentStream.ReadAsync(buffer.AsMemory(0, HighSpeedBufferSize), token)) > 0)
+                        {
+                            _pauseEvent.Wait(token);
+
+                            await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead), token);
+                            thread.DownloadedBytes += bytesRead;
+                            thread.CurrentByte += bytesRead;
+                            Interlocked.Add(ref _totalDownloadedBytes, bytesRead);
+
+                            if (segmentTotal > 0)
+                            {
+                                thread.ProgressPercentage = Math.Min(100.0, (thread.DownloadedBytes / (double)segmentTotal) * 100.0);
+                            }
+                            else
+                            {
+                                thread.ProgressPercentage = 0.0;
+                            }
+                            thread.FormattedDownloaded = FormatBytes(thread.DownloadedBytes);
+
+                            // Speed limiter throttling (delay injection per block)
+                            if (SpeedLimiter.IsEnabled && SpeedLimiter.MaxSpeedKbps > 0)
+                            {
+                                var maxBytesPerSec = SpeedLimiter.MaxSpeedKbps * 1024L;
+                                var targetDelayMs = (bytesRead * 1000L) / Math.Max(1000L, maxBytesPerSec);
+                                if (targetDelayMs > 0)
+                                {
+                                    await Task.Delay((int)targetDelayMs, token);
+                                }
+                            }
+                        }
+                        await fileStream.FlushAsync(token);
+                    }
+                    finally
+                    {
+                        System.Buffers.ArrayPool<byte>.Shared.Return(buffer);
+                    }
+
+                    thread.StatusInfo = "Complete";
+                    thread.ProgressPercentage = 100.0;
+                    thread.IsActive = false;
+                    return;
+                }
+                catch (OperationCanceledException)
+                {
+                    thread.StatusInfo = IsPaused ? "Paused" : "Cancelled";
+                    thread.IsActive = false;
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    retryCount++;
+                    if (retryCount >= maxRetries || token.IsCancellationRequested)
+                    {
+                        thread.StatusInfo = token.IsCancellationRequested ? "Cancelled" : $"Failed: {ex.Message}";
+                        thread.IsActive = false;
+                        throw;
+                    }
+
+                    thread.StatusInfo = $"Glitch: Retrying ({retryCount}/{maxRetries})...";
+                    await Task.Delay(Math.Min(5000, 300 * (1 << retryCount)), token);
+                }
             }
         }
 

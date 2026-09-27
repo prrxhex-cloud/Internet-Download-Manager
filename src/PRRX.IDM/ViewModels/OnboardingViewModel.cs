@@ -95,8 +95,17 @@ namespace PRRX.IDM.ViewModels
                 var extDir = Path.Combine(baseDir, "extension");
                 if (Directory.Exists(extDir)) return extDir;
 
+                var installedExt = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "PRRX Internet Download Manager", "extension");
+                if (Directory.Exists(installedExt)) return installedExt;
+
+                var devExtRepo = @"C:\Users\sayur\Documents\GitHub\Internet-Download-Manager\extension";
+                if (Directory.Exists(devExtRepo)) return devExtRepo;
+
+                var devExt = @"D:\Internet Download Manager\extension";
+                if (Directory.Exists(devExt)) return devExt;
+
                 var cur = new DirectoryInfo(baseDir);
-                for (int i = 0; i < 5 && cur != null; i++)
+                for (int i = 0; i < 6 && cur != null; i++)
                 {
                     var candidate = Path.Combine(cur.FullName, "extension");
                     if (Directory.Exists(candidate)) return candidate;

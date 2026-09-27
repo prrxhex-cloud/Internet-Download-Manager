@@ -627,7 +627,10 @@ namespace PRRX.IDM.Services
                 }
                 else
                 {
-                    try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
+                    if (!cancellationToken.IsCancellationRequested)
+                    {
+                        try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
+                    }
                 }
             }
             catch (Exception ex)
@@ -653,19 +656,41 @@ namespace PRRX.IDM.Services
                 totalBytes = 10 * 1024 * 1024; // Default fallback allocation
             }
 
-            const int chunkSize = 1048576; // 1 MB high-speed chunks
+            const int chunkSize = 2097152; // 2 MB Turbo High-Speed Chunk Sizing
             int totalChunks = (int)Math.Max(1, Math.Ceiling((double)totalBytes / chunkSize));
-            int concurrency = Math.Clamp(request.Concurrency > 0 ? request.Concurrency : 32, 1, 64);
+            int concurrency = Math.Clamp(request.Concurrency > 0 ? request.Concurrency : 32, 8, 64);
 
             var destinationPath = request.DestinationFilePath;
             var tempPath = destinationPath + ".prrx_tg_part";
+            var statePath = destinationPath + ".prrx_tg_state";
+
+            // Track completed chunks for robust resume capability
+            var completedChunkIndices = new ConcurrentDictionary<int, bool>();
+            if (File.Exists(statePath) && File.Exists(tempPath))
+            {
+                try
+                {
+                    var lines = File.ReadAllLines(statePath);
+                    foreach (var line in lines)
+                    {
+                        if (int.TryParse(line.Trim(), out int idx))
+                        {
+                            completedChunkIndices[idx] = true;
+                        }
+                    }
+                }
+                catch { }
+            }
 
             // Pre-allocate file on disk to eliminate fragmentation and optimize sequential I/O
-            await using (var fs = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite, 65536, useAsync: true))
+            if (!File.Exists(tempPath))
             {
-                if (totalBytes > 0)
+                await using (var fs = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite, 1048576, useAsync: true))
                 {
-                    fs.SetLength(totalBytes);
+                    if (totalBytes > 0)
+                    {
+                        fs.SetLength(totalBytes);
+                    }
                 }
             }
 
@@ -697,7 +722,26 @@ namespace PRRX.IDM.Services
             var chunkQueue = new ConcurrentQueue<int>();
             for (int i = 0; i < totalChunks; i++)
             {
-                chunkQueue.Enqueue(i);
+                if (completedChunkIndices.ContainsKey(i))
+                {
+                    long chunkOffset = (long)i * chunkSize;
+                    int currentChunkSize = (int)Math.Min(chunkSize, totalBytes - chunkOffset);
+                    downloadedBytes += currentChunkSize;
+
+                    // Update corresponding thread block for resumed chunks
+                    int tIdx = segmentSize > 0 ? Math.Clamp((int)(chunkOffset / segmentSize), 0, concurrency - 1) : 0;
+                    var t = threads[tIdx];
+                    t.DownloadedBytes += currentChunkSize;
+                    t.CurrentByte = chunkOffset + currentChunkSize;
+                    t.FormattedDownloaded = FormatBytes(t.DownloadedBytes);
+                    long slotLen = Math.Max(1, t.EndByte - t.StartByte + 1);
+                    t.ProgressPercentage = Math.Clamp((double)t.DownloadedBytes / slotLen * 100.0, 0, 100);
+                    t.StatusInfo = t.DownloadedBytes >= slotLen ? "Complete" : "Receiving data...";
+                }
+                else
+                {
+                    chunkQueue.Enqueue(i);
+                }
             }
 
             var activeWorkers = new List<Task>();
@@ -716,7 +760,7 @@ namespace PRRX.IDM.Services
                         bool chunkSuccess = false;
                         int retries = 0;
 
-                        while (!chunkSuccess && retries < 3 && !cancellationToken.IsCancellationRequested)
+                        while (!chunkSuccess && retries < 5 && !cancellationToken.IsCancellationRequested)
                         {
                             try
                             {
@@ -725,7 +769,7 @@ namespace PRRX.IDM.Services
                                 {
                                     lock (fileLock)
                                     {
-                                        using var writeStream = new FileStream(tempPath, FileMode.Open, FileAccess.Write, FileShare.ReadWrite);
+                                        using var writeStream = new FileStream(tempPath, FileMode.Open, FileAccess.Write, FileShare.ReadWrite, 1048576);
                                         writeStream.Seek(chunkOffset, SeekOrigin.Begin);
                                         writeStream.Write(chunkBytes, 0, chunkBytes.Length);
 
@@ -738,6 +782,14 @@ namespace PRRX.IDM.Services
                                         long slotLen = Math.Max(1, targetThread.EndByte - targetThread.StartByte + 1);
                                         targetThread.ProgressPercentage = Math.Clamp((double)targetThread.DownloadedBytes / slotLen * 100.0, 0, 100);
                                         targetThread.StatusInfo = targetThread.DownloadedBytes >= slotLen ? "Complete" : "Receiving data...";
+
+                                        // Save completed chunk index to state file for reliable resume
+                                        completedChunkIndices[chunkIndex] = true;
+                                        try
+                                        {
+                                            File.AppendAllText(statePath, chunkIndex + Environment.NewLine);
+                                        }
+                                        catch { }
                                     }
 
                                     Interlocked.Add(ref downloadedBytes, chunkBytes.Length);
@@ -758,14 +810,14 @@ namespace PRRX.IDM.Services
 
                         // Periodic progress reporting matching IDM visual style
                         var now = stopwatch.ElapsedMilliseconds;
-                        if (now - lastReportTime >= 250)
+                        if (now - lastReportTime >= 200)
                         {
                             lastReportTime = now;
                             var currentDownloaded = Interlocked.Read(ref downloadedBytes);
                             var bytesSinceLast = currentDownloaded - lastReportBytes;
                             lastReportBytes = currentDownloaded;
 
-                            double speedBps = (bytesSinceLast / 0.25);
+                            double speedBps = (bytesSinceLast / 0.20);
                             var speedFormatted = FormatSpeed(speedBps);
                             double pct = totalBytes > 0 ? Math.Min(100.0, (double)currentDownloaded / totalBytes * 100.0) : 0;
 
@@ -794,24 +846,24 @@ namespace PRRX.IDM.Services
             }
             catch (OperationCanceledException)
             {
-                try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
+                // Preserve tempPath and statePath for seamless resume
                 return false;
             }
             catch
             {
-                try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
                 return false;
             }
 
             if (cancellationToken.IsCancellationRequested || downloadedBytes < totalBytes)
             {
-                try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
+                // Preserved for clean resume
                 return false;
             }
 
             // Final rename from temp to destination
             if (File.Exists(destinationPath)) File.Delete(destinationPath);
             File.Move(tempPath, destinationPath);
+            try { if (File.Exists(statePath)) File.Delete(statePath); } catch { }
             PRRX.IDM.Security.SecurityGuard.ApplyMarkOfTheWeb(destinationPath, request.DirectStreamUrl ?? request.Url);
 
             progress?.Report(new SegmentProgressEventArgs

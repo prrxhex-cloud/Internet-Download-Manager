@@ -462,8 +462,42 @@ namespace PRRX.IDM.ViewModels
         public ICommand SetThemeCommand { get; }
         public ICommand ReplayQuickTourCommand { get; }
         public ICommand ReplayOnboardingCommand { get; }
+        public string ExtensionDirectory
+        {
+            get
+            {
+                var baseAppDir = AppDomain.CurrentDomain.BaseDirectory;
+                var extDir = Path.Combine(baseAppDir, "extension");
+                if (Directory.Exists(extDir)) return extDir;
+
+                var installedExt = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "PRRX Internet Download Manager", "extension");
+                if (Directory.Exists(installedExt)) return installedExt;
+
+                var devExtRepo = @"C:\Users\sayur\Documents\GitHub\Internet-Download-Manager\extension";
+                if (Directory.Exists(devExtRepo)) return devExtRepo;
+
+                var devExt = @"D:\Internet Download Manager\extension";
+                if (Directory.Exists(devExt)) return devExt;
+
+                var cur = new DirectoryInfo(baseAppDir);
+                for (int i = 0; i < 6 && cur != null; i++)
+                {
+                    var candidate = Path.Combine(cur.FullName, "extension");
+                    if (Directory.Exists(candidate)) return candidate;
+                    var pubCandidate = Path.Combine(cur.FullName, "publish", "extension");
+                    if (Directory.Exists(pubCandidate)) return pubCandidate;
+                    cur = cur.Parent;
+                }
+
+                return extDir;
+            }
+        }
+
         public ICommand InstallBrowserExtensionCommand { get; }
         public ICommand OpenExtensionFolderCommand { get; }
+        public ICommand CopyExtensionPathCommand { get; }
+        public ICommand OpenChromeExtensionsCommand { get; }
+        public ICommand OpenEdgeExtensionsCommand { get; }
         public ICommand CleanupCacheCommand { get; }
         public ICommand CheckServerTrafficCommand { get; }
         public ICommand ToggleCloudInstallCommand { get; }
@@ -684,40 +718,111 @@ namespace PRRX.IDM.ViewModels
 
             InstallBrowserExtensionCommand = new RelayCommand(() =>
             {
-                var browserService = new BrowserIntegrationService(_configService, _securityService);
-                bool ok = browserService.RegisterBrowserHost();
-                BrowserStatusMessage = ok 
-                    ? "✓ Successfully registered Native Messaging Host for Chrome and Microsoft Edge!" 
-                    : "Warning: Could not write Registry keys. Run PRRX IDM once as Administrator.";
+                try
+                {
+                    var browserService = new BrowserIntegrationService(_configService, _securityService);
+                    bool ok = browserService.RegisterBrowserHost();
+                    browserService.RegisterExtensionInRegistry();
+                    BrowserStatusMessage = ok 
+                        ? "✓ Successfully registered Native Messaging Host & Registry for Chrome and Microsoft Edge!" 
+                        : "Warning: Could not write Registry keys. Run PRRX IDM once as Administrator.";
+                }
+                catch (Exception ex)
+                {
+                    BrowserStatusMessage = $"Registration notice: {ex.Message}";
+                }
+            });
+
+            CopyExtensionPathCommand = new RelayCommand(() =>
+            {
+                try
+                {
+                    var path = ExtensionDirectory;
+                    System.Windows.Clipboard.SetText(path);
+                    BrowserStatusMessage = $"✓ Extension folder path copied to clipboard: {path}";
+                }
+                catch (Exception ex)
+                {
+                    BrowserStatusMessage = $"Failed to copy path: {ex.Message}";
+                }
             });
 
             OpenExtensionFolderCommand = new RelayCommand(() =>
             {
-                var baseAppDir = AppDomain.CurrentDomain.BaseDirectory;
-                var extDir = Path.Combine(baseAppDir, "extension");
-                if (!Directory.Exists(extDir))
+                try
                 {
-                    var cur = new DirectoryInfo(baseAppDir);
-                    for (int i = 0; i < 5 && cur != null; i++)
+                    var extDir = ExtensionDirectory;
+                    if (Directory.Exists(extDir))
                     {
-                        var candidate = Path.Combine(cur.FullName, "extension");
-                        if (Directory.Exists(candidate))
+                        try { System.Windows.Clipboard.SetText(extDir); } catch { }
+                        Process.Start(new ProcessStartInfo
                         {
-                            extDir = candidate;
-                            break;
-                        }
-                        cur = cur.Parent;
+                            FileName = "explorer.exe",
+                            UseShellExecute = false,
+                            ArgumentList = { Path.GetFullPath(extDir) }
+                        });
+                        BrowserStatusMessage = $"✓ Opened extension folder: {extDir}";
+                    }
+                    else
+                    {
+                        BrowserStatusMessage = $"Extension folder not found at: {extDir}";
                     }
                 }
+                catch (Exception ex)
+                {
+                    BrowserStatusMessage = $"Error opening folder: {ex.Message}";
+                }
+            });
 
-                if (Directory.Exists(extDir))
+            OpenChromeExtensionsCommand = new RelayCommand(() =>
+            {
+                try
                 {
                     Process.Start(new ProcessStartInfo
                     {
-                        FileName = "explorer.exe",
-                        UseShellExecute = false,
-                        ArgumentList = { Path.GetFullPath(extDir) }
+                        FileName = "chrome.exe",
+                        Arguments = "chrome://extensions",
+                        UseShellExecute = true
                     });
+                    BrowserStatusMessage = "Opening Google Chrome Extensions (chrome://extensions)... Turn on 'Developer mode' and click 'Load unpacked'.";
+                }
+                catch
+                {
+                    try
+                    {
+                        Process.Start(new ProcessStartInfo { FileName = "cmd", Arguments = "/c start chrome chrome://extensions", CreateNoWindow = true, UseShellExecute = false });
+                        BrowserStatusMessage = "Opening Chrome Extensions...";
+                    }
+                    catch (Exception ex)
+                    {
+                        BrowserStatusMessage = $"Could not launch Chrome: {ex.Message}";
+                    }
+                }
+            });
+
+            OpenEdgeExtensionsCommand = new RelayCommand(() =>
+            {
+                try
+                {
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = "msedge.exe",
+                        Arguments = "edge://extensions",
+                        UseShellExecute = true
+                    });
+                    BrowserStatusMessage = "Opening Microsoft Edge Extensions (edge://extensions)... Turn on 'Developer mode' and click 'Load unpacked'.";
+                }
+                catch
+                {
+                    try
+                    {
+                        Process.Start(new ProcessStartInfo { FileName = "cmd", Arguments = "/c start msedge edge://extensions", CreateNoWindow = true, UseShellExecute = false });
+                        BrowserStatusMessage = "Opening Edge Extensions...";
+                    }
+                    catch (Exception ex)
+                    {
+                        BrowserStatusMessage = $"Could not launch Edge: {ex.Message}";
+                    }
                 }
             });
 

@@ -328,6 +328,29 @@ namespace PRRX.IDM
 
                 if (!hasStartupPayload && !isSilentLaunch)
                 {
+                    // If first launch / onboarding is required, show ONLY the Onboarding Window first
+                    if (_configService != null && !_configService.CurrentConfig.IsOnboardingCompleted)
+                    {
+                        try
+                        {
+                            if (_themeService != null && _browserService != null)
+                            {
+                                var onboardingVm = new OnboardingViewModel(_configService, _themeService, _browserService);
+                                var onboardingWindow = new OnboardingWindow(onboardingVm);
+                                _themeService.ApplyTheme(_configService.CurrentConfig.ThemeMode, onboardingWindow);
+                                onboardingWindow.ShowDialog();
+
+                                _configService.CurrentConfig.IsOnboardingCompleted = true;
+                                _configService.CurrentConfig.HasCompletedQuickTour = true;
+                                _configService.SaveConfig();
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.WriteLine($"[Startup] Onboarding error: {ex.Message}");
+                        }
+                    }
+
                     mainWindow.Show();
                 }
                 else
@@ -462,22 +485,7 @@ namespace PRRX.IDM
                 {
                     try
                     {
-                        if (!_configService.CurrentConfig.IsOnboardingCompleted)
-                        {
-                            if (_themeService != null && _browserService != null)
-                            {
-                                var onboardingVm = new OnboardingViewModel(_configService, _themeService, _browserService);
-                                var onboardingWindow = new OnboardingWindow(onboardingVm);
-                                _themeService.ApplyTheme(_configService.CurrentConfig.ThemeMode, onboardingWindow);
-                                onboardingWindow.ShowDialog();
-
-                                _configService.CurrentConfig.IsOnboardingCompleted = true;
-                                _configService.CurrentConfig.HasCompletedQuickTour = true;
-                                _configService.SaveConfig();
-                            }
-                        }
-
-                        if (!_configService.CurrentConfig.HasCompletedQuickTour)
+                        if (!_configService.CurrentConfig.HasCompletedQuickTour && _configService.CurrentConfig.IsOnboardingCompleted)
                         {
                             if (_themeService != null)
                             {

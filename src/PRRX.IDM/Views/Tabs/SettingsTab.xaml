@@ -432,6 +432,72 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
                 </StackPanel>
             </Border>
 
+            <!-- Browser Integration & Extension Module Card -->
+            <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" 
+                    CornerRadius="12" Padding="20" Margin="0,0,0,18"
+                    BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+                <StackPanel>
+                    <Grid Margin="0,0,0,10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel>
+                            <TextBlock Text="Browser Integration &amp; Extension Module (Chrome / Edge / Brave)" FontSize="16" FontWeight="SemiBold"/>
+                            <TextBlock Text="Intercept browser downloads, grab video/audio with floating player button, and download with multi-socket speed." 
+                                       Opacity="0.7" FontSize="12" Margin="0,2,0,0"/>
+                        </StackPanel>
+
+                        <Border Grid.Column="1" Background="#2000E5FF" BorderBrush="#4000E5FF" BorderThickness="1" CornerRadius="8" Padding="10,4" VerticalAlignment="Center">
+                            <TextBlock Text="Native Host Active" FontWeight="Bold" FontSize="11" Foreground="#00E5FF"/>
+                        </Border>
+                    </Grid>
+
+                    <!-- Status Message Banner -->
+                    <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="14,10" Margin="0,0,0,14">
+                        <StackPanel Orientation="Horizontal">
+                            <ui:SymbolIcon Symbol="Link24" Margin="0,0,10,0" VerticalAlignment="Center"/>
+                            <TextBlock Text="{Binding BrowserStatusMessage}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Unpacked Extension File Path Display & Copy Button -->
+                    <TextBlock Text="Unpacked Browser Extension Location:" FontWeight="Medium" FontSize="12" Margin="0,0,0,6"/>
+                    <Grid Margin="0,0,0,14">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <ui:TextBox Grid.Column="0" Text="{Binding ExtensionDirectory, Mode=OneWay}" 
+                                    IsReadOnly="True" Height="40" Margin="0,0,10,0" VerticalContentAlignment="Center"/>
+
+                        <ui:Button Grid.Column="1" Content="Copy Path" Icon="{ui:SymbolIcon Symbol=Copy24}"
+                                   Command="{Binding CopyExtensionPathCommand}" Height="40" Margin="0,0,10,0" Padding="14,0"/>
+
+                        <ui:Button Grid.Column="2" Content="Open Folder" Icon="{ui:SymbolIcon Symbol=FolderOpen24}"
+                                   Appearance="Secondary" Command="{Binding OpenExtensionFolderCommand}" Height="40" Padding="14,0"/>
+                    </Grid>
+
+                    <!-- Action Helpers: Register Host & Open Browser Extensions Pages -->
+                    <StackPanel Orientation="Horizontal">
+                        <ui:Button Content="Register Native Host" Icon="{ui:SymbolIcon Symbol=Checkmark24}"
+                                   Appearance="Primary" Command="{Binding InstallBrowserExtensionCommand}" 
+                                   Height="40" Margin="0,0,10,0" Padding="16,0"/>
+
+                        <ui:Button Content="Install in Chrome" Icon="{ui:SymbolIcon Symbol=Globe24}"
+                                   Appearance="Secondary" Command="{Binding OpenChromeExtensionsCommand}" 
+                                   Height="40" Margin="0,0,10,0" Padding="14,0"/>
+
+                        <ui:Button Content="Install in Edge" Icon="{ui:SymbolIcon Symbol=Globe24}"
+                                   Appearance="Secondary" Command="{Binding OpenEdgeExtensionsCommand}" 
+                                   Height="40" Padding="14,0"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
             <!-- Turbo Multi-Connection Chunk Acceleration Card -->
             <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" 
                     CornerRadius="12" Padding="20" Margin="0,0,0,18"
