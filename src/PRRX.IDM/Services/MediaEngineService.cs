@@ -37,7 +37,12 @@ namespace PRRX.IDM.Services
         string? ActiveCookiesPath { get; }
         bool IsCookiesConfigured { get; }
         bool IsEngineAvailable { get; }
-        Task<(MediaProbeResult? Result, string? ErrorMessage)> ProbeMediaAsync(string url, CancellationToken cancellationToken = default);
+        string? LastErrorMessage { get; }
+        Task<(MediaProbeResult? Result, string? ErrorMessage)> ProbeMediaAsync(
+            string url, 
+            CancellationToken cancellationToken = default,
+            string? cookies = null,
+            string? userAgent = null);
         Task<bool> DownloadVideoAsync(
             string url,
             string formatId,
@@ -45,14 +50,18 @@ namespace PRRX.IDM.Services
             IProgress<DownloadProgressReport>? progress = null,
             CancellationToken cancellationToken = default,
             string? targetContainer = null,
-            string? destinationFilePath = null);
+            string? destinationFilePath = null,
+            string? cookies = null,
+            string? userAgent = null);
         Task<bool> ConvertToMp3Async(
             string sourceUrlOrPath,
             string bitrate,
             string outputDirectory,
             IProgress<DownloadProgressReport>? progress = null,
             CancellationToken cancellationToken = default,
-            string? destinationFilePath = null);
+            string? destinationFilePath = null,
+            string? cookies = null,
+            string? userAgent = null);
         Task<bool> ConvertAudioAsync(
             string sourceUrlOrPath,
             string targetFormat,
@@ -61,7 +70,9 @@ namespace PRRX.IDM.Services
             bool trimRingtone = false,
             IProgress<DownloadProgressReport>? progress = null,
             CancellationToken cancellationToken = default,
-            string? destinationFilePath = null);
+            string? destinationFilePath = null,
+            string? cookies = null,
+            string? userAgent = null);
         Task<(bool Success, string Message)> UpdateEngineAsync(CancellationToken cancellationToken = default);
     }
 
@@ -83,9 +94,79 @@ namespace PRRX.IDM.Services
         public string? FfmpegDirectoryPath { get; private set; }
         public string? Aria2cExecutablePath { get; private set; }
 
-        public string? ActiveCookiesPath => null;
-        public bool IsCookiesConfigured => false;
+        public string? LastErrorMessage { get; private set; }
+        public string? ActiveCookiesPath => GetBestAvailableCookiesFile();
+        public bool IsCookiesConfigured => !string.IsNullOrWhiteSpace(ActiveCookiesPath) && File.Exists(ActiveCookiesPath);
         public bool IsEngineAvailable => File.Exists(EngineExecutablePath);
+
+        public static void SaveCachedCookies(string cookies)
+        {
+            if (string.IsNullOrWhiteSpace(cookies)) return;
+            try
+            {
+                var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PRRX.IDM");
+                Directory.CreateDirectory(dir);
+                var cookieFile = Path.Combine(dir, "youtube_cookies.txt");
+                File.WriteAllText(cookieFile, cookies);
+            }
+            catch { }
+        }
+
+        public static string? GetBestAvailableCookiesFile()
+        {
+            try
+            {
+                var appData = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PRRX.IDM", "youtube_cookies.txt");
+                if (File.Exists(appData) && new FileInfo(appData).Length > 0) return appData;
+
+                var appDataAlt = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PRRX.IDM", "cookies.txt");
+                if (File.Exists(appDataAlt) && new FileInfo(appDataAlt).Length > 0) return appDataAlt;
+
+                var baseDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "cookies.txt");
+                if (File.Exists(baseDir) && new FileInfo(baseDir).Length > 0) return baseDir;
+
+                var downloads = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads", "cookies.txt");
+                if (File.Exists(downloads) && new FileInfo(downloads).Length > 0) return downloads;
+            }
+            catch { }
+            return null;
+        }
+
+        private static void AttachCookiesAndUserAgent(
+            ProcessStartInfo startInfo,
+            string? cookies,
+            string? userAgent,
+            out string? tempCookiePath)
+        {
+            tempCookiePath = null;
+            if (!string.IsNullOrWhiteSpace(cookies))
+            {
+                try
+                {
+                    tempCookiePath = Path.Combine(Path.GetTempPath(), $"prrx_cookie_{Guid.NewGuid():N}.txt");
+                    File.WriteAllText(tempCookiePath, cookies);
+                    startInfo.ArgumentList.Add("--cookies");
+                    startInfo.ArgumentList.Add(tempCookiePath);
+                    SaveCachedCookies(cookies);
+                }
+                catch { }
+            }
+            else
+            {
+                var cached = GetBestAvailableCookiesFile();
+                if (!string.IsNullOrWhiteSpace(cached) && File.Exists(cached))
+                {
+                    startInfo.ArgumentList.Add("--cookies");
+                    startInfo.ArgumentList.Add(cached);
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(userAgent))
+            {
+                startInfo.ArgumentList.Add("--user-agent");
+                startInfo.ArgumentList.Add(userAgent);
+            }
+        }
 
         public MediaEngineService(IConfigurationService? configService = null)
         {
@@ -220,7 +301,9 @@ namespace PRRX.IDM.Services
                         host.Contains("twitter.com") || host.Contains("x.com") ||
                         host.Contains("vimeo.com") || host.Contains("soundcloud.com") ||
                         host.Contains("bilibili.com") || host.Contains("dailymotion.com") ||
-                        host.Contains("twitch.tv") || host.Contains("reddit.com"))
+                        host.Contains("twitch.tv") || host.Contains("reddit.com") ||
+                        uri.AbsolutePath.EndsWith(".m3u8", StringComparison.OrdinalIgnoreCase) ||
+                        uri.AbsolutePath.EndsWith(".mpd", StringComparison.OrdinalIgnoreCase))
                     {
                         return true;
                     }
@@ -245,9 +328,7 @@ namespace PRRX.IDM.Services
                 startInfo.ArgumentList.Add($"node:{nodeExe}");
             }
 
-            // Modern tokenless / client emulation extractor arguments to bypass YouTube bot detection without requiring cookies
-            startInfo.ArgumentList.Add("--extractor-args");
-            startInfo.ArgumentList.Add("youtube:player_client=android,ios,web_creator");
+            // Approximate date for tab playlists
             startInfo.ArgumentList.Add("--extractor-args");
             startInfo.ArgumentList.Add("youtubetab:approximate_date");
 
@@ -256,20 +337,14 @@ namespace PRRX.IDM.Services
             startInfo.ArgumentList.Add("--concurrent-fragments");
             startInfo.ArgumentList.Add(connections.ToString());
 
-            // Anti-freeze & Anti-stall streaming optimizations
-            startInfo.ArgumentList.Add("--throttled-rate");
-            startInfo.ArgumentList.Add("100K"); // Auto-drops any CDN connection that stalls below 100 KB/s and restarts it instantly
-
-            startInfo.ArgumentList.Add("--hls-use-mpegts"); // Seamless fragment demuxing without MP4 container lock delays
-            startInfo.ArgumentList.Add("--no-part"); // Direct streaming into destination without locking .part files
-
+            // High-throughput streaming buffer
             startInfo.ArgumentList.Add("--buffer-size");
-            startInfo.ArgumentList.Add("8M"); // 8MB high-throughput buffer
+            startInfo.ArgumentList.Add("8M");
             startInfo.ArgumentList.Add("--http-chunk-size");
             startInfo.ArgumentList.Add("10M");
 
             startInfo.ArgumentList.Add("--socket-timeout");
-            startInfo.ArgumentList.Add("5"); // Fast 5s timeout fails hung sockets immediately and recovers
+            startInfo.ArgumentList.Add("10"); // Resilient 10s socket timeout
             startInfo.ArgumentList.Add("--retries");
             startInfo.ArgumentList.Add("10");
             startInfo.ArgumentList.Add("--fragment-retries");
@@ -287,7 +362,11 @@ namespace PRRX.IDM.Services
             return $"{bytes} B";
         }
 
-        public async Task<(MediaProbeResult? Result, string? ErrorMessage)> ProbeMediaAsync(string url, CancellationToken cancellationToken = default)
+        public async Task<(MediaProbeResult? Result, string? ErrorMessage)> ProbeMediaAsync(
+            string url, 
+            CancellationToken cancellationToken = default, 
+            string? cookies = null, 
+            string? userAgent = null)
         {
             if (!SecurityGuard.ValidateUrl(url, out var safeUrl, out var error))
             {
@@ -349,7 +428,7 @@ namespace PRRX.IDM.Services
             startInfo.ArgumentList.Add("--no-warnings");
             startInfo.ArgumentList.Add("--no-check-certificates");
             startInfo.ArgumentList.Add("--socket-timeout");
-            startInfo.ArgumentList.Add("3");
+            startInfo.ArgumentList.Add("4");
             startInfo.ArgumentList.Add("--retries");
             startInfo.ArgumentList.Add("2");
 
@@ -367,14 +446,15 @@ namespace PRRX.IDM.Services
             }
 
             startInfo.ArgumentList.Add("--extractor-args");
-            startInfo.ArgumentList.Add("youtube:player_client=android,ios,web_creator");
-            startInfo.ArgumentList.Add("--extractor-args");
             startInfo.ArgumentList.Add("youtubetab:approximate_date");
+
+            string? tempCookiePath = null;
+            AttachCookiesAndUserAgent(startInfo, cookies, userAgent, out tempCookiePath);
 
             startInfo.ArgumentList.Add(safeUrl);
 
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            linkedCts.CancelAfter(TimeSpan.FromMilliseconds(3500));
+            linkedCts.CancelAfter(TimeSpan.FromMilliseconds(8000));
 
             using var process = new Process { StartInfo = startInfo };
             process.Start();
@@ -389,12 +469,16 @@ namespace PRRX.IDM.Services
             catch (OperationCanceledException)
             {
                 try { if (!process.HasExited) process.Kill(true); } catch { }
-                return (null, "Probe timed out after 3.5s");
+                return (null, "Probe timed out after 8s");
             }
             catch (Exception ex)
             {
                 try { if (!process.HasExited) process.Kill(true); } catch { }
                 return (null, ex.Message);
+            }
+            finally
+            {
+                try { if (!string.IsNullOrWhiteSpace(tempCookiePath) && File.Exists(tempCookiePath)) File.Delete(tempCookiePath); } catch { }
             }
 
             var json = await outputTask;
@@ -571,7 +655,9 @@ namespace PRRX.IDM.Services
             IProgress<DownloadProgressReport>? progress = null,
             CancellationToken cancellationToken = default,
             string? targetContainer = null,
-            string? destinationFilePath = null)
+            string? destinationFilePath = null,
+            string? cookies = null,
+            string? userAgent = null)
         {
             if (!SecurityGuard.ValidateUrl(url, out var safeUrl, out var error))
             {
@@ -612,64 +698,86 @@ namespace PRRX.IDM.Services
                     startInfo.ArgumentList.Add(cleanExt);
                 }
             }
+            else
+            {
+                startInfo.ArgumentList.Add("--merge-output-format");
+                startInfo.ArgumentList.Add("mp4");
+            }
 
             // Attach anti-stall parameters
             AttachCommonArguments(startInfo);
+
+            string? tempCookiePath = null;
+            AttachCookiesAndUserAgent(startInfo, cookies, userAgent, out tempCookiePath);
 
             startInfo.ArgumentList.Add("-o");
             startInfo.ArgumentList.Add(outputTemplate);
             startInfo.ArgumentList.Add(safeUrl);
 
             _lastNonZeroSpeed = "Calculating...";
+            LastErrorMessage = null;
 
-            using var process = new Process { StartInfo = startInfo };
-            process.OutputDataReceived += (_, e) =>
+            try
             {
-                if (string.IsNullOrWhiteSpace(e.Data)) return;
-                ParseAndReportProgress(e.Data, progress);
-            };
-
-            process.ErrorDataReceived += (_, e) =>
-            {
-                if (string.IsNullOrWhiteSpace(e.Data)) return;
-                if (e.Data.Contains("ERROR:", StringComparison.OrdinalIgnoreCase) ||
-                    e.Data.Contains("Sign in to confirm", StringComparison.OrdinalIgnoreCase))
+                using var process = new Process { StartInfo = startInfo };
+                process.OutputDataReceived += (_, e) =>
                 {
-                    var msg = e.Data.Contains("Sign in to confirm", StringComparison.OrdinalIgnoreCase)
-                        ? "YouTube Authentication: Please load cookies.txt in Settings & Updates."
-                        : e.Data.Trim();
-                    progress?.Report(new DownloadProgressReport { StatusMessage = msg, IsError = true });
-                }
-            };
+                    if (string.IsNullOrWhiteSpace(e.Data)) return;
+                    ParseAndReportProgress(e.Data, progress);
+                };
 
-            process.Start();
-            process.BeginOutputReadLine();
-            process.BeginErrorReadLine();
-
-            await process.WaitForExitAsync(cancellationToken);
-
-            if (process.ExitCode == 0 && !string.IsNullOrWhiteSpace(destinationFilePath) && !File.Exists(destinationFilePath))
-            {
-                try
+                process.ErrorDataReceived += (_, e) =>
                 {
-                    var baseName = Path.GetFileNameWithoutExtension(destinationFilePath);
-                    var dir = Path.GetDirectoryName(destinationFilePath) ?? outputDirectory;
-                    if (Directory.Exists(dir))
+                    if (string.IsNullOrWhiteSpace(e.Data)) return;
+                    LastErrorMessage = e.Data.Trim();
+                    if (e.Data.Contains("ERROR:", StringComparison.OrdinalIgnoreCase) ||
+                        e.Data.Contains("Sign in to confirm", StringComparison.OrdinalIgnoreCase))
                     {
-                        var match = Directory.GetFiles(dir, $"{baseName}.*")
-                            .OrderByDescending(f => File.GetLastWriteTimeUtc(f))
-                            .FirstOrDefault();
-                        if (match != null && !string.Equals(match, destinationFilePath, StringComparison.OrdinalIgnoreCase))
+                        var msg = e.Data.Contains("Sign in to confirm", StringComparison.OrdinalIgnoreCase)
+                            ? "YouTube Authentication: Please ensure you are logged into YouTube in Chrome or load cookies.txt."
+                            : e.Data.Trim();
+                        progress?.Report(new DownloadProgressReport { StatusMessage = msg, IsError = true });
+                    }
+                };
+
+                process.Start();
+                process.BeginOutputReadLine();
+                process.BeginErrorReadLine();
+
+                await process.WaitForExitAsync(cancellationToken);
+
+                if (process.ExitCode == 0 && !string.IsNullOrWhiteSpace(destinationFilePath) && !File.Exists(destinationFilePath))
+                {
+                    try
+                    {
+                        var baseName = Path.GetFileNameWithoutExtension(destinationFilePath);
+                        var dir = Path.GetDirectoryName(destinationFilePath) ?? outputDirectory;
+                        if (Directory.Exists(dir))
                         {
-                            File.Move(match, destinationFilePath, true);
+                            var match = Directory.GetFiles(dir, $"{baseName}.*")
+                                .Where(f => !f.EndsWith(".part", StringComparison.OrdinalIgnoreCase) &&
+                                            !f.EndsWith(".ytdl", StringComparison.OrdinalIgnoreCase) &&
+                                            !f.EndsWith(".aria2", StringComparison.OrdinalIgnoreCase) &&
+                                            !f.EndsWith(".temp", StringComparison.OrdinalIgnoreCase) &&
+                                            !f.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase))
+                                .OrderByDescending(f => File.GetLastWriteTimeUtc(f))
+                                .FirstOrDefault();
+                            if (match != null && !string.Equals(match, destinationFilePath, StringComparison.OrdinalIgnoreCase))
+                            {
+                                File.Move(match, destinationFilePath, true);
+                            }
                         }
                     }
+                    catch { }
                 }
-                catch { }
-            }
 
-            MemoryOptimizer.TrimMemory();
-            return process.ExitCode == 0;
+                MemoryOptimizer.TrimMemory();
+                return process.ExitCode == 0;
+            }
+            finally
+            {
+                try { if (!string.IsNullOrWhiteSpace(tempCookiePath) && File.Exists(tempCookiePath)) File.Delete(tempCookiePath); } catch { }
+            }
         }
 
         public async Task<bool> ConvertToMp3Async(
@@ -678,9 +786,11 @@ namespace PRRX.IDM.Services
             string outputDirectory,
             IProgress<DownloadProgressReport>? progress = null,
             CancellationToken cancellationToken = default,
-            string? destinationFilePath = null)
+            string? destinationFilePath = null,
+            string? cookies = null,
+            string? userAgent = null)
         {
-            return await ConvertAudioAsync(sourceUrlOrPath, "mp3", bitrate, outputDirectory, false, progress, cancellationToken, destinationFilePath);
+            return await ConvertAudioAsync(sourceUrlOrPath, "mp3", bitrate, outputDirectory, false, progress, cancellationToken, destinationFilePath, cookies, userAgent);
         }
 
         public async Task<bool> ConvertAudioAsync(
@@ -691,7 +801,9 @@ namespace PRRX.IDM.Services
             bool trimRingtone = false,
             IProgress<DownloadProgressReport>? progress = null,
             CancellationToken cancellationToken = default,
-            string? destinationFilePath = null)
+            string? destinationFilePath = null,
+            string? cookies = null,
+            string? userAgent = null)
         {
             Directory.CreateDirectory(outputDirectory);
             var normalizedFormat = targetFormat.ToLowerInvariant().TrimStart('.');
@@ -723,6 +835,11 @@ namespace PRRX.IDM.Services
                         if (Directory.Exists(dir))
                         {
                             var match = Directory.GetFiles(dir, $"{baseName}.*")
+                                .Where(f => !f.EndsWith(".part", StringComparison.OrdinalIgnoreCase) &&
+                                            !f.EndsWith(".ytdl", StringComparison.OrdinalIgnoreCase) &&
+                                            !f.EndsWith(".aria2", StringComparison.OrdinalIgnoreCase) &&
+                                            !f.EndsWith(".temp", StringComparison.OrdinalIgnoreCase) &&
+                                            !f.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase))
                                 .OrderByDescending(f => File.GetLastWriteTimeUtc(f))
                                 .FirstOrDefault();
                             if (match != null && !string.Equals(match, destinationFilePath, StringComparison.OrdinalIgnoreCase))
@@ -768,6 +885,9 @@ namespace PRRX.IDM.Services
 
             AttachCommonArguments(startInfo);
 
+            string? tempCookiePath = null;
+            AttachCookiesAndUserAgent(startInfo, cookies, userAgent, out tempCookiePath);
+
             startInfo.ArgumentList.Add("-o");
             startInfo.ArgumentList.Add(outputTemplate);
 
@@ -786,79 +906,93 @@ namespace PRRX.IDM.Services
             }
 
             _lastNonZeroSpeed = "Calculating...";
+            LastErrorMessage = null;
 
-            using var process = new Process { StartInfo = startInfo };
-            process.OutputDataReceived += (_, e) =>
+            try
             {
-                if (string.IsNullOrWhiteSpace(e.Data)) return;
-                ParseAndReportProgress(e.Data, progress);
-            };
-
-            process.ErrorDataReceived += (_, e) =>
-            {
-                if (string.IsNullOrWhiteSpace(e.Data)) return;
-                if (e.Data.Contains("ERROR:", StringComparison.OrdinalIgnoreCase) ||
-                    e.Data.Contains("Sign in to confirm", StringComparison.OrdinalIgnoreCase))
+                using var process = new Process { StartInfo = startInfo };
+                process.OutputDataReceived += (_, e) =>
                 {
-                    var msg = e.Data.Contains("Sign in to confirm", StringComparison.OrdinalIgnoreCase)
-                        ? "YouTube Authentication: Please load cookies.txt in Settings & Updates."
-                        : e.Data.Trim();
-                    progress?.Report(new DownloadProgressReport { StatusMessage = msg, IsError = true });
-                }
-            };
+                    if (string.IsNullOrWhiteSpace(e.Data)) return;
+                    ParseAndReportProgress(e.Data, progress);
+                };
 
-            process.Start();
-            process.BeginOutputReadLine();
-            process.BeginErrorReadLine();
-
-            await process.WaitForExitAsync(cancellationToken);
-
-            if (process.ExitCode == 0 && !string.IsNullOrWhiteSpace(destinationFilePath) && !File.Exists(destinationFilePath))
-            {
-                try
+                process.ErrorDataReceived += (_, e) =>
                 {
-                    var baseName = Path.GetFileNameWithoutExtension(destinationFilePath);
-                    var dir = Path.GetDirectoryName(destinationFilePath) ?? outputDirectory;
-                    if (Directory.Exists(dir))
+                    if (string.IsNullOrWhiteSpace(e.Data)) return;
+                    LastErrorMessage = e.Data.Trim();
+                    if (e.Data.Contains("ERROR:", StringComparison.OrdinalIgnoreCase) ||
+                        e.Data.Contains("Sign in to confirm", StringComparison.OrdinalIgnoreCase))
                     {
-                        var match = Directory.GetFiles(dir, $"{baseName}.*")
-                            .OrderByDescending(f => File.GetLastWriteTimeUtc(f))
-                            .FirstOrDefault();
-                        if (match != null && !string.Equals(match, destinationFilePath, StringComparison.OrdinalIgnoreCase))
+                        var msg = e.Data.Contains("Sign in to confirm", StringComparison.OrdinalIgnoreCase)
+                            ? "YouTube Authentication: Please ensure you are logged into YouTube in Chrome or load cookies.txt."
+                            : e.Data.Trim();
+                        progress?.Report(new DownloadProgressReport { StatusMessage = msg, IsError = true });
+                    }
+                };
+
+                process.Start();
+                process.BeginOutputReadLine();
+                process.BeginErrorReadLine();
+
+                await process.WaitForExitAsync(cancellationToken);
+
+                if (process.ExitCode == 0 && !string.IsNullOrWhiteSpace(destinationFilePath) && !File.Exists(destinationFilePath))
+                {
+                    try
+                    {
+                        var baseName = Path.GetFileNameWithoutExtension(destinationFilePath);
+                        var dir = Path.GetDirectoryName(destinationFilePath) ?? outputDirectory;
+                        if (Directory.Exists(dir))
                         {
-                            File.Move(match, destinationFilePath, true);
+                            var match = Directory.GetFiles(dir, $"{baseName}.*")
+                                .Where(f => !f.EndsWith(".part", StringComparison.OrdinalIgnoreCase) &&
+                                            !f.EndsWith(".ytdl", StringComparison.OrdinalIgnoreCase) &&
+                                            !f.EndsWith(".aria2", StringComparison.OrdinalIgnoreCase) &&
+                                            !f.EndsWith(".temp", StringComparison.OrdinalIgnoreCase) &&
+                                            !f.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase))
+                                .OrderByDescending(f => File.GetLastWriteTimeUtc(f))
+                                .FirstOrDefault();
+                            if (match != null && !string.Equals(match, destinationFilePath, StringComparison.OrdinalIgnoreCase))
+                            {
+                                File.Move(match, destinationFilePath, true);
+                            }
                         }
                     }
+                    catch { }
                 }
-                catch { }
-            }
 
-            // If user requested m4r (iPhone Ringtone), rename/remux the downloaded m4a to m4r
-            if (process.ExitCode == 0 && normalizedFormat == "m4r")
-            {
-                try
+                // If user requested m4r (iPhone Ringtone), rename/remux the downloaded m4a to m4r
+                if (process.ExitCode == 0 && normalizedFormat == "m4r")
                 {
-                    var m4aFiles = Directory.GetFiles(outputDirectory, "*.m4a")
-                        .Select(f => new FileInfo(f))
-                        .OrderByDescending(f => f.LastWriteTimeUtc)
-                        .ToList();
-
-                    if (m4aFiles.Count > 0)
+                    try
                     {
-                        var latestM4a = m4aFiles[0].FullName;
-                        var m4rPath = Path.ChangeExtension(latestM4a, ".m4r");
-                        if (File.Exists(m4rPath)) File.Delete(m4rPath);
-                        File.Move(latestM4a, m4rPath);
+                        var m4aFiles = Directory.GetFiles(outputDirectory, "*.m4a")
+                            .Select(f => new FileInfo(f))
+                            .OrderByDescending(f => f.LastWriteTimeUtc)
+                            .ToList();
+
+                        if (m4aFiles.Count > 0)
+                        {
+                            var latestM4a = m4aFiles[0].FullName;
+                            var m4rPath = Path.ChangeExtension(latestM4a, ".m4r");
+                            if (File.Exists(m4rPath)) File.Delete(m4rPath);
+                            File.Move(latestM4a, m4rPath);
+                        }
+                    }
+                    catch
+                    {
+                        // Fall through
                     }
                 }
-                catch
-                {
-                    // Fall through
-                }
-            }
 
-            MemoryOptimizer.TrimMemory();
-            return process.ExitCode == 0;
+                MemoryOptimizer.TrimMemory();
+                return process.ExitCode == 0;
+            }
+            finally
+            {
+                try { if (!string.IsNullOrWhiteSpace(tempCookiePath) && File.Exists(tempCookiePath)) File.Delete(tempCookiePath); } catch { }
+            }
         }
 
         private async Task<bool> ConvertLocalFileWithFfmpegAsync(

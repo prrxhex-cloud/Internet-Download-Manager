@@ -324,7 +324,24 @@
           const innerMedia = mediaElement.querySelector("video, audio, source, a[href]");
           if (innerMedia) targetUrl = innerMedia.currentSrc || innerMedia.src || innerMedia.href;
         }
-        if (!targetUrl) targetUrl = window.location.href;
+
+        const host = (window.location.hostname || "").toLowerCase();
+        const isStreamingSite = host.includes("youtube.com") ||
+                                host.includes("youtu.be") ||
+                                host.includes("tiktok.com") ||
+                                host.includes("instagram.com") ||
+                                host.includes("twitter.com") ||
+                                host.includes("x.com") ||
+                                host.includes("facebook.com") ||
+                                host.includes("fb.watch") ||
+                                host.includes("vimeo.com") ||
+                                host.includes("soundcloud.com") ||
+                                host.includes("bilibili.com") ||
+                                host.includes("dailymotion.com");
+
+        if (isStreamingSite || !targetUrl || targetUrl.startsWith("blob:") || targetUrl.startsWith("data:")) {
+          targetUrl = window.location.href;
+        }
 
         let detectedTitle = document.title || "media_file";
         const titleEl = container.querySelector(".document-title, .audio-title, .title, .name");
@@ -336,6 +353,7 @@
           chrome.runtime.sendMessage({
             action: "download_video",
             url: targetUrl,
+            referer: window.location.href,
             quality: item.dataset.quality || "best",
             targetFormat: item.dataset.format || "mp4",
             mediaType: item.dataset.type || "video",

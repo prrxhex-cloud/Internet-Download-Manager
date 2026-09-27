@@ -377,6 +377,7 @@ namespace PRRX.IDM.Services
 
         public void StartIpcServer(int? httpPort = null)
         {
+            if (_cts != null && !_cts.IsCancellationRequested) return;
             _cts = new CancellationTokenSource();
             _activePort = httpPort ?? DefaultHttpPort;
             
@@ -798,6 +799,11 @@ namespace PRRX.IDM.Services
             }
             else if (!string.IsNullOrWhiteSpace(payload.Url))
             {
+                if (!string.IsNullOrWhiteSpace(payload.Cookies))
+                {
+                    MediaEngineService.SaveCachedCookies(payload.Cookies);
+                }
+
                 var vm = new DownloadFileInfoViewModel(
                     payload.Url, 
                     defaultDir, 

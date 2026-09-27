@@ -234,12 +234,12 @@ namespace PRRX.IDM.Services
                         if (isAudio)
                         {
                             var audioFmt = string.IsNullOrWhiteSpace(ext) ? "mp3" : ext;
-                            success = await mediaEngine.ConvertAudioAsync(url, audioFmt, "320k", outDir, false, progressReporter, _cts.Token, destinationFilePath);
+                            success = await mediaEngine.ConvertAudioAsync(url, audioFmt, "320k", outDir, false, progressReporter, _cts.Token, destinationFilePath, cookies, userAgent);
                         }
                         else
                         {
                             var videoFmt = string.IsNullOrWhiteSpace(ext) ? "mp4" : ext;
-                            success = await mediaEngine.DownloadVideoAsync(url, "bestvideo+bestaudio/best", outDir, progressReporter, _cts.Token, videoFmt, destinationFilePath);
+                            success = await mediaEngine.DownloadVideoAsync(url, "bestvideo+bestaudio/best", outDir, progressReporter, _cts.Token, videoFmt, destinationFilePath, cookies, userAgent);
                         }
 
                         IsRunning = false;
@@ -253,6 +253,11 @@ namespace PRRX.IDM.Services
                             {
                                 var baseName = Path.GetFileNameWithoutExtension(destinationFilePath);
                                 var match = Directory.GetFiles(outDir, $"{baseName}.*")
+                                    .Where(f => !f.EndsWith(".part", StringComparison.OrdinalIgnoreCase) &&
+                                                !f.EndsWith(".ytdl", StringComparison.OrdinalIgnoreCase) &&
+                                                !f.EndsWith(".aria2", StringComparison.OrdinalIgnoreCase) &&
+                                                !f.EndsWith(".temp", StringComparison.OrdinalIgnoreCase) &&
+                                                !f.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase))
                                     .OrderByDescending(f => File.GetLastWriteTimeUtc(f))
                                     .FirstOrDefault();
                                 if (match != null && new FileInfo(match).Length > 0)
@@ -279,7 +284,10 @@ namespace PRRX.IDM.Services
                             }
                         }
 
-                        DownloadFailed?.Invoke(this, "Media stream download failed. Please verify that the media is available.");
+                        var errMsg = !string.IsNullOrWhiteSpace(mediaEngine.LastErrorMessage)
+                            ? mediaEngine.LastErrorMessage
+                            : "Media stream download failed. Please verify that the media is available.";
+                        DownloadFailed?.Invoke(this, errMsg);
                         return false;
                     }
                 }

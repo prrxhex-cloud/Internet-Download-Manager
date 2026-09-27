@@ -93,6 +93,7 @@ namespace PRRX.IDM
                 _updateService = new UpdateService();
                 _historyService = new HistoryService();
                 _browserService = new BrowserIntegrationService(_configService, null, _historyService);
+                _browserService.StartIpcServer();
                 _telegramBotSyncService = new TelegramBotSyncService(_configService);
 
                 _telegramBotSyncService.TaskReceived += (s, task) =>

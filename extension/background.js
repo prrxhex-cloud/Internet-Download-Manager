@@ -127,6 +127,49 @@ async function checkDesktopBridge() {
   return { status: "offline" };
 }
 
+// 2.5 Full Cookie Extractor (Netscape Format for Authenticated Downloads)
+async function getFullNetscapeCookies(targetUrl) {
+  if (!chrome.cookies) return "";
+  try {
+    let cookieList = [];
+    const lower = (targetUrl || "").toLowerCase();
+    if (lower.includes("youtube.com") || lower.includes("youtu.be")) {
+      const ytCookies = await chrome.cookies.getAll({ domain: "youtube.com" });
+      const googleCookies = await chrome.cookies.getAll({ domain: "google.com" });
+      cookieList = [...ytCookies, ...googleCookies];
+    } else if (targetUrl) {
+      cookieList = await chrome.cookies.getAll({ url: targetUrl });
+      if (!cookieList || cookieList.length === 0) {
+        try {
+          const u = new URL(targetUrl);
+          cookieList = await chrome.cookies.getAll({ domain: u.hostname });
+        } catch { }
+      }
+    }
+
+    if (cookieList && cookieList.length > 0) {
+      let netscape = "# Netscape HTTP Cookie File\n";
+      const seen = new Set();
+      for (const c of cookieList) {
+        const key = `${c.domain}|${c.path}|${c.name}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+
+        const domain = c.domain.startsWith(".") ? c.domain : `.${c.domain}`;
+        const flag = domain.startsWith(".") ? "TRUE" : "FALSE";
+        const path = c.path || "/";
+        const secure = c.secure ? "TRUE" : "FALSE";
+        const expiry = c.expirationDate ? Math.floor(c.expirationDate) : 2147483647;
+        netscape += `${domain}\t${flag}\t${path}\t${secure}\t${expiry}\t${c.name}\t${c.value}\n`;
+      }
+      return netscape;
+    }
+  } catch (err) {
+    console.warn("PRRX IDM: Cookie extraction error:", err);
+  }
+  return "";
+}
+
 // 3. Handle Context Menu Clicks
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId === "prrx_download_link") {
@@ -144,15 +187,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 
     if (targetUrl) {
       console.log("PRRX IDM: Captured URL from context menu:", targetUrl);
-      let cookiesStr = "";
-      try {
-        if (chrome.cookies) {
-          const cookieList = await chrome.cookies.getAll({ url: targetUrl });
-          if (cookieList && cookieList.length > 0) {
-            cookiesStr = cookieList.map(c => `${c.name}=${c.value}`).join("; ");
-          }
-        }
-      } catch (e) { }
+      const cookiesStr = await getFullNetscapeCookies(targetUrl);
 
       sendToPrrxIdm({
         action: "download",
@@ -215,15 +250,7 @@ chrome.downloads.onDeterminingFilename.addListener((downloadItem, suggest) => {
         detectedSize = downloadItem.totalBytes;
       }
 
-      let cookiesStr = "";
-      try {
-        if (chrome.cookies) {
-          const cookieList = await chrome.cookies.getAll({ url: targetUrl });
-          if (cookieList && cookieList.length > 0) {
-            cookiesStr = cookieList.map(c => `${c.name}=${c.value}`).join("; ");
-          }
-        }
-      } catch (e) { }
+      const cookiesStr = await getFullNetscapeCookies(targetUrl);
 
       sendToPrrxIdm({
         action: "download",
@@ -245,15 +272,7 @@ chrome.downloads.onDeterminingFilename.addListener((downloadItem, suggest) => {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === "download_video" || message.action === "download_url") {
     (async () => {
-      let cookiesStr = "";
-      try {
-        if (chrome.cookies && message.url) {
-          const cookieList = await chrome.cookies.getAll({ url: message.url });
-          if (cookieList && cookieList.length > 0) {
-            cookiesStr = cookieList.map(c => `${c.name}=${c.value}`).join("; ");
-          }
-        }
-      } catch (e) { }
+      const cookiesStr = await getFullNetscapeCookies(message.url);
 
       sendToPrrxIdm({
         action: "download",

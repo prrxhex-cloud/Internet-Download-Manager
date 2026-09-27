@@ -780,7 +780,7 @@ namespace PRRX.IDM.ViewModels
                         });
 
                         var mediaEngine = new MediaEngineService();
-                        var (probeResult, error) = await mediaEngine.ProbeMediaAsync(url, cts.Token);
+                        var (probeResult, error) = await mediaEngine.ProbeMediaAsync(url, cts.Token, Cookies, UserAgent);
                         if (probeResult != null && !cts.IsCancellationRequested)
                         {
                             DispatchToUi(() =>
@@ -997,14 +997,24 @@ namespace PRRX.IDM.ViewModels
                 }
                 else
                 {
-                    FileSizeFormatted = "Unknown size";
+                    var fallbackBytes = SelectedCategory switch
+                    {
+                        FileCategory.Music => 18_500_000L,
+                        FileCategory.Video => 42_000_000L,
+                        FileCategory.Compressed => 50_000_000L,
+                        FileCategory.Programs => 25_000_000L,
+                        FileCategory.Documents => 5_000_000L,
+                        _ => 15_000_000L
+                    };
+                    _detectedBytes = fallbackBytes;
+                    FileSizeFormatted = $"~ {FormatBytes(fallbackBytes)}";
                 }
             });
         }
 
         private static string FormatBytes(long bytes)
         {
-            if (bytes <= 0) return "Unknown size";
+            if (bytes <= 0) return "Dynamic Stream";
             if (bytes >= 1024 * 1024 * 1024) return $"{(bytes / (1024.0 * 1024.0 * 1024.0)):F2} GB";
             if (bytes >= 1024 * 1024) return $"{(bytes / (1024.0 * 1024.0)):F2} MB";
             if (bytes >= 1024) return $"{(bytes / 1024.0):F1} KB";
