@@ -537,6 +537,7 @@ namespace PRRX.IDM.ViewModels
 
         public ICommand OpenTelegramBotCommand { get; }
         public ICommand RefreshTelegramPairingCommand { get; }
+        public ICommand RePairTelegramCommand { get; }
         public ICommand TestTelegramConnectionCommand { get; }
         public ICommand ForceTelegramHeartbeatCommand { get; }
         public ICommand UnlinkTelegramCommand { get; }
@@ -766,7 +767,7 @@ namespace PRRX.IDM.ViewModels
             {
                 if (TelegramBotSyncService.Current != null)
                 {
-                    await TelegramBotSyncService.Current.InitializeAsync();
+                    await TelegramBotSyncService.Current.RePairAsync();
                     TelegramPairingCode = TelegramBotSyncService.Current.PairingCode;
                 }
                 else
@@ -775,6 +776,34 @@ namespace PRRX.IDM.ViewModels
                 }
                 OnPropertyChanged(nameof(TelegramBotUrl));
                 UpdateTelegramStatusProperties();
+            });
+
+            RePairTelegramCommand = new AsyncRelayCommand(async () =>
+            {
+                if (TelegramBotSyncService.Current == null)
+                {
+                    TelegramActionFeedback = "Telegram sync service is not initialized.";
+                    return;
+                }
+
+                IsTestingTelegram = true;
+                TelegramActionFeedback = "Resetting pairing and generating fresh code...";
+                try
+                {
+                    await TelegramBotSyncService.Current.RePairAsync();
+                    TelegramPairingCode = TelegramBotSyncService.Current.PairingCode;
+                    OnPropertyChanged(nameof(TelegramBotUrl));
+                    UpdateTelegramStatusProperties();
+                    TelegramActionFeedback = $"✓ New pairing code: {TelegramPairingCode}. Send it to @{TelegramBotUsername} to connect.";
+                }
+                catch (Exception ex)
+                {
+                    TelegramActionFeedback = $"⚠️ Re-pair error: {ex.Message}";
+                }
+                finally
+                {
+                    IsTestingTelegram = false;
+                }
             });
 
             TestTelegramConnectionCommand = new AsyncRelayCommand(async () =>

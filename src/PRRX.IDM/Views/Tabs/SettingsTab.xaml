@@ -358,7 +358,11 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
                                    Appearance="Secondary" Command="{Binding ForceTelegramHeartbeatCommand}"
                                    Height="34" Margin="0,0,8,0" Padding="12,0"
                                    IsEnabled="{Binding IsTestingTelegram, Converter={StaticResource InvBool}}"/>
-                        <ui:Button Content="Unlink PC" Icon="{ui:SymbolIcon Symbol=Dismiss24}"
+                        <ui:Button Content="Re-Pair" Icon="{ui:SymbolIcon Symbol=QrCode24}"
+                                   Appearance="Secondary" Command="{Binding RePairTelegramCommand}"
+                                   Height="34" Margin="0,0,8,0" Padding="12,0"
+                                   IsEnabled="{Binding IsTestingTelegram, Converter={StaticResource InvBool}}"/>
+                        <ui:Button Content="Unlink" Icon="{ui:SymbolIcon Symbol=Dismiss24}"
                                    Appearance="Danger" Command="{Binding UnlinkTelegramCommand}"
                                    Height="34" Padding="12,0"
                                    IsEnabled="{Binding IsTelegramLinked}"/>

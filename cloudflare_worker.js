@@ -52,6 +52,7 @@ async function getTelegramFileBase(env) {
 const taskQueues = new Map();    // clientId -> Array of task objects
 const pairMap = new Map();       // pairCode -> clientId
 const userClientMap = new Map(); // telegramChatId -> clientId
+const clientUserMap = new Map(); // clientId -> { chatId, username, firstName, lastSeen, status, isNotifiedOffline }
 
 // Edge Rate Limiter (Anti-Abuse Guard)
 const rateLimitMap = new Map();
@@ -437,10 +438,22 @@ export default {
           ? rawClientId
           : crypto.randomUUID().replace(/-/g, "");
 
-        const rawPairCode = body.pairCode || body.pair_code;
+        const forceNew = body.forceNew === true || body.force_new === true;
+        const rawPairCode = forceNew ? null : (body.pairCode || body.pair_code);
         const pairCode = (typeof rawPairCode === "string" && /^PRRX-[A-Z0-9]{4,12}$/i.test(rawPairCode.trim()))
           ? rawPairCode.trim().toUpperCase()
           : generatePairCode();
+
+        if (forceNew) {
+          for (const [k, v] of pairMap.entries()) {
+            if (v === clientId) pairMap.delete(k);
+          }
+          if (env.DB) {
+            try {
+              await env.DB.prepare("DELETE FROM telegram_pairs WHERE client_id = ?1").bind(clientId).run();
+            } catch (_) {}
+          }
+        }
 
         pairMap.set(pairCode, clientId);
 
@@ -1163,6 +1176,35 @@ async function handleTelegramUpdate(update, env, ctx) {
 
   // If user sent bare /start or /pair without code, show friendly welcome instructions
   if (isPairOrStartCommand && !pairingCodeAttempt) {
+    let existingClientId = userClientMap.get(chatId.toString());
+    if (!existingClientId && env.DB) {
+      try {
+        const row = await env.DB.prepare("SELECT client_id FROM telegram_users WHERE chat_id = ?1").bind(chatId.toString()).first();
+        if (row) existingClientId = row.client_id;
+      } catch {}
+    }
+    if (!existingClientId && env.PRRX_KV) {
+      existingClientId = await env.PRRX_KV.get(`user:${chatId}`);
+    }
+
+    if (existingClientId) {
+      await sendTelegramMessage(chatId,
+        `👋 <b>Welcome back to PRRX IDM Bot!</b>\n\n` +
+        `🟢 <b>PC Status:</b> Linked & Active\n` +
+        `💻 <b>Client ID:</b> <code>${existingClientId.substring(0, 8)}...</code>\n\n` +
+        `🚀 Forward any <b>video, audio, document, or link</b> here to download immediately on your PC!\n\n` +
+        `💡 <i>Files sent while your PC is offline will be queued safely and will download automatically when you reconnect.</i>`,
+        env,
+        {
+          inline_keyboard: [
+            [{ text: "📊 Check Status", callback_data: "cmd_status" }, { text: "📥 View Queue", callback_data: "cmd_queue" }],
+            [{ text: "⚡ Turbo Boost", callback_data: "cmd_boost" }, { text: "❓ Help & Commands", callback_data: "cmd_help" }]
+          ]
+        }
+      );
+      return;
+    }
+
     await sendTelegramMessage(chatId,
       `👋 <b>Welcome to PRRX Internet Download Manager Bot!</b>\n\n` +
       `⚡ <b>Automated Telegram-to-PC Downloading:</b>\n` +

@@ -658,11 +658,31 @@ namespace PRRX.IDM.Tests
             Assert.True(vm.ForceTelegramHeartbeatCommand.CanExecute(null));
             vm.ForceTelegramHeartbeatCommand.Execute(null);
 
+            // RePairTelegramCommand
+            Assert.NotNull(vm.RePairTelegramCommand);
+            Assert.True(vm.RePairTelegramCommand.CanExecute(null));
+            vm.RePairTelegramCommand.Execute(null);
+
             // UnlinkTelegramCommand
             Assert.True(vm.UnlinkTelegramCommand.CanExecute(null));
             vm.UnlinkTelegramCommand.Execute(null);
 
             Assert.False(string.IsNullOrWhiteSpace(vm.TelegramPairingCode));
+        }
+
+        [Fact]
+        public async Task TelegramBotSyncService_RePairAsync_GeneratesNewPairingCode()
+        {
+            var configService = new ConfigurationService();
+            var service = new TelegramBotSyncService(configService, "http://127.0.0.1:59997");
+
+            var initialCode = service.PairingCode;
+            var newCode = await service.RePairAsync();
+
+            Assert.False(string.IsNullOrWhiteSpace(newCode));
+            Assert.StartsWith("PRRX-", newCode);
+            Assert.Equal(TelegramBotConnectionStatus.PairingRequired, service.Status);
+            Assert.Equal(newCode, service.PairingCode);
         }
 
         private static string FormatBytes(long bytes)

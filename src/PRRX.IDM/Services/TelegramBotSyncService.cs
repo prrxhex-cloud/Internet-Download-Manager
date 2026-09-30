@@ -57,7 +57,8 @@ namespace PRRX.IDM.Services
         event EventHandler<TelegramRemoteTask>? TaskReceived;
         event EventHandler<string>? PairingCodeChanged;
         event EventHandler? StatusChanged;
-        Task InitializeAsync();
+        Task InitializeAsync(bool forceNew = false);
+        Task<string> RePairAsync(CancellationToken ct = default);
         void Start();
         void Stop();
         Task<List<TelegramRemoteTask>> HydratePendingTasksAsync(CancellationToken ct = default);
@@ -184,7 +185,21 @@ namespace PRRX.IDM.Services
             }
         }
 
-        public async Task InitializeAsync()
+        public async Task<string> RePairAsync(CancellationToken ct = default)
+        {
+            try
+            {
+                await UnlinkAsync(ct).ConfigureAwait(false);
+            }
+            catch { }
+
+            PairingCode = "PRRX-INIT";
+            await InitializeAsync(forceNew: true).ConfigureAwait(false);
+            UpdateStatus(TelegramBotConnectionStatus.PairingRequired);
+            return PairingCode;
+        }
+
+        public async Task InitializeAsync(bool forceNew = false)
         {
             try
             {
@@ -193,15 +208,16 @@ namespace PRRX.IDM.Services
                 var payloadObj = new
                 {
                     clientId = ClientId,
-                    pairCode = (PairingCode != "PRRX-INIT" && PairingCode.StartsWith("PRRX-")) ? PairingCode : null
+                    pairCode = (!forceNew && PairingCode != "PRRX-INIT" && PairingCode.StartsWith("PRRX-")) ? PairingCode : null,
+                    forceNew = forceNew
                 };
                 var payload = JsonSerializer.Serialize(payloadObj);
                 using var content = new StringContent(payload, System.Text.Encoding.UTF8, "application/json");
 
-                using var resp = await SharedHttpClient.PostAsync(pairUri, content);
+                using var resp = await SharedHttpClient.PostAsync(pairUri, content).ConfigureAwait(false);
                 if (resp.IsSuccessStatusCode)
                 {
-                    var json = await resp.Content.ReadAsStringAsync();
+                    var json = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
                     using var doc = JsonDocument.Parse(json);
                     if (doc.RootElement.TryGetProperty("pairCode", out var codeElem) &&
                         codeElem.GetString() is { } code && !string.IsNullOrWhiteSpace(code))
@@ -209,24 +225,26 @@ namespace PRRX.IDM.Services
                         PairingCode = code;
                         _lastPairRegistered = DateTime.UtcNow;
                         PairingCodeChanged?.Invoke(this, PairingCode);
-                        await SendHeartbeatAsync();
+                        await SendHeartbeatAsync().ConfigureAwait(false);
                         return;
                     }
                 }
 
-                ApplyFallbackPairingCode();
+                ApplyFallbackPairingCode(forceNew);
             }
             catch
             {
-                ApplyFallbackPairingCode();
+                ApplyFallbackPairingCode(forceNew);
                 UpdateStatus(TelegramBotConnectionStatus.Disconnected);
             }
         }
 
-        private void ApplyFallbackPairingCode()
+        private void ApplyFallbackPairingCode(bool randomSuffix = false)
         {
-            var prefix = (ClientId.Length >= 4 ? ClientId.Substring(0, 4) : ClientId.PadRight(4, '0')).ToUpperInvariant();
-            PairingCode = "PRRX-" + prefix;
+            var code = randomSuffix
+                ? "PRRX-" + Guid.NewGuid().ToString("N").Substring(0, 4).ToUpperInvariant()
+                : "PRRX-" + (ClientId.Length >= 4 ? ClientId.Substring(0, 4) : ClientId.PadRight(4, '0')).ToUpperInvariant();
+            PairingCode = code;
             PairingCodeChanged?.Invoke(this, PairingCode);
         }
 
@@ -258,10 +276,10 @@ namespace PRRX.IDM.Services
                     status = "online"
                 });
                 using var content = new StringContent(payload, System.Text.Encoding.UTF8, "application/json");
-                using var resp = await SharedHttpClient.PostAsync(heartbeatUri, content, ct);
+                using var resp = await SharedHttpClient.PostAsync(heartbeatUri, content, ct).ConfigureAwait(false);
                 if (resp.IsSuccessStatusCode)
                 {
-                    var json = await resp.Content.ReadAsStringAsync(ct);
+                    var json = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
                     using var doc = JsonDocument.Parse(json);
                     var root = doc.RootElement;
                     bool linked = root.TryGetProperty("linked", out var linkedElem) && linkedElem.GetBoolean();
@@ -299,15 +317,15 @@ namespace PRRX.IDM.Services
         public async Task<bool> TestConnectionAsync(CancellationToken ct = default)
         {
             UpdateStatus(TelegramBotConnectionStatus.Connecting);
-            return await SendHeartbeatAsync(ct);
+            return await SendHeartbeatAsync(ct).ConfigureAwait(false);
         }
 
         public async Task ForceHeartbeatAsync(CancellationToken ct = default)
         {
-            await SendHeartbeatAsync(ct);
+            await SendHeartbeatAsync(ct).ConfigureAwait(false);
             if (IsEnabled)
             {
-                await PollRemoteTasksAsync(ct);
+                await PollRemoteTasksAsync(ct).ConfigureAwait(false);
             }
         }
 
@@ -318,13 +336,13 @@ namespace PRRX.IDM.Services
                 var unlinkUri = $"{_baseUrl}/api/telegram/unlink";
                 var payload = JsonSerializer.Serialize(new { clientId = ClientId });
                 using var content = new StringContent(payload, System.Text.Encoding.UTF8, "application/json");
-                using var resp = await SharedHttpClient.PostAsync(unlinkUri, content, ct);
+                using var resp = await SharedHttpClient.PostAsync(unlinkUri, content, ct).ConfigureAwait(false);
 
                 LinkedChatId = null;
                 LinkedUsername = null;
                 PendingTaskCount = 0;
                 UpdateStatus(TelegramBotConnectionStatus.PairingRequired);
-                await InitializeAsync();
+                await InitializeAsync(forceNew: true).ConfigureAwait(false);
                 return resp.IsSuccessStatusCode;
             }
             catch
@@ -344,7 +362,7 @@ namespace PRRX.IDM.Services
                     status = "offline"
                 });
                 using var content = new StringContent(payload, System.Text.Encoding.UTF8, "application/json");
-                using var resp = await SharedHttpClient.PostAsync(statusUri, content, ct);
+                using var resp = await SharedHttpClient.PostAsync(statusUri, content, ct).ConfigureAwait(false);
             }
             catch
             {
@@ -410,7 +428,7 @@ namespace PRRX.IDM.Services
                 });
 
                 using var content = new StringContent(payload, System.Text.Encoding.UTF8, "application/json");
-                using var resp = await SharedHttpClient.PostAsync(ackUri, content, ct);
+                using var resp = await SharedHttpClient.PostAsync(ackUri, content, ct).ConfigureAwait(false);
                 return resp.IsSuccessStatusCode;
             }
             catch
@@ -427,10 +445,10 @@ namespace PRRX.IDM.Services
             try
             {
                 var taskUri = $"{_baseUrl}/api/telegram/tasks?client_id={ClientId}";
-                using var resp = await SharedHttpClient.GetAsync(taskUri, ct);
+                using var resp = await SharedHttpClient.GetAsync(taskUri, ct).ConfigureAwait(false);
                 if (!resp.IsSuccessStatusCode) return results;
 
-                var json = await resp.Content.ReadAsStringAsync(ct);
+                var json = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
                 using var doc = JsonDocument.Parse(json);
 
                 var ackIds = new List<string>();
@@ -455,7 +473,7 @@ namespace PRRX.IDM.Services
 
                 if (ackIds.Count > 0)
                 {
-                    await AcknowledgeTasksAsync(ackIds, ct);
+                    await AcknowledgeTasksAsync(ackIds, ct).ConfigureAwait(false);
                 }
             }
             catch (Exception ex)
@@ -469,10 +487,10 @@ namespace PRRX.IDM.Services
         private async Task PollRemoteTasksAsync(CancellationToken ct)
         {
             var taskUri = $"{_baseUrl}/api/telegram/tasks?client_id={ClientId}";
-            using var resp = await SharedHttpClient.GetAsync(taskUri, ct);
+            using var resp = await SharedHttpClient.GetAsync(taskUri, ct).ConfigureAwait(false);
             if (!resp.IsSuccessStatusCode) return;
 
-            var json = await resp.Content.ReadAsStringAsync(ct);
+            var json = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
             using var doc = JsonDocument.Parse(json);
 
             var ackIds = new List<string>();
@@ -496,7 +514,7 @@ namespace PRRX.IDM.Services
 
             if (ackIds.Count > 0)
             {
-                await AcknowledgeTasksAsync(ackIds, ct);
+                await AcknowledgeTasksAsync(ackIds, ct).ConfigureAwait(false);
             }
         }
 

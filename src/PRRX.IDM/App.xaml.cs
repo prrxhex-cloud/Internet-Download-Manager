@@ -906,7 +906,14 @@ namespace PRRX.IDM
             try
             {
                 // Explicitly send offline status to Telegram gateway so user is immediately notified
-                _telegramBotSyncService?.SendOfflineStatusAsync().Wait(TimeSpan.FromSeconds(2));
+                // Offload to background thread pool to prevent UI thread synchronization context deadlock
+                Task.Run(async () =>
+                {
+                    if (_telegramBotSyncService != null)
+                    {
+                        await _telegramBotSyncService.SendOfflineStatusAsync().ConfigureAwait(false);
+                    }
+                }).Wait(TimeSpan.FromSeconds(2));
             }
             catch { }
 
