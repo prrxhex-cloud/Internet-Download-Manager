@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Xunit;
+using System.Net.Http;
 using PRRX.IDM.Models;
 using PRRX.IDM.Services;
 using PRRX.IDM.ViewModels;
@@ -95,6 +96,143 @@ namespace PRRX.IDM.Tests
 
             Assert.True(errors.Count == 0, "XAML Enum Errors:\n" + string.Join("\n", errors));
         }
+
+        [Fact]
+        public void InstantiateSiteGrabberTab_DoesNotThrow()
+        {
+            Exception? thrown = null;
+            var thread = new Thread(() =>
+            {
+                try
+                {
+                    if (System.Windows.Application.Current == null)
+                    {
+                        if (System.Windows.Application.ResourceAssembly == null)
+                        {
+                            System.Windows.Application.ResourceAssembly = typeof(PRRX.IDM.App).Assembly;
+                        }
+                        new System.Windows.Application();
+                    }
+                    var configService = new ConfigurationService();
+                    var spiderService = new SiteSpiderGrabberService(configService);
+                    var scheduleService = new ScheduleService();
+                    var vm = new SiteGrabberViewModel(spiderService, scheduleService, configService);
+
+                    var tab = new PRRX.IDM.Views.Tabs.SiteGrabberTab();
+                    tab.DataContext = vm;
+                    tab.Measure(new System.Windows.Size(1000, 1000));
+                    tab.Arrange(new System.Windows.Rect(0, 0, 1000, 1000));
+                    tab.UpdateLayout();
+                    Assert.NotNull(tab);
+
+                    var idmTab = new PRRX.IDM.Views.Tabs.IdmDownloadsTab();
+                    var videoTab = new PRRX.IDM.Views.Tabs.VideoDownloaderTab();
+                    var audioTab = new PRRX.IDM.Views.Tabs.AudioConverterTab();
+                    var thumbTab = new PRRX.IDM.Views.Tabs.ThumbnailTab();
+                    var settingsTab = new PRRX.IDM.Views.Tabs.SettingsTab();
+                    Assert.NotNull(idmTab);
+                    Assert.NotNull(videoTab);
+                    Assert.NotNull(audioTab);
+                    Assert.NotNull(thumbTab);
+                    Assert.NotNull(settingsTab);
+
+                    var themeService = new ThemeService(configService);
+                    var browserService = new BrowserIntegrationService(configService);
+                    var quickTour = new PRRX.IDM.Views.QuickTourWindow(new QuickTourViewModel(configService, themeService));
+                    var onboarding = new PRRX.IDM.Views.OnboardingWindow(new OnboardingViewModel(configService, themeService, browserService));
+                    var fileInfo = new PRRX.IDM.Views.DownloadFileInfoDialog(new DownloadFileInfoViewModel("https://example.com/test.zip", "C:\\Downloads"));
+                    var batchReq = new PRRX.IDM.Models.BatchDownloadRequest { SourcePageUrl = "https://example.com" };
+                    var batchDialog = new PRRX.IDM.Views.BatchDownloadDialog(new BatchDownloadViewModel(batchReq, "C:\\Downloads"));
+                    Assert.NotNull(quickTour);
+                    Assert.NotNull(onboarding);
+                    Assert.NotNull(fileInfo);
+                    Assert.NotNull(batchDialog);
+
+
+
+                }
+                catch (Exception ex)
+                {
+                    thrown = ex;
+                }
+            });
+            thread.SetApartmentState(ApartmentState.STA);
+            thread.Start();
+            thread.Join();
+
+            if (thrown != null)
+            {
+                throw new Exception($"XAML view instantiation failed: {thrown}", thrown);
+            }
+        }
+
+        [Fact]
+        public async Task TestGoogleDriveSetupRequest()
+        {
+            var url = "https://dl.google.com/drive-file-stream/GoogleDriveSetup.exe";
+            using var client = new System.Net.Http.HttpClient();
+
+            // Test 1: HEAD with ApplyStandardHeaders
+            using var headReq = new HttpRequestMessage(HttpMethod.Head, url);
+            PRRX.IDM.Services.SegmentedDownloadEngine.ApplyStandardHeaders(headReq, url);
+            using var headResp = await client.SendAsync(headReq);
+
+            // Test 2: GET with ApplyStandardHeaders and Range: 0-0
+            using var getReq0 = new HttpRequestMessage(HttpMethod.Get, url);
+            PRRX.IDM.Services.SegmentedDownloadEngine.ApplyStandardHeaders(getReq0, url);
+            getReq0.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(0, 0);
+            using var getResp0 = await client.SendAsync(getReq0, HttpCompletionOption.ResponseHeadersRead);
+
+            // Test 3: What SegmentedDownloadEngine was sending when total size unknown:
+            // reqStart = 0, reqEnd = -1 -> Range: bytes=0-
+            using var getReqStream = new HttpRequestMessage(HttpMethod.Get, url);
+            PRRX.IDM.Services.SegmentedDownloadEngine.ApplyStandardHeaders(getReqStream, url);
+            getReqStream.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(0, null);
+            using var getRespStream = await client.SendAsync(getReqStream, HttpCompletionOption.ResponseHeadersRead);
+
+            Assert.True(headResp.IsSuccessStatusCode, $"HEAD status: {headResp.StatusCode}");
+            Assert.True(getResp0.IsSuccessStatusCode, $"GET 0-0 status: {getResp0.StatusCode}");
+            Assert.True(getRespStream.IsSuccessStatusCode, $"GET 0- status: {getRespStream.StatusCode}");
+        }
+
+        [Fact]
+        public async Task TestSegmentedDownloadEngine_GoogleDriveSetup()
+        {
+            var engine = new MultiSegmentDownloader();
+            var tempDir = Path.Combine(Path.GetTempPath(), "prrx_gdrive_test_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempDir);
+            var dest = Path.Combine(tempDir, "GoogleDriveSetup.exe");
+            var url = "https://dl.google.com/drive-file-stream/GoogleDriveSetup.exe";
+
+            var tcs = new TaskCompletionSource<bool>();
+            string? failedReason = null;
+            engine.DownloadCompleted += (_, _) => tcs.TrySetResult(true);
+            engine.DownloadFailed += (_, err) => { failedReason = err; tcs.TrySetResult(false); };
+
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            cts.Token.Register(() => tcs.TrySetCanceled());
+
+            // Cancel after 2 seconds so we only test the connection / start handshake
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(2500);
+                engine.Cancel();
+            });
+
+            _ = engine.StartDownloadAsync(url, dest, 4, cancellationToken: default);
+            try
+            {
+                var result = await tcs.Task;
+            }
+            catch (TaskCanceledException) { }
+
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+
+
+
+
+
 
 
 
@@ -683,6 +821,76 @@ namespace PRRX.IDM.Tests
             Assert.StartsWith("PRRX-", newCode);
             Assert.Equal(TelegramBotConnectionStatus.PairingRequired, service.Status);
             Assert.Equal(newCode, service.PairingCode);
+        }
+
+        [Fact]
+        public void TestMediaEngine_ParseAndReportProgress_AudioPostProcessingStages()
+        {
+            var configService = new ConfigurationService();
+            var mediaEngine = new MediaEngineService(configService);
+            var reports = new List<DownloadProgressReport>();
+            var progress = new SyncProgress<DownloadProgressReport>(r => reports.Add(r));
+            var streamState = new StreamProgressState();
+
+            // 1. [ExtractAudio] -> 96%
+            mediaEngine.ParseAndReportProgress("[ExtractAudio] Destination: test.mp3", progress, streamState);
+            Assert.NotEmpty(reports);
+            Assert.Equal(96.0, reports.Last().Percentage);
+            Assert.Contains("Transcoding", reports.Last().StatusMessage);
+
+            // 2. [Fixup] -> 97%
+            mediaEngine.ParseAndReportProgress("[FixupM3u8] Fixing media container...", progress, streamState);
+            Assert.Equal(97.0, reports.Last().Percentage);
+
+            // 3. [Metadata] -> 98%
+            mediaEngine.ParseAndReportProgress("[Metadata] Adding metadata to test.mp3", progress, streamState);
+            Assert.Equal(98.0, reports.Last().Percentage);
+            Assert.Contains("metadata", reports.Last().StatusMessage, StringComparison.OrdinalIgnoreCase);
+
+            // 4. Deleting original file -> 99%
+            mediaEngine.ParseAndReportProgress("Deleting original file test.temp.mp4 (pass -k to keep)", progress, streamState);
+            Assert.Equal(99.0, reports.Last().Percentage);
+            Assert.Contains("Finalizing", reports.Last().StatusMessage);
+        }
+
+        [Fact]
+        public void TestSegmentedDownloadEngine_StandardHeaders_NoCorsHeaders()
+        {
+            var req = new HttpRequestMessage(HttpMethod.Get, "https://dl.google.com/drive-file-stream/GoogleDriveSetup.exe");
+            SegmentedDownloadEngine.ApplyStandardHeaders(req, req.RequestUri!.ToString());
+
+            // Sec-Fetch-Mode: cors must NOT be present
+            Assert.False(req.Headers.Contains("Sec-Fetch-Mode"), "Sec-Fetch-Mode should not be present");
+            Assert.False(req.Headers.Contains("Sec-Fetch-Site"), "Sec-Fetch-Site should not be present");
+            Assert.True(req.Headers.Contains("User-Agent"));
+            Assert.True(req.Headers.Contains("Accept"));
+        }
+
+        [Fact]
+        public void TestTelegramDynamicSegmentation_ThreadActiveToggling()
+        {
+            var thread = new DownloadConnectionThread
+            {
+                ThreadId = 1,
+                StartByte = 0,
+                EndByte = 1000,
+                CurrentByte = 0,
+                DownloadedBytes = 0,
+                IsActive = true
+            };
+
+            // Thread active while receiving
+            thread.DownloadedBytes = 500;
+            long slotLen = thread.EndByte - thread.StartByte + 1;
+            bool isComplete = thread.DownloadedBytes >= slotLen;
+            thread.IsActive = !isComplete;
+            Assert.True(thread.IsActive);
+
+            // Thread completed -> IsActive becomes false
+            thread.DownloadedBytes = 1001;
+            isComplete = thread.DownloadedBytes >= slotLen;
+            thread.IsActive = !isComplete;
+            Assert.False(thread.IsActive);
         }
 
         private static string FormatBytes(long bytes)

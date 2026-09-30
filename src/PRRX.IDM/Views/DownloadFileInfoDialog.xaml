@@ -18,7 +18,7 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
         WindowStyle="None"
         AllowsTransparency="True"
         Background="Transparent"
-        Icon="/Assets/app_icon.png"
+        Icon="pack://application:,,,/PRRX.InternetDownloadManager;component/Assets/app_icon.png"
         ResizeMode="NoResize">
 
     <Window.Resources>

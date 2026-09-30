@@ -20,7 +20,7 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
         MinHeight="660" MinWidth="900"
         WindowStartupLocation="CenterScreen"
         WindowBackdropType="Mica"
-        Icon="/Assets/app_icon.png"
+        Icon="pack://application:,,,/PRRX.InternetDownloadManager;component/Assets/app_icon.png"
         ExtendsContentIntoTitleBar="True"
         AllowDrop="True"
         DragEnter="Window_DragEnter"

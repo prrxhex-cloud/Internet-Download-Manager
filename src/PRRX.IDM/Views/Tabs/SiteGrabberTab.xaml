@@ -12,6 +12,7 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
              xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+             xmlns:sys="clr-namespace:System;assembly=mscorlib"
              xmlns:converters="clr-namespace:PRRX.IDM.Converters"
              mc:Ignorable="d" 
              d:DesignHeight="850" d:DesignWidth="900">
@@ -19,7 +20,18 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
         <converters:BoolToVisibilityConverter x:Key="BoolToVis"/>
         <converters:InverseBoolToVisibilityConverter x:Key="InvBoolToVis"/>
         <converters:InverseBoolConverter x:Key="InvBool"/>
+
+        <sys:Int32 x:Key="Int0">0</sys:Int32>
+        <sys:Int32 x:Key="Int1">1</sys:Int32>
+        <sys:Int32 x:Key="Int2">2</sys:Int32>
+        <sys:Int32 x:Key="Int3">3</sys:Int32>
+        <sys:Int32 x:Key="Int4">4</sys:Int32>
+        <sys:Int32 x:Key="Int5">5</sys:Int32>
+        <sys:Int32 x:Key="Int6">6</sys:Int32>
+        <sys:Int32 x:Key="Int12">12</sys:Int32>
+        <sys:Int32 x:Key="Int24">24</sys:Int32>
     </UserControl.Resources>
+
 
     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
         <Grid Margin="24,16,24,24">
@@ -82,12 +94,12 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
                         <StackPanel Grid.Column="0" Margin="0,0,12,0">
                             <TextBlock Text="Exploration Depth" FontSize="12" FontWeight="SemiBold" Margin="0,0,0,6"/>
                             <ComboBox SelectedValue="{Binding CurrentProject.ExplorationDepth}" SelectedValuePath="Tag" Height="36" HorizontalAlignment="Stretch">
-                                <ComboBoxItem Content="1 Level (Start Page Only)" Tag="1"/>
-                                <ComboBoxItem Content="2 Levels (Direct Links)" Tag="2" IsSelected="True"/>
-                                <ComboBoxItem Content="3 Levels (Deep Crawl)" Tag="3"/>
-                                <ComboBoxItem Content="4 Levels (Intense Crawl)" Tag="4"/>
-                                <ComboBoxItem Content="5 Levels (Ultra Deep)" Tag="5"/>
-                                <ComboBoxItem Content="Whole Domain (Unlimited)" Tag="0"/>
+                                <ComboBoxItem Content="1 Level (Start Page Only)" Tag="{StaticResource Int1}"/>
+                                <ComboBoxItem Content="2 Levels (Direct Links)" Tag="{StaticResource Int2}"/>
+                                <ComboBoxItem Content="3 Levels (Deep Crawl)" Tag="{StaticResource Int3}"/>
+                                <ComboBoxItem Content="4 Levels (Intense Crawl)" Tag="{StaticResource Int4}"/>
+                                <ComboBoxItem Content="5 Levels (Ultra Deep)" Tag="{StaticResource Int5}"/>
+                                <ComboBoxItem Content="Whole Domain (Unlimited)" Tag="{StaticResource Int0}"/>
                             </ComboBox>
                         </StackPanel>
 
@@ -174,13 +186,14 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
                             <StackPanel Grid.Column="1" Margin="0,0,12,0">
                                 <TextBlock Text="Recurrence Interval" FontSize="12" FontWeight="SemiBold" Margin="0,0,0,4"/>
                                 <ComboBox SelectedValue="{Binding CurrentProject.PeriodicHours}" SelectedValuePath="Tag" Height="34" HorizontalAlignment="Stretch">
-                                    <ComboBoxItem Content="Every 1 Hour" Tag="1"/>
-                                    <ComboBoxItem Content="Every 2 Hours" Tag="2"/>
-                                    <ComboBoxItem Content="Every 4 Hours" Tag="4"/>
-                                    <ComboBoxItem Content="Every 6 Hours" Tag="6" IsSelected="True"/>
-                                    <ComboBoxItem Content="Every 12 Hours" Tag="12"/>
-                                    <ComboBoxItem Content="Every 24 Hours (Daily)" Tag="24"/>
+                                    <ComboBoxItem Content="Every 1 Hour" Tag="{StaticResource Int1}"/>
+                                    <ComboBoxItem Content="Every 2 Hours" Tag="{StaticResource Int2}"/>
+                                    <ComboBoxItem Content="Every 4 Hours" Tag="{StaticResource Int4}"/>
+                                    <ComboBoxItem Content="Every 6 Hours" Tag="{StaticResource Int6}"/>
+                                    <ComboBoxItem Content="Every 12 Hours" Tag="{StaticResource Int12}"/>
+                                    <ComboBoxItem Content="Every 24 Hours (Daily)" Tag="{StaticResource Int24}"/>
                                 </ComboBox>
+
                             </StackPanel>
 
                             <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Bottom">
@@ -256,8 +269,9 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
                     <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,40"
                                 Visibility="{Binding HasFoundFiles, Converter={StaticResource InvBoolToVis}}">
                         <Border Background="#100078D4" Width="64" Height="64" CornerRadius="32" HorizontalAlignment="Center" Margin="0,0,0,12">
-                            <ui:SymbolIcon Symbol="GlobeSearch24" FontSize="30" Foreground="{DynamicResource SystemAccentColorPrimaryBrush}"/>
+                            <ui:SymbolIcon Symbol="GlobeSearch24" FontSize="30" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"/>
                         </Border>
+
                         <TextBlock Text="No Discovered Files Yet" FontSize="16" FontWeight="SemiBold" HorizontalAlignment="Center"/>
                         <TextBlock Text="Configure a target site URL and click 'Start Spider &amp; Grabber' to explore web assets." 
                                    FontSize="12" Opacity="0.7" HorizontalAlignment="Center" Margin="0,4,0,0"/>

@@ -547,14 +547,16 @@ namespace PRRX.IDM.Services
                                     t.DownloadedBytes = t.EndByte - t.StartByte + 1;
                                     t.ProgressPercentage = 100.0;
                                     t.StatusInfo = "Complete";
+                                    t.IsActive = false;
                                     t.FormattedDownloaded = FormatBytes(t.DownloadedBytes);
                                 }
-                                else if (downloaded > t.StartByte)
+                                else if (downloaded >= t.StartByte)
                                 {
-                                    t.DownloadedBytes = downloaded - t.StartByte;
+                                    t.DownloadedBytes = Math.Max(0, downloaded - t.StartByte);
                                     long slot = Math.Max(1, t.EndByte - t.StartByte + 1);
                                     t.ProgressPercentage = Math.Clamp((double)t.DownloadedBytes / slot * 100.0, 0, 100);
                                     t.StatusInfo = "Receiving data...";
+                                    t.IsActive = true;
                                     t.FormattedDownloaded = FormatBytes(t.DownloadedBytes);
                                 }
                                 else
@@ -562,6 +564,7 @@ namespace PRRX.IDM.Services
                                     t.DownloadedBytes = 0;
                                     t.ProgressPercentage = 0.0;
                                     t.StatusInfo = "Pending";
+                                    t.IsActive = false;
                                     t.FormattedDownloaded = "0 KB";
                                 }
                             }
@@ -735,8 +738,9 @@ namespace PRRX.IDM.Services
                     t.CurrentByte = chunkOffset + currentChunkSize;
                     t.FormattedDownloaded = FormatBytes(t.DownloadedBytes);
                     long slotLen = Math.Max(1, t.EndByte - t.StartByte + 1);
-                    t.ProgressPercentage = Math.Clamp((double)t.DownloadedBytes / slotLen * 100.0, 0, 100);
-                    t.StatusInfo = t.DownloadedBytes >= slotLen ? "Complete" : "Receiving data...";
+                    bool isSlotDone = t.DownloadedBytes >= slotLen;
+                    t.StatusInfo = isSlotDone ? "Complete" : "Receiving data...";
+                    t.IsActive = !isSlotDone;
                 }
                 else
                 {
@@ -780,8 +784,9 @@ namespace PRRX.IDM.Services
                                         targetThread.CurrentByte = chunkOffset + chunkBytes.Length;
                                         targetThread.FormattedDownloaded = FormatBytes(targetThread.DownloadedBytes);
                                         long slotLen = Math.Max(1, targetThread.EndByte - targetThread.StartByte + 1);
-                                        targetThread.ProgressPercentage = Math.Clamp((double)targetThread.DownloadedBytes / slotLen * 100.0, 0, 100);
-                                        targetThread.StatusInfo = targetThread.DownloadedBytes >= slotLen ? "Complete" : "Receiving data...";
+                                        bool isSlotComplete = targetThread.DownloadedBytes >= slotLen;
+                                        targetThread.StatusInfo = isSlotComplete ? "Complete" : "Receiving data...";
+                                        targetThread.IsActive = !isSlotComplete;
 
                                         // Save completed chunk index to state file for reliable resume
                                         completedChunkIndices[chunkIndex] = true;

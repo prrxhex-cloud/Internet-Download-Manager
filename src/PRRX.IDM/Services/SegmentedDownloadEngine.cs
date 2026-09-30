@@ -497,9 +497,16 @@ namespace PRRX.IDM.Services
                                     .FirstOrDefault();
                                 if (match != null && new FileInfo(match).Length > 0)
                                 {
-                                    try { File.Move(match, destinationFilePath, true); } catch { }
-                                    if (File.Exists(destinationFilePath)) finalPath = destinationFilePath;
-                                    else finalPath = match;
+                                    if (isAudio && !string.Equals(Path.GetExtension(destinationFilePath), Path.GetExtension(match), StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        finalPath = match;
+                                    }
+                                    else
+                                    {
+                                        try { File.Move(match, destinationFilePath, true); } catch { }
+                                        if (File.Exists(destinationFilePath)) finalPath = destinationFilePath;
+                                        else finalPath = match;
+                                    }
                                 }
                             }
 
@@ -539,6 +546,8 @@ namespace PRRX.IDM.Services
                 _totalBytes = initialTotalBytes > 0 ? initialTotalBytes : -1;
                 bool acceptRanges = false;
                 var client = _activeHttpClient ?? DefaultHttpClient;
+
+                ReportProgress("Connecting...");
 
                 // 1. Probe HEAD to detect Content-Length and Accept-Ranges (with fast 2.5s timeout)
                 try
@@ -839,7 +848,8 @@ namespace PRRX.IDM.Services
                     using var request = new HttpRequestMessage(HttpMethod.Get, url);
                     ApplyStandardHeaders(request, url, referer, userAgent, cookies, customHeaders);
 
-                    if (reqStart >= 0 && (reqEnd < 0 || reqEnd >= reqStart))
+                    bool shouldSendRange = (reqStart > 0) || (reqEnd > 0 && reqEnd >= reqStart);
+                    if (shouldSendRange)
                     {
                         if (reqEnd > 0)
                             request.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(reqStart, reqEnd);
@@ -851,17 +861,31 @@ namespace PRRX.IDM.Services
                     thread.IsActive = true;
 
                     var workerClient = _activeHttpClient ?? DefaultHttpClient;
-                    using var response = await workerClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
+                    var response = await workerClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
 
                     if (response.StatusCode == System.Net.HttpStatusCode.RequestedRangeNotSatisfiable)
                     {
+                        response.Dispose();
                         thread.ProgressPercentage = 100.0;
                         thread.StatusInfo = "Complete";
                         thread.IsActive = false;
                         return;
                     }
 
-                    response.EnsureSuccessStatusCode();
+                    if (response.StatusCode == System.Net.HttpStatusCode.BadRequest && request.Headers.Range != null)
+                    {
+                        response.Dispose();
+                        thread.DownloadedBytes = 0;
+                        existingBytes = 0;
+                        thread.CurrentByte = thread.StartByte;
+                        var fallbackReq = new HttpRequestMessage(HttpMethod.Get, url);
+                        ApplyStandardHeaders(fallbackReq, url, referer, userAgent, cookies, customHeaders);
+                        response = await workerClient.SendAsync(fallbackReq, HttpCompletionOption.ResponseHeadersRead, token);
+                    }
+
+                    using (response)
+                    {
+                        response.EnsureSuccessStatusCode();
 
                     // Check if server accepted the byte range or sent the entire body from offset 0
                     bool isPartial = response.StatusCode == System.Net.HttpStatusCode.PartialContent;
@@ -966,10 +990,11 @@ namespace PRRX.IDM.Services
                         System.Buffers.ArrayPool<byte>.Shared.Return(buffer);
                     }
 
-                    thread.StatusInfo = "Complete";
-                    thread.ProgressPercentage = 100.0;
-                    thread.IsActive = false;
-                    return;
+                        thread.StatusInfo = "Complete";
+                        thread.ProgressPercentage = 100.0;
+                        thread.IsActive = false;
+                        return;
+                    }
                 }
                 catch (OperationCanceledException)
                 {
@@ -1065,9 +1090,6 @@ namespace PRRX.IDM.Services
             request.Headers.TryAddWithoutValidation("Sec-Ch-Ua", "\"Chromium\";v=\"124\", \"Google Chrome\";v=\"124\", \"Not-A.Brand\";v=\"99\"");
             request.Headers.TryAddWithoutValidation("Sec-Ch-Ua-Mobile", "?0");
             request.Headers.TryAddWithoutValidation("Sec-Ch-Ua-Platform", "\"Windows\"");
-            request.Headers.TryAddWithoutValidation("Sec-Fetch-Dest", "empty");
-            request.Headers.TryAddWithoutValidation("Sec-Fetch-Mode", "cors");
-            request.Headers.TryAddWithoutValidation("Sec-Fetch-Site", "cross-site");
 
             // Smart Referer Attachment:
             // If explicit referer is provided, use it.

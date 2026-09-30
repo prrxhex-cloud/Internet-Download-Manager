@@ -308,6 +308,11 @@ namespace PRRX.IDM.Controls
                         dc.DrawRectangle(HeadMarkerBrush, null, markerRect);
                     }
                 }
+                else if (thread.IsActive)
+                {
+                    var markerRect = new Rect(xStart, 1.0, 2.0, Math.Max(1.0, height - 2));
+                    dc.DrawRectangle(HeadMarkerBrush, null, markerRect);
+                }
             }
 
             dc.Pop(); // End clip

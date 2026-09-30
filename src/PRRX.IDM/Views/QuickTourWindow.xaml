@@ -15,7 +15,7 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
         xmlns:converters="clr-namespace:PRRX.IDM.Converters"
         mc:Ignorable="d"
         Title="PRRX IDM - Quick Tour &amp; Full Setup Guide" 
-        Icon="/Assets/app_icon.png"
+        Icon="pack://application:,,,/PRRX.InternetDownloadManager;component/Assets/app_icon.png"
         Height="580" Width="760"
         WindowStartupLocation="CenterScreen"
         ResizeMode="NoResize"

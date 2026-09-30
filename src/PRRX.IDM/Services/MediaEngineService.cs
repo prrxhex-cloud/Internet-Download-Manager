@@ -557,6 +557,9 @@ namespace PRRX.IDM.Services
             startInfo.ArgumentList.Add("--progress-delta");
             startInfo.ArgumentList.Add("0.1");
             startInfo.ArgumentList.Add("--continue");
+            startInfo.ArgumentList.Add("--force-overwrites");
+            startInfo.ArgumentList.Add("--postprocessor-args");
+            startInfo.ArgumentList.Add("ffmpeg:-y -nostdin");
 
             // Attach Proxy if configured
             if (_configService?.CurrentConfig.UseProxy == true && !string.IsNullOrWhiteSpace(_configService.CurrentConfig.ProxyHost))
@@ -1148,6 +1151,7 @@ namespace PRRX.IDM.Services
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
+                RedirectStandardInput = true,
                 CreateNoWindow = true
             };
 
@@ -1218,6 +1222,7 @@ namespace PRRX.IDM.Services
                 };
 
                 process.Start();
+                try { process.StandardInput.Close(); } catch { }
                 process.BeginOutputReadLine();
                 process.BeginErrorReadLine();
 
@@ -1229,6 +1234,17 @@ namespace PRRX.IDM.Services
                 {
                     try { if (!process.HasExited) process.Kill(true); } catch { }
                     throw;
+                }
+
+                if (process.ExitCode == 0)
+                {
+                    progress?.Report(new DownloadProgressReport
+                    {
+                        Percentage = 100.0,
+                        Speed = "0 KB/s",
+                        Eta = "00:00",
+                        StatusMessage = "Complete - Downloaded successfully"
+                    });
                 }
 
                 if (process.ExitCode == 0 && !string.IsNullOrWhiteSpace(destinationFilePath) && !File.Exists(destinationFilePath))
@@ -1382,6 +1398,7 @@ namespace PRRX.IDM.Services
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
+                RedirectStandardInput = true,
                 CreateNoWindow = true
             };
 
@@ -1452,6 +1469,7 @@ namespace PRRX.IDM.Services
                 };
 
                 process.Start();
+                try { process.StandardInput.Close(); } catch { }
                 process.BeginOutputReadLine();
                 process.BeginErrorReadLine();
 
@@ -1463,6 +1481,17 @@ namespace PRRX.IDM.Services
                 {
                     try { if (!process.HasExited) process.Kill(true); } catch { }
                     throw;
+                }
+
+                if (process.ExitCode == 0)
+                {
+                    progress?.Report(new DownloadProgressReport
+                    {
+                        Percentage = 100.0,
+                        Speed = "0 KB/s",
+                        Eta = "00:00",
+                        StatusMessage = "Complete - Audio converted successfully"
+                    });
                 }
 
                 if (process.ExitCode == 0 && !string.IsNullOrWhiteSpace(destinationFilePath) && !File.Exists(destinationFilePath))
@@ -1859,7 +1888,7 @@ namespace PRRX.IDM.Services
                     });
                     continue;
                 }
-                else if (trimmed.Contains("[ExtractAudio]", StringComparison.OrdinalIgnoreCase) || trimmed.Contains("[FixupM3u8]", StringComparison.OrdinalIgnoreCase))
+                else if (trimmed.Contains("[ExtractAudio]", StringComparison.OrdinalIgnoreCase))
                 {
                     if (state != null) state.HighestMappedPercent = Math.Max(state.HighestMappedPercent, 96.0);
                     progress.Report(new DownloadProgressReport
@@ -1868,6 +1897,42 @@ namespace PRRX.IDM.Services
                         Speed = _lastNonZeroSpeed,
                         Eta = "00:01",
                         StatusMessage = "Transcoding pristine high-fidelity audio stream..."
+                    });
+                    continue;
+                }
+                else if (trimmed.Contains("[Fixup", StringComparison.OrdinalIgnoreCase) || trimmed.Contains("Fixing", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (state != null) state.HighestMappedPercent = Math.Max(state.HighestMappedPercent, 97.0);
+                    progress.Report(new DownloadProgressReport
+                    {
+                        Percentage = state?.HighestMappedPercent ?? 97.0,
+                        Speed = _lastNonZeroSpeed,
+                        Eta = "00:01",
+                        StatusMessage = "Fixing media container and packet timestamps..."
+                    });
+                    continue;
+                }
+                else if (trimmed.Contains("[Metadata]", StringComparison.OrdinalIgnoreCase) || trimmed.Contains("Adding metadata", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (state != null) state.HighestMappedPercent = Math.Max(state.HighestMappedPercent, 98.0);
+                    progress.Report(new DownloadProgressReport
+                    {
+                        Percentage = state?.HighestMappedPercent ?? 98.0,
+                        Speed = _lastNonZeroSpeed,
+                        Eta = "00:01",
+                        StatusMessage = "Embedding pristine audio metadata & tags..."
+                    });
+                    continue;
+                }
+                else if (trimmed.Contains("Deleting original file", StringComparison.OrdinalIgnoreCase) || trimmed.Contains("[DeleteFile]", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (state != null) state.HighestMappedPercent = Math.Max(state.HighestMappedPercent, 99.0);
+                    progress.Report(new DownloadProgressReport
+                    {
+                        Percentage = state?.HighestMappedPercent ?? 99.0,
+                        Speed = _lastNonZeroSpeed,
+                        Eta = "00:01",
+                        StatusMessage = "Finalizing pristine audio file..."
                     });
                     continue;
                 }
