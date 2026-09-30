@@ -204,6 +204,218 @@ namespace PRRX.IDM.Tests
             Assert.Equal(12_500_000L, chosenFormat.FileSizeBytes);
         }
 
+        [Theory]
+        [InlineData("100 B", 100L)]
+        [InlineData("~ 500 KB", 512000L)]
+        [InlineData("≈ 1.5 MB", (long)(1.5 * 1024 * 1024))]
+        [InlineData("> 2.5 GB", (long)(2.5 * 1024 * 1024 * 1024))]
+        [InlineData("10 GiB", 10L * 1024 * 1024 * 1024)]
+        [InlineData("128 MiB", 128L * 1024 * 1024)]
+        [InlineData("64 KiB", 64L * 1024)]
+        [InlineData("invalid", 0L)]
+        public void ParseSizeStringToBytes_HandlesAllUnitsAndPrefixes(string input, long expectedMin)
+        {
+            var result = SegmentedDownloadEngine.ParseSizeStringToBytes(input);
+            if (expectedMin == 0)
+            {
+                Assert.Equal(0, result);
+            }
+            else
+            {
+                Assert.True(result >= expectedMin - 100 && result <= expectedMin + 100, 
+                    $"Input '{input}' gave {result}, expected near {expectedMin}");
+            }
+        }
+
+        [Fact]
+        public void CreateConfiguredClient_AppliesProxyAndCredentials()
+        {
+            var config = new AppConfig
+            {
+                UseProxy = true,
+                ProxyType = ProxyType.Socks5,
+                ProxyHost = "127.0.0.1",
+                ProxyPort = 1080,
+                UseProxyAuth = true,
+                ProxyUsername = "user",
+                ProxyPassword = "pwd"
+            };
+
+            var client = SegmentedDownloadEngine.CreateConfiguredClient(
+                config, 
+                siteUsername: "siteUser", 
+                sitePassword: "sitePassword", 
+                targetUri: new Uri("https://example.com/file.zip"));
+
+            Assert.NotNull(client);
+            Assert.Equal(TimeSpan.FromSeconds(45), client.Timeout);
+        }
+
+        [Fact]
+        public void BatchDownloadViewModel_PresetsAndFiltering()
+        {
+            var req = new BatchDownloadRequest
+            {
+                SourcePageUrl = "https://example.com/index.html",
+                PageTitle = "Test Page",
+                Links = new System.Collections.Generic.List<BatchLinkItem>
+                {
+                    new BatchLinkItem { FileName = "movie.mp4", Extension = ".mp4", Category = FileCategory.Video, FileSizeBytes = 50 * 1024 * 1024 },
+                    new BatchLinkItem { FileName = "song.mp3", Extension = ".mp3", Category = FileCategory.Music, FileSizeBytes = 5 * 1024 * 1024 },
+                    new BatchLinkItem { FileName = "report.pdf", Extension = ".pdf", Category = FileCategory.Documents, FileSizeBytes = 2 * 1024 * 1024 },
+                    new BatchLinkItem { FileName = "archive.zip", Extension = ".zip", Category = FileCategory.Compressed, FileSizeBytes = 20 * 1024 * 1024 }
+                }
+            };
+
+            var vm = new BatchDownloadViewModel(req, @"C:\Downloads");
+            Assert.Equal(4, vm.Links.Count);
+            Assert.Equal(4, vm.SelectedLinks.Count);
+
+            // Filter to Videos
+            vm.SelectedPreset = BatchFilterPreset.Videos;
+            Assert.Single(vm.SelectedLinks);
+            Assert.Equal("movie.mp4", vm.SelectedLinks[0].FileName);
+
+            // Filter to Documents
+            vm.SelectedPreset = BatchFilterPreset.Documents;
+            Assert.Single(vm.SelectedLinks);
+            Assert.Equal("report.pdf", vm.SelectedLinks[0].FileName);
+
+            // Size filtering
+            vm.SelectedPreset = BatchFilterPreset.All;
+            vm.MinSizeMbText = "10";
+            // Should match movie.mp4 (50MB) and archive.zip (20MB)
+            Assert.Equal(2, vm.SelectedLinks.Count);
+
+            // Invert selection
+            vm.InvertSelectionCommand.Execute(null);
+            Assert.Equal(2, vm.SelectedLinks.Count);
+            Assert.Contains(vm.SelectedLinks, l => l.FileName == "song.mp3");
+            Assert.Contains(vm.SelectedLinks, l => l.FileName == "report.pdf");
+        }
+
+        [Fact]
+        public void ScheduleService_SchedulesAndUnschedules()
+        {
+            using var schedule = new ScheduleService();
+            var project = new GrabberProject
+            {
+                ProjectName = "Scheduled Site Project",
+                StartUrl = "https://example.com",
+                ScheduleMode = GrabberScheduleMode.RunOnceAtTime,
+                ScheduleStartTime = DateTime.Now.AddHours(2)
+            };
+
+            schedule.ScheduleGrabber(project, _ => Task.CompletedTask);
+            Assert.True(schedule.IsGrabberScheduled(project.Id));
+            Assert.NotNull(schedule.GetNextRunTime(project.Id));
+            Assert.Equal(GrabberStatus.Scheduled, project.Status);
+
+            schedule.UnscheduleGrabber(project.Id);
+            Assert.False(schedule.IsGrabberScheduled(project.Id));
+            Assert.Equal(GrabberStatus.Idle, project.Status);
+        }
+
+        [Theory]
+        [InlineData("video.mp4", FileCategory.Video, "Video Stream")]
+        [InlineData("song.mp3", FileCategory.Music, "Audio Stream")]
+        [InlineData("document.pdf", FileCategory.Documents, "Document")]
+        [InlineData("setup.exe", FileCategory.Programs, "Software Package")]
+        [InlineData("backup.zip", FileCategory.Compressed, "Archive File")]
+        [InlineData("unknown.dat", FileCategory.General, "Dynamic Stream")]
+        public void DownloadFileInfoViewModel_HeuristicResolution(string fileName, FileCategory category, string expectedSubstr)
+        {
+            var heuristic = DownloadFileInfoViewModel.GetCategoryHeuristic(fileName, category);
+            Assert.Contains(expectedSubstr, heuristic);
+        }
+
+        [Fact]
+        public void ParseAndReportProgress_ReportsImmediateFeedbackOnInitHandshake()
+        {
+            var mediaEngine = new MediaEngineService();
+            DownloadProgressReport? lastReport = null;
+            var progress = new SyncProgress<DownloadProgressReport>(r => lastReport = r);
+            var state = new StreamProgressState();
+
+            mediaEngine.ParseAndReportProgress("[youtube] Extracting URL: https://www.youtube.com/watch?v=dQw4w9WgXcQ", progress, state);
+
+            Assert.NotNull(lastReport);
+            Assert.True(lastReport.Percentage >= 3.0);
+            Assert.Equal("Connecting...", lastReport.Speed);
+            Assert.Contains("[youtube]", lastReport.StatusMessage);
+        }
+
+        [Fact]
+        public void ParseAndReportProgress_ScalesMultiPassStreamsAccurately()
+        {
+            var mediaEngine = new MediaEngineService();
+            DownloadProgressReport? lastReport = null;
+            var progress = new SyncProgress<DownloadProgressReport>(r => lastReport = r);
+            var state = new StreamProgressState();
+
+            // Destination 1: Video
+            mediaEngine.ParseAndReportProgress("[download] Destination: video.f137.mp4", progress, state);
+            Assert.NotNull(lastReport);
+            Assert.Equal(5.0, lastReport.Percentage);
+            Assert.Contains("video.f137.mp4", lastReport.StatusMessage);
+
+            // Pass 1: Video 50%
+            mediaEngine.ParseAndReportProgress("[download]  50.0% of  50.00MiB at   5.00MiB/s ETA 00:05", progress, state);
+            Assert.NotNull(lastReport);
+            Assert.Equal(45.0, lastReport.Percentage);
+            Assert.Equal("5.00MiB/s", lastReport.Speed);
+            Assert.Equal("00:05", lastReport.Eta);
+
+            // Pass 1: Video 100%
+            mediaEngine.ParseAndReportProgress("[download] 100.0% of  50.00MiB at   5.00MiB/s ETA 00:00", progress, state);
+            Assert.NotNull(lastReport);
+            Assert.Equal(85.0, lastReport.Percentage);
+
+            // Destination 2: Audio
+            mediaEngine.ParseAndReportProgress("[download] Destination: audio.f140.m4a", progress, state);
+            Assert.NotNull(lastReport);
+            Assert.True(lastReport.Percentage >= 85.0);
+            Assert.Contains("audio.f140.m4a", lastReport.StatusMessage);
+
+            // Pass 2: Audio 50%
+            mediaEngine.ParseAndReportProgress("[download]  50.0% of   5.00MiB at   2.00MiB/s ETA 00:01", progress, state);
+            Assert.NotNull(lastReport);
+            Assert.True(lastReport.Percentage >= 91.0 && lastReport.Percentage <= 92.0);
+
+            // Merger
+            mediaEngine.ParseAndReportProgress("[Merger] Merging formats into \"final.mp4\"", progress, state);
+            Assert.NotNull(lastReport);
+            Assert.Equal(98.0, lastReport.Percentage);
+            Assert.Contains("Multiplexing", lastReport.StatusMessage);
+        }
+
+        [Fact]
+        public void BatchDownloadViewModel_CustomFilter_SupportsMultiTokenDelimiters()
+        {
+            var req = new BatchDownloadRequest
+            {
+                SourcePageUrl = "https://example.com/files",
+                PageTitle = "Download Directory",
+                Links = new System.Collections.Generic.List<BatchLinkItem>
+                {
+                    new BatchLinkItem { FileName = "document.pdf", Extension = ".pdf", Category = FileCategory.Documents },
+                    new BatchLinkItem { FileName = "presentation.pptx", Extension = ".pptx", Category = FileCategory.Documents },
+                    new BatchLinkItem { FileName = "installer.msi", Extension = ".msi", Category = FileCategory.Programs },
+                    new BatchLinkItem { FileName = "photo.png", Extension = ".png", Category = FileCategory.General }
+                }
+            };
+
+            var vm = new BatchDownloadViewModel(req, @"C:\Downloads");
+            vm.SelectedPreset = BatchFilterPreset.Custom;
+            vm.FilterQuery = "*.pdf, pptx; *.msi";
+
+            Assert.Equal(3, vm.SelectedLinks.Count);
+            Assert.Contains(vm.SelectedLinks, l => l.FileName == "document.pdf");
+            Assert.Contains(vm.SelectedLinks, l => l.FileName == "presentation.pptx");
+            Assert.Contains(vm.SelectedLinks, l => l.FileName == "installer.msi");
+            Assert.DoesNotContain(vm.SelectedLinks, l => l.FileName == "photo.png");
+        }
+
         private static string FormatBytes(long bytes)
         {
             if (bytes <= 0) return "Unknown";
@@ -211,6 +423,13 @@ namespace PRRX.IDM.Tests
             if (bytes >= 1024 * 1024) return $"{(bytes / (1024.0 * 1024.0)):F2} MB";
             if (bytes >= 1024) return $"{(bytes / 1024.0):F1} KB";
             return $"{bytes} B";
+        }
+
+        private class SyncProgress<T> : IProgress<T>
+        {
+            private readonly Action<T> _action;
+            public SyncProgress(Action<T> action) => _action = action;
+            public void Report(T value) => _action(value);
         }
     }
 }

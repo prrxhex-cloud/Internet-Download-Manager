@@ -40,6 +40,8 @@ namespace PRRX.IDM.ViewModels
         public string UserAgent { get; set; } = string.Empty;
         public string Cookies { get; set; } = string.Empty;
         public Dictionary<string, string> CustomHeaders { get; } = new();
+        public string? SiteUsername { get; set; }
+        public string? SitePassword { get; set; }
 
         // Speed Limiter
         private bool _useSpeedLimiter = false;
@@ -254,7 +256,23 @@ namespace PRRX.IDM.ViewModels
 
         public void Start()
         {
-            _downloadEngine.StartDownloadAsync(Url, DestinationFilePath, 0, default, Referer, UserAgent, Cookies, CustomHeaders);
+            if (TotalBytes > 1)
+            {
+                FileSizeFormatted = FormatBytes(TotalBytes);
+            }
+
+            _downloadEngine.StartDownloadAsync(
+                Url,
+                DestinationFilePath,
+                0,
+                default,
+                Referer,
+                UserAgent,
+                Cookies,
+                CustomHeaders,
+                initialTotalBytes: TotalBytes > 1 ? TotalBytes : -1,
+                siteUsername: SiteUsername,
+                sitePassword: SitePassword);
 
             // Announce to LAN P2P matchmaker non-blocking
             _ = Task.Run(async () =>

@@ -214,6 +214,104 @@ namespace PRRX.IDM.ViewModels
             }
         }
 
+        private bool _useProxy;
+        public bool UseProxy
+        {
+            get => _useProxy;
+            set
+            {
+                if (SetProperty(ref _useProxy, value))
+                {
+                    _configService.CurrentConfig.UseProxy = value;
+                    _configService.SaveConfig();
+                }
+            }
+        }
+
+        private ProxyType _selectedProxyType;
+        public ProxyType SelectedProxyType
+        {
+            get => _selectedProxyType;
+            set
+            {
+                if (SetProperty(ref _selectedProxyType, value))
+                {
+                    _configService.CurrentConfig.ProxyType = value;
+                    _configService.SaveConfig();
+                }
+            }
+        }
+
+        private string _proxyHost = string.Empty;
+        public string ProxyHost
+        {
+            get => _proxyHost;
+            set
+            {
+                if (SetProperty(ref _proxyHost, value))
+                {
+                    _configService.CurrentConfig.ProxyHost = value;
+                    _configService.SaveConfig();
+                }
+            }
+        }
+
+        private int _proxyPort = 8080;
+        public int ProxyPort
+        {
+            get => _proxyPort;
+            set
+            {
+                if (SetProperty(ref _proxyPort, value))
+                {
+                    _configService.CurrentConfig.ProxyPort = value;
+                    _configService.SaveConfig();
+                }
+            }
+        }
+
+        private bool _useProxyAuth;
+        public bool UseProxyAuth
+        {
+            get => _useProxyAuth;
+            set
+            {
+                if (SetProperty(ref _useProxyAuth, value))
+                {
+                    _configService.CurrentConfig.UseProxyAuth = value;
+                    _configService.SaveConfig();
+                }
+            }
+        }
+
+        private string _proxyUsername = string.Empty;
+        public string ProxyUsername
+        {
+            get => _proxyUsername;
+            set
+            {
+                if (SetProperty(ref _proxyUsername, value))
+                {
+                    _configService.CurrentConfig.ProxyUsername = value;
+                    _configService.SaveConfig();
+                }
+            }
+        }
+
+        private string _proxyPassword = string.Empty;
+        public string ProxyPassword
+        {
+            get => _proxyPassword;
+            set
+            {
+                if (SetProperty(ref _proxyPassword, value))
+                {
+                    _configService.CurrentConfig.ProxyPassword = value;
+                    _configService.SaveConfig();
+                }
+            }
+        }
+
         public ObservableCollection<int> AvailableStreamCounts { get; } = new()
         {
             4,
@@ -527,6 +625,14 @@ namespace PRRX.IDM.ViewModels
             _launchOnStartup = _configService.CurrentConfig.LaunchOnStartup;
             _isWin11 = _themeService.IsWindows11;
             _appVersion = $"v{CurrentVersionClean} (Official Release)";
+
+            _useProxy = _configService.CurrentConfig.UseProxy;
+            _selectedProxyType = _configService.CurrentConfig.ProxyType;
+            _proxyHost = _configService.CurrentConfig.ProxyHost;
+            _proxyPort = _configService.CurrentConfig.ProxyPort > 0 ? _configService.CurrentConfig.ProxyPort : 8080;
+            _useProxyAuth = _configService.CurrentConfig.UseProxyAuth;
+            _proxyUsername = _configService.CurrentConfig.ProxyUsername;
+            _proxyPassword = _configService.CurrentConfig.ProxyPassword;
 
             _isCloudAccelerated = _configService.CurrentConfig.AccelerationMode == DownloadAccelerationMode.CloudAccelerated;
             _isDefaultDirect = _configService.CurrentConfig.AccelerationMode == DownloadAccelerationMode.DefaultDirect;

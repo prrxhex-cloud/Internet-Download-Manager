@@ -173,6 +173,14 @@ namespace PRRX.IDM
                                         vm.CustomHeaders,
                                         _historyService);
 
+                                    if (vm.DetectedBytes.HasValue && vm.DetectedBytes.Value > 0)
+                                    {
+                                        activeVm.TotalBytes = vm.DetectedBytes.Value;
+                                        activeVm.FileSizeFormatted = vm.FileSizeFormatted;
+                                    }
+                                    activeVm.SiteUsername = vm.SiteUsername;
+                                    activeVm.SitePassword = vm.SitePassword;
+
                                     var activeWin = new ActiveDownloadWindow(activeVm);
                                     activeWin.Closed += (_, _) => MemoryOptimizer.TrimMemory();
                                     activeWin.Show();
@@ -779,6 +787,118 @@ namespace PRRX.IDM
             {
                 Debug.WriteLine($"[App] Priority allocation warning: {ex.Message}");
             }
+        }
+
+        public static void LaunchDownloadPrompt(
+            string url,
+            string? fileName = null,
+            long precalculatedSize = 0,
+            string? pageTitle = null,
+            string? referer = null,
+            string? userAgent = null,
+            string? cookies = null,
+            Dictionary<string, string>? customHeaders = null)
+        {
+            if (Current is not App app) return;
+
+            app.Dispatcher.BeginInvoke(new Action(() =>
+            {
+                try
+                {
+                    var defaultDir = app._configService?.CurrentConfig.DownloadDirectory;
+                    if (string.IsNullOrWhiteSpace(defaultDir))
+                    {
+                        defaultDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+                    }
+
+                    var vm = new DownloadFileInfoViewModel(
+                        url,
+                        defaultDir,
+                        pageTitle,
+                        precalculatedSize > 0 ? precalculatedSize : null,
+                        fileName,
+                        null,
+                        referer,
+                        userAgent,
+                        cookies,
+                        customHeaders);
+
+                    var dlg = new DownloadFileInfoDialog(vm);
+                    dlg.Topmost = true;
+                    dlg.Show();
+                    dlg.Activate();
+                    dlg.Focus();
+
+                    try
+                    {
+                        var helper = new WindowInteropHelper(dlg);
+                        helper.EnsureHandle();
+                        SetForegroundWindow(helper.Handle);
+                        BringWindowToTop(helper.Handle);
+                    }
+                    catch { }
+
+                    dlg.Loaded += (_, _) =>
+                    {
+                        _ = System.Threading.Tasks.Task.Delay(150).ContinueWith(_ =>
+                            dlg.Dispatcher.BeginInvoke(new Action(() => dlg.Topmost = false)));
+                    };
+
+                    dlg.Closed += (_, _) =>
+                    {
+                        vm.CancelProbe();
+                        if (vm.DialogResult == DownloadDialogResult.StartNow)
+                        {
+                            var activeVm = new ActiveDownloadViewModel(
+                                vm.Url,
+                                vm.SaveAsFullPath,
+                                null,
+                                null,
+                                null,
+                                vm.Referer,
+                                vm.UserAgent,
+                                vm.Cookies,
+                                vm.CustomHeaders,
+                                app._historyService);
+
+                            if (vm.DetectedBytes.HasValue && vm.DetectedBytes.Value > 0)
+                            {
+                                activeVm.TotalBytes = vm.DetectedBytes.Value;
+                                activeVm.FileSizeFormatted = vm.FileSizeFormatted;
+                            }
+                            activeVm.SiteUsername = vm.SiteUsername;
+                            activeVm.SitePassword = vm.SitePassword;
+
+                            var activeWin = new ActiveDownloadWindow(activeVm);
+                            activeWin.Closed += (_, _) => MemoryOptimizer.TrimMemory();
+                            activeWin.Show();
+                            activeWin.Activate();
+                        }
+                        else if (vm.DialogResult == DownloadDialogResult.DownloadLater)
+                        {
+                            app._historyService?.AddItem(new DownloadItem
+                            {
+                                Title = vm.FileName,
+                                Url = vm.Url,
+                                TargetFilePath = vm.SaveAsFullPath,
+                                FileSizeFormatted = vm.FileSizeFormatted,
+                                Status = DownloadStatus.Queued,
+                                Type = vm.SelectedCategory == FileCategory.Music ? MediaType.Audio : MediaType.Video,
+                                CreatedAt = DateTime.UtcNow
+                            });
+                            MemoryOptimizer.TrimMemory();
+                        }
+                        else
+                        {
+                            MemoryOptimizer.TrimMemory();
+                        }
+                    };
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[App] Error launching download prompt: {ex.Message}");
+                }
+            }));
         }
 
         protected override void OnExit(ExitEventArgs e)

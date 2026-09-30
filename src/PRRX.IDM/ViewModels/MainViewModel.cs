@@ -19,6 +19,8 @@ namespace PRRX.IDM.ViewModels
         private readonly IUpdateService _updateService;
         private readonly IHistoryService _historyService;
         private readonly IBrowserIntegrationService _browserService;
+        private readonly ISiteSpiderGrabberService _spiderService;
+        private readonly IScheduleService _scheduleService;
 
         private ViewModelBase _currentTabViewModel;
         private string _selectedTabKey = "Video";
@@ -29,6 +31,7 @@ namespace PRRX.IDM.ViewModels
         private AudioConverterViewModel? _audioViewModel;
         private ThumbnailViewModel? _thumbnailViewModel;
         private SettingsViewModel? _settingsViewModel;
+        private SiteGrabberViewModel? _siteGrabberViewModel;
 
         public VideoDownloaderViewModel VideoViewModel =>
             _videoViewModel ??= new VideoDownloaderViewModel(_mediaEngine, _configService, _historyService);
@@ -44,6 +47,9 @@ namespace PRRX.IDM.ViewModels
 
         public SettingsViewModel SettingsViewModel =>
             _settingsViewModel ??= new SettingsViewModel(_configService, _themeService, _updateService, _mediaEngine);
+
+        public SiteGrabberViewModel SiteGrabberViewModel =>
+            _siteGrabberViewModel ??= new SiteGrabberViewModel(_spiderService, _scheduleService, _configService);
 
         public ViewModelBase CurrentTabViewModel
         {
@@ -66,7 +72,9 @@ namespace PRRX.IDM.ViewModels
             IThumbnailService thumbnailService,
             IUpdateService updateService,
             IHistoryService historyService,
-            IBrowserIntegrationService browserService)
+            IBrowserIntegrationService browserService,
+            ISiteSpiderGrabberService? spiderService = null,
+            IScheduleService? scheduleService = null)
         {
             _configService = configService;
             _themeService = themeService;
@@ -75,6 +83,8 @@ namespace PRRX.IDM.ViewModels
             _updateService = updateService;
             _historyService = historyService;
             _browserService = browserService;
+            _spiderService = spiderService ?? new SiteSpiderGrabberService(configService);
+            _scheduleService = scheduleService ?? new ScheduleService();
 
             // Start with VideoViewModel as default active tab
             _currentTabViewModel = VideoViewModel;
@@ -91,6 +101,7 @@ namespace PRRX.IDM.ViewModels
                         "Video" => VideoViewModel,
                         "Audio" => AudioViewModel,
                         "Thumbnail" => ThumbnailViewModel,
+                        "SiteGrabber" => SiteGrabberViewModel,
                         "Settings" => SettingsViewModel,
                         _ => VideoViewModel
                     };

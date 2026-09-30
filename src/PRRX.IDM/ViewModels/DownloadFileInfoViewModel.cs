@@ -72,6 +72,28 @@ namespace PRRX.IDM.ViewModels
         public string Cookies { get; set; } = string.Empty;
         public Dictionary<string, string> CustomHeaders { get; } = new();
 
+        private bool _requiresAuth = false;
+        private string _siteUsername = string.Empty;
+        private string _sitePassword = string.Empty;
+
+        public bool RequiresAuth
+        {
+            get => _requiresAuth;
+            set => SetProperty(ref _requiresAuth, value);
+        }
+
+        public string SiteUsername
+        {
+            get => _siteUsername;
+            set => SetProperty(ref _siteUsername, value);
+        }
+
+        public string SitePassword
+        {
+            get => _sitePassword;
+            set => SetProperty(ref _sitePassword, value);
+        }
+
         public DownloadDialogResult DialogResult { get; private set; } = DownloadDialogResult.Cancel;
 
         public bool IsProbing
@@ -776,6 +798,23 @@ namespace PRRX.IDM.ViewModels
                             IsProbing = true;
                         });
 
+                        // 1.5s fast category heuristic fallback timer to guarantee responsiveness
+                        _ = Task.Run(async () =>
+                        {
+                            await Task.Delay(1500, cts.Token);
+                            if (!cts.IsCancellationRequested && (_detectedBytes == null || _detectedBytes <= 0) && IsProbing)
+                            {
+                                DispatchToUi(() =>
+                                {
+                                    if (IsProbing && (_detectedBytes == null || _detectedBytes <= 0))
+                                    {
+                                        FileSizeFormatted = isAudioTarget ? "Audio Stream" : "Video Stream";
+                                        IsProbing = false;
+                                    }
+                                });
+                            }
+                        }, cts.Token);
+
                         var mediaEngine = new MediaEngineService();
                         var (probeResult, error) = await mediaEngine.ProbeMediaAsync(url, cts.Token, Cookies, UserAgent);
                         if (probeResult != null && !cts.IsCancellationRequested)
@@ -831,7 +870,7 @@ namespace PRRX.IDM.ViewModels
                             {
                                 if (!_detectedBytes.HasValue || _detectedBytes.Value <= 0)
                                 {
-                                    FileSizeFormatted = "Dynamic Stream";
+                                    FileSizeFormatted = isAudioTarget ? "Audio Stream" : "Video Stream";
                                     _detectedBytes = null;
                                 }
                                 IsProbing = false;
@@ -873,15 +912,32 @@ namespace PRRX.IDM.ViewModels
                 }
             });
 
+            // 1. Immediate category heuristic fallback scheduled at 1.5s to prevent prolonged "Probing size..."
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(1500, cts.Token);
+                if (!cts.IsCancellationRequested && (_detectedBytes == null || _detectedBytes <= 0) && IsProbing)
+                {
+                    DispatchToUi(() =>
+                    {
+                        if (IsProbing && (_detectedBytes == null || _detectedBytes <= 0))
+                        {
+                            FileSizeFormatted = GetCategoryHeuristic(FileName, SelectedCategory);
+                            IsProbing = false;
+                        }
+                    });
+                }
+            }, cts.Token);
+
             long? detectedBytes = null;
             string? detectedName = null;
             string? detectedMime = null;
 
-            // 1. Try HEAD request with 3.5-second timeout
+            // 1. Try HEAD request with 1.5-second timeout
             try
             {
                 using var headCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
-                headCts.CancelAfter(TimeSpan.FromSeconds(3.5));
+                headCts.CancelAfter(TimeSpan.FromSeconds(1.5));
 
                 using var headReq = new HttpRequestMessage(HttpMethod.Head, url);
                 SegmentedDownloadEngine.ApplyStandardHeaders(headReq, url, Referer, UserAgent, Cookies, CustomHeaders);
@@ -914,13 +970,13 @@ namespace PRRX.IDM.ViewModels
                 // Fallback to GET immediately
             }
 
-            // 2. If HEAD didn't yield size or failed/blocked, probe with GET Range: bytes=0-0
+            // 2. If HEAD didn't yield size or failed/blocked, probe with GET Range: bytes=0-0 (2.0-second timeout)
             if (detectedBytes == null && !cts.IsCancellationRequested)
             {
                 try
                 {
                     using var getCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
-                    getCts.CancelAfter(TimeSpan.FromSeconds(4.5));
+                    getCts.CancelAfter(TimeSpan.FromSeconds(2.0));
 
                     using var getReq = new HttpRequestMessage(HttpMethod.Get, url);
                     SegmentedDownloadEngine.ApplyStandardHeaders(getReq, url, Referer, UserAgent, Cookies, CustomHeaders);
@@ -1004,6 +1060,28 @@ namespace PRRX.IDM.ViewModels
                     FileSizeFormatted = "Dynamic Stream";
                 }
             });
+        }
+
+        public static string GetCategoryHeuristic(string fileName, FileCategory category)
+        {
+            var ext = Path.GetExtension(fileName).ToLowerInvariant().TrimStart('.');
+            return ext switch
+            {
+                "mp4" or "mkv" or "webm" or "avi" or "mov" => "Video Stream",
+                "mp3" or "wav" or "flac" or "aac" or "m4a" or "ogg" => "Audio Stream",
+                "zip" or "rar" or "7z" or "tar" or "gz" => "Archive File",
+                "pdf" or "docx" or "xlsx" or "pptx" or "txt" => "Document",
+                "exe" or "msi" or "iso" or "dmg" => "Software Package",
+                _ => category switch
+                {
+                    FileCategory.Video => "Video Stream",
+                    FileCategory.Music => "Audio Stream",
+                    FileCategory.Compressed => "Archive File",
+                    FileCategory.Documents => "Document",
+                    FileCategory.Programs => "Software Package",
+                    _ => "Dynamic Stream"
+                }
+            };
         }
 
         private static string FormatBytes(long bytes)

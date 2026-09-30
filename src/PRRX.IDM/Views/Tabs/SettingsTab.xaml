@@ -527,6 +527,95 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
                 </StackPanel>
             </Border>
 
+            <!-- Manual Proxy Server Configuration Card -->
+            <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" 
+                    CornerRadius="12" Padding="20" Margin="0,0,0,18"
+                    BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+                <StackPanel>
+                    <Grid Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <ui:SymbolIcon Symbol="Router24" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" Margin="0,0,8,0"/>
+                                <TextBlock Text="Manual Proxy Server &amp; Network Routing" FontSize="16" FontWeight="SemiBold"/>
+                            </StackPanel>
+                            <TextBlock Text="Route downloads through HTTP, HTTPS, SOCKS4, or SOCKS5 proxies with enterprise authentication." 
+                                       Opacity="0.7" FontSize="12" Margin="0,3,0,0"/>
+                        </StackPanel>
+
+                        <CheckBox Grid.Column="1" Content="Enable Proxy" IsChecked="{Binding UseProxy, Mode=TwoWay}"
+                                  FontWeight="SemiBold" VerticalAlignment="Center"/>
+                    </Grid>
+
+                    <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="14"
+                            IsEnabled="{Binding UseProxy}">
+                        <StackPanel>
+                            <!-- Proxy Protocol Type, Host, Port -->
+                            <Grid Margin="0,0,0,12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="140"/>
+                                    <ColumnDefinition Width="2*"/>
+                                    <ColumnDefinition Width="90"/>
+                                </Grid.ColumnDefinitions>
+
+                                <StackPanel Grid.Column="0" Margin="0,0,10,0">
+                                    <TextBlock Text="Protocol" FontWeight="SemiBold" FontSize="12" Margin="0,0,0,4"/>
+                                    <ComboBox SelectedValue="{Binding SelectedProxyType, Mode=TwoWay}" SelectedValuePath="Tag" Height="36">
+                                        <ComboBoxItem Content="HTTP" Tag="{x:Static models:ProxyType.Http}" xmlns:models="clr-namespace:PRRX.IDM.Models" IsSelected="True"/>
+                                        <ComboBoxItem Content="HTTPS" Tag="{x:Static models:ProxyType.Https}" xmlns:models="clr-namespace:PRRX.IDM.Models"/>
+                                        <ComboBoxItem Content="SOCKS4" Tag="{x:Static models:ProxyType.Socks4}" xmlns:models="clr-namespace:PRRX.IDM.Models"/>
+                                        <ComboBoxItem Content="SOCKS5" Tag="{x:Static models:ProxyType.Socks5}" xmlns:models="clr-namespace:PRRX.IDM.Models"/>
+                                    </ComboBox>
+                                </StackPanel>
+
+                                <StackPanel Grid.Column="1" Margin="0,0,10,0">
+                                    <TextBlock Text="Proxy Server Host / IP" FontWeight="SemiBold" FontSize="12" Margin="0,0,0,4"/>
+                                    <ui:TextBox Text="{Binding ProxyHost, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" 
+                                                PlaceholderText="127.0.0.1 or proxy.corp.local" Height="36"/>
+                                </StackPanel>
+
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="Port" FontWeight="SemiBold" FontSize="12" Margin="0,0,0,4"/>
+                                    <ui:TextBox Text="{Binding ProxyPort, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" 
+                                                PlaceholderText="8080" Height="36"/>
+                                </StackPanel>
+                            </Grid>
+
+                            <!-- Proxy Authentication -->
+                            <CheckBox Content="Proxy server requires authentication" 
+                                      IsChecked="{Binding UseProxyAuth, Mode=TwoWay}"
+                                      FontWeight="Medium" Margin="0,0,0,10"/>
+
+                            <Grid IsEnabled="{Binding UseProxyAuth}" Margin="0,0,0,6">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+
+                                <StackPanel Grid.Column="0" Margin="0,0,10,0">
+                                    <TextBlock Text="Username" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                                    <ui:TextBox Text="{Binding ProxyUsername, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" 
+                                                PlaceholderText="Proxy Username" Height="34"/>
+                                </StackPanel>
+
+                                <StackPanel Grid.Column="1">
+                                    <TextBlock Text="Password" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                                    <ui:PasswordBox Password="{Binding ProxyPassword, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" 
+                                                    PlaceholderText="Proxy Password" Height="34"/>
+                                </StackPanel>
+                            </Grid>
+
+                            <TextBlock Text="* Supports Basic, Digest, NTLM, and Kerberos/Negotiate authentication with automatic fallback." 
+                                       FontSize="11" Opacity="0.6" Margin="0,4,0,0"/>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </Border>
+
             <!-- Storage & Downloads Location Card -->
             <Border Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" 
                     CornerRadius="12" Padding="20" Margin="0,0,0,18"

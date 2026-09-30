@@ -380,7 +380,7 @@
   scanIntervalId = setInterval(scanAndAttachVideoPanels, 2000);
   scanAndAttachVideoPanels();
 
-  // 2. Link Collector for "Download All Links with PRRX IDM"
+  // 2. Comprehensive Link & Media Collector for "Download All Links with PRRX IDM"
   try {
     if (isExtensionValid() && chrome.runtime && chrome.runtime.onMessage) {
       chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -388,32 +388,90 @@
         if (request && request.action === "collect_all_links") {
           const links = [];
           const seenUrls = new Set();
-          const anchors = document.querySelectorAll("a[href]");
 
-          anchors.forEach((a) => {
-            const href = a.href;
-            if (!href || href.startsWith("javascript:") || href.startsWith("#") || seenUrls.has(href)) {
+          const videoExts = new Set(["mp4", "mkv", "webm", "avi", "mov", "flv", "m4v", "ts", "m3u8", "3gp", "wmv"]);
+          const audioExts = new Set(["mp3", "m4a", "wav", "aac", "flac", "ogg", "opus", "wma", "aiff"]);
+          const imageExts = new Set(["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp", "ico", "tiff", "avif"]);
+          const docExts = new Set(["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "csv", "epub", "rtf", "odt"]);
+          const archiveExts = new Set(["zip", "rar", "7z", "tar", "gz", "bz2", "xz", "iso", "dmg"]);
+          const programExts = new Set(["exe", "msi", "apk", "bin", "jar", "deb", "rpm"]);
+
+          function classifyCategory(ext, tagName) {
+            const clean = ext.replace(/^\./, "").toLowerCase();
+            if (videoExts.has(clean) || tagName === "VIDEO") return 2; // Video
+            if (audioExts.has(clean) || tagName === "AUDIO") return 1; // Music / Audio
+            if (imageExts.has(clean) || tagName === "IMG") return 0; // General / Image
+            if (docExts.has(clean)) return 4; // Documents
+            if (archiveExts.has(clean)) return 5; // Compressed
+            if (programExts.has(clean)) return 3; // Programs
+            return 0; // General
+          }
+
+          function addLinkCandidate(rawUrl, linkText, defaultCategory, tagName) {
+            if (!rawUrl || seenUrls.has(rawUrl)) return;
+            if (rawUrl.startsWith("javascript:") || rawUrl.startsWith("#") || rawUrl.startsWith("data:") || rawUrl.startsWith("blob:")) {
               return;
             }
-            seenUrls.add(href);
 
-            const cleanUrl = href.split("?")[0].split("#")[0];
-            const lastSeg = cleanUrl.substring(cleanUrl.lastIndexOf("/") + 1);
-            const ext = lastSeg.includes(".") ? lastSeg.substring(lastSeg.lastIndexOf(".")) : "";
-            const filename = lastSeg || "download.bin";
+            try {
+              const parsed = new URL(rawUrl, window.location.href);
+              if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return;
 
-            links.push({
-              url: href,
-              fileName: decodeURIComponent(filename),
-              extension: ext.toLowerCase(),
-              linkText: (a.innerText || a.title || filename).trim().substring(0, 60),
-              fileSizeFormatted: "Pending...",
-              isSelected: true
+              const fullUrl = parsed.href;
+              if (seenUrls.has(fullUrl)) return;
+              seenUrls.add(fullUrl);
+
+              const cleanPath = parsed.pathname;
+              const lastSeg = cleanPath.substring(cleanPath.lastIndexOf("/") + 1);
+              const ext = lastSeg.includes(".") ? lastSeg.substring(lastSeg.lastIndexOf(".")) : "";
+              const filename = lastSeg ? decodeURIComponent(lastSeg) : "download.bin";
+              const cat = classifyCategory(ext, tagName);
+
+              links.push({
+                url: fullUrl,
+                fileName: filename,
+                extension: ext.toLowerCase(),
+                linkText: (linkText || filename).trim().substring(0, 80),
+                fileSizeFormatted: "Pending...",
+                fileSizeBytes: 0,
+                category: cat,
+                isSelected: true
+              });
+            } catch (_) { }
+          }
+
+          // A. Anchors <a href>
+          document.querySelectorAll("a[href]").forEach((a) => {
+            addLinkCandidate(a.href, a.innerText || a.title || a.getAttribute("download") || "", 0, "A");
+          });
+
+          // B. Images <img src>
+          document.querySelectorAll("img[src]").forEach((img) => {
+            addLinkCandidate(img.src, img.alt || img.title || "Image", 0, "IMG");
+          });
+
+          // C. Videos <video src> & <video source src>
+          document.querySelectorAll("video").forEach((vid) => {
+            if (vid.src) {
+              addLinkCandidate(vid.src, vid.title || "Video Stream", 2, "VIDEO");
+            }
+            vid.querySelectorAll("source[src]").forEach((src) => {
+              addLinkCandidate(src.src, "Video Stream", 2, "VIDEO");
+            });
+          });
+
+          // D. Audios <audio src> & <audio source src>
+          document.querySelectorAll("audio").forEach((aud) => {
+            if (aud.src) {
+              addLinkCandidate(aud.src, aud.title || "Audio Track", 1, "AUDIO");
+            }
+            aud.querySelectorAll("source[src]").forEach((src) => {
+              addLinkCandidate(src.src, "Audio Track", 1, "AUDIO");
             });
           });
 
           try {
-            sendResponse({ links: links.slice(0, 200) });
+            sendResponse({ links: links.slice(0, 500) });
           } catch (_) { }
         }
         return true;

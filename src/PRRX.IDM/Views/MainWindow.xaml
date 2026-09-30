@@ -21,7 +21,12 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
         WindowStartupLocation="CenterScreen"
         WindowBackdropType="Mica"
         Icon="/Assets/app_icon.png"
-        ExtendsContentIntoTitleBar="True">
+        ExtendsContentIntoTitleBar="True"
+        AllowDrop="True"
+        DragEnter="Window_DragEnter"
+        DragOver="Window_DragOver"
+        DragLeave="Window_DragLeave"
+        Drop="Window_Drop">
 
     <ui:FluentWindow.Resources>
         <DataTemplate DataType="{x:Type vm:IdmDownloadsViewModel}">
@@ -35,6 +40,9 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
         </DataTemplate>
         <DataTemplate DataType="{x:Type vm:ThumbnailViewModel}">
             <tabs:ThumbnailTab/>
+        </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:SiteGrabberViewModel}">
+            <tabs:SiteGrabberTab/>
         </DataTemplate>
         <DataTemplate DataType="{x:Type vm:SettingsViewModel}">
             <tabs:SettingsTab/>
@@ -92,6 +100,11 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
                                Command="{Binding NavigateTabCommand}" CommandParameter="Thumbnail"
                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
                                Height="44" Margin="0,0,0,8" Padding="16,0" CornerRadius="8"/>
+
+                    <ui:Button Content="Site Grabber" Icon="{ui:SymbolIcon Symbol=GlobeSearch24}"
+                               Command="{Binding NavigateTabCommand}" CommandParameter="SiteGrabber"
+                               HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                               Height="44" Margin="0,0,0,8" Padding="16,0" CornerRadius="8"/>
                 </StackPanel>
 
                 <!-- Bottom Settings Nav & Security Badge -->
@@ -138,5 +151,25 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
                 </ContentControl.Style>
             </ContentControl>
         </Grid>
+
+        <!-- Visual Drag & Drop Overlay -->
+        <Border x:Name="DropOverlay" Grid.Column="0" Grid.ColumnSpan="2"
+                Background="#E60F172A" Visibility="Collapsed"
+                IsHitTestVisible="False" Panel.ZIndex="999">
+            <Border BorderBrush="{DynamicResource AccentTextFillColorPrimaryBrush}"
+                    BorderThickness="2" CornerRadius="16" Margin="32"
+                    Background="#250078D4">
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <ui:SymbolIcon Symbol="ArrowDownload48" FontSize="56"
+                                   Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"
+                                   HorizontalAlignment="Center" Margin="0,0,0,16"/>
+                    <TextBlock Text="Drop links, files, or torrents here"
+                               FontSize="22" FontWeight="SemiBold"
+                               Foreground="White" HorizontalAlignment="Center" Margin="0,0,0,6"/>
+                    <TextBlock Text="Release to start accelerated download with PRRX IDM"
+                               FontSize="13" Foreground="#B0FFFFFF" HorizontalAlignment="Center"/>
+                </StackPanel>
+            </Border>
+        </Border>
     </Grid>
 </ui:FluentWindow>

@@ -86,19 +86,53 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
 
             <!-- 2. Filter & Selection Bar -->
             <Grid Grid.Row="1" Margin="0,0,0,12">
-                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
                     <Button Content="Check All" Command="{Binding CheckAllCommand}"
                             Background="#222836" Foreground="#E2E8F0" BorderBrush="#333D52" BorderThickness="1"
-                            Padding="14,6" Margin="0,0,8,0" Cursor="Hand" FontSize="11" FontWeight="Medium"/>
+                            Padding="10,5" Margin="0,0,6,0" Cursor="Hand" FontSize="11" FontWeight="Medium"/>
                     <Button Content="Uncheck All" Command="{Binding UncheckAllCommand}"
                             Background="#222836" Foreground="#A0AEC0" BorderBrush="#333D52" BorderThickness="1"
-                            Padding="14,6" Margin="0,0,16,0" Cursor="Hand" FontSize="11" FontWeight="Medium"/>
+                            Padding="10,5" Margin="0,0,6,0" Cursor="Hand" FontSize="11" FontWeight="Medium"/>
+                    <Button Content="Invert" Command="{Binding InvertSelectionCommand}"
+                            Background="#222836" Foreground="#A0AEC0" BorderBrush="#333D52" BorderThickness="1"
+                            Padding="10,5" Margin="0,0,12,0" Cursor="Hand" FontSize="11" FontWeight="Medium"/>
 
-                    <TextBlock Text="Filter:" Foreground="#8FA0B8" VerticalAlignment="Center" Margin="0,0,8,0" FontSize="12" FontWeight="Medium"/>
-                    <TextBox Text="{Binding FilterQuery, UpdateSourceTrigger=PropertyChanged}" Width="180"
+                    <TextBlock Text="Preset:" Foreground="#8FA0B8" VerticalAlignment="Center" Margin="0,0,6,0" FontSize="11" FontWeight="Medium"/>
+                    <ComboBox SelectedValue="{Binding SelectedPreset, Mode=TwoWay}" SelectedValuePath="Tag" Height="28" Width="110" Margin="0,0,10,0" FontSize="11"
+                              Background="#161922" Foreground="#E2E8F0" BorderBrush="#2A3245">
+                        <ComboBoxItem Content="All Types" Tag="{x:Static vm:BatchFilterPreset.All}" xmlns:vm="clr-namespace:PRRX.IDM.ViewModels" IsSelected="True"/>
+                        <ComboBoxItem Content="Videos" Tag="{x:Static vm:BatchFilterPreset.Videos}" xmlns:vm="clr-namespace:PRRX.IDM.ViewModels"/>
+                        <ComboBoxItem Content="Audio" Tag="{x:Static vm:BatchFilterPreset.Audio}" xmlns:vm="clr-namespace:PRRX.IDM.ViewModels"/>
+                        <ComboBoxItem Content="Images" Tag="{x:Static vm:BatchFilterPreset.Images}" xmlns:vm="clr-namespace:PRRX.IDM.ViewModels"/>
+                        <ComboBoxItem Content="Documents" Tag="{x:Static vm:BatchFilterPreset.Documents}" xmlns:vm="clr-namespace:PRRX.IDM.ViewModels"/>
+                        <ComboBoxItem Content="Archives" Tag="{x:Static vm:BatchFilterPreset.Archives}" xmlns:vm="clr-namespace:PRRX.IDM.ViewModels"/>
+                        <ComboBoxItem Content="Programs" Tag="{x:Static vm:BatchFilterPreset.Programs}" xmlns:vm="clr-namespace:PRRX.IDM.ViewModels"/>
+                        <ComboBoxItem Content="Regex" Tag="{x:Static vm:BatchFilterPreset.Regex}" xmlns:vm="clr-namespace:PRRX.IDM.ViewModels"/>
+                        <ComboBoxItem Content="Custom" Tag="{x:Static vm:BatchFilterPreset.Custom}" xmlns:vm="clr-namespace:PRRX.IDM.ViewModels"/>
+                    </ComboBox>
+
+                    <TextBlock Text="Filter:" Foreground="#8FA0B8" VerticalAlignment="Center" Margin="0,0,6,0" FontSize="11" FontWeight="Medium"/>
+                    <TextBox Text="{Binding FilterQuery, UpdateSourceTrigger=PropertyChanged}" Width="130" Margin="0,0,10,0"
                              Background="#161922" Foreground="#E2E8F0" BorderBrush="#2A3245" BorderThickness="1"
-                             Padding="10,5" FontSize="11"/>
+                             Padding="6,4" FontSize="11"/>
+
+                    <TextBlock Text="Size MB:" Foreground="#8FA0B8" VerticalAlignment="Center" Margin="0,0,4,0" FontSize="11"/>
+                    <TextBox Text="{Binding MinSizeMbText, UpdateSourceTrigger=PropertyChanged}" Width="45" ToolTip="Min Size MB"
+                             Background="#161922" Foreground="#E2E8F0" BorderBrush="#2A3245" BorderThickness="1"
+                             Padding="4,4" FontSize="11"/>
+                    <TextBlock Text="-" Foreground="#8FA0B8" VerticalAlignment="Center" Margin="2,0"/>
+                    <TextBox Text="{Binding MaxSizeMbText, UpdateSourceTrigger=PropertyChanged}" Width="45" ToolTip="Max Size MB"
+                             Background="#161922" Foreground="#E2E8F0" BorderBrush="#2A3245" BorderThickness="1"
+                             Padding="4,4" FontSize="11"/>
                 </StackPanel>
+
+                <TextBlock Grid.Column="1" Text="{Binding SelectionStatusText}" Foreground="#0078D4"
+                           FontWeight="SemiBold" FontSize="11" VerticalAlignment="Center"/>
             </Grid>
 
             <!-- 3. Links DataGrid -->

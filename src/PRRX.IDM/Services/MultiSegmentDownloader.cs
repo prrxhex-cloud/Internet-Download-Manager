@@ -52,9 +52,12 @@ namespace PRRX.IDM.Services
             string? referer = null,
             string? userAgent = null,
             string? cookies = null,
-            Dictionary<string, string>? customHeaders = null)
+            Dictionary<string, string>? customHeaders = null,
+            long initialTotalBytes = -1,
+            string? siteUsername = null,
+            string? sitePassword = null)
         {
-            return StartDownloadAsync(url, destinationFilePath, concurrency, cancellationToken, referer, userAgent, cookies, customHeaders);
+            return StartDownloadAsync(url, destinationFilePath, concurrency, cancellationToken, referer, userAgent, cookies, customHeaders, initialTotalBytes, siteUsername, sitePassword);
         }
     }
 }

@@ -54,6 +54,15 @@ namespace PRRX.IDM.Models
         Normal = 2
     }
 
+    public enum ProxyType
+    {
+        Direct = 0,
+        Http = 1,
+        Https = 2,
+        Socks4 = 3,
+        Socks5 = 4
+    }
+
     public class AppConfig
     {
         public bool IsOnboardingCompleted { get; set; } = false;
@@ -148,6 +157,17 @@ namespace PRRX.IDM.Models
         /// Enable draggable floating video grabber panel in web browsers
         /// </summary>
         public bool EnableFloatingPanel { get; set; } = true;
+
+        /// <summary>
+        /// Manual Proxy configuration (HTTP, HTTPS, SOCKS4, SOCKS5)
+        /// </summary>
+        public bool UseProxy { get; set; } = false;
+        public ProxyType ProxyType { get; set; } = ProxyType.Direct;
+        public string ProxyHost { get; set; } = string.Empty;
+        public int ProxyPort { get; set; } = 8080;
+        public bool UseProxyAuth { get; set; } = false;
+        public string ProxyUsername { get; set; } = string.Empty;
+        public string ProxyPassword { get; set; } = string.Empty;
     }
 
     public enum DownloadStatus
@@ -386,15 +406,27 @@ namespace PRRX.IDM.Models
         public long TotalSizeBytes { get; set; }
         public string FormattedSize { get; set; } = "Unknown Size";
         public bool StartImmediately { get; set; } = true;
+        public string? SiteUsername { get; set; }
+        public string? SitePassword { get; set; }
+        public bool RequiresAuth { get; set; } = false;
     }
 
-    public class BatchLinkItem
+    public class BatchLinkItem : System.ComponentModel.INotifyPropertyChanged
     {
-        public bool IsSelected { get; set; } = true;
+        private bool _isSelected = true;
+        private string _fileSizeFormatted = "Pending...";
+        private long _fileSizeBytes = 0;
+
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        private void OnPropertyChanged([System.Runtime.CompilerServices.CallerMemberName] string? propName = null) =>
+            PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(propName));
+
+        public bool IsSelected { get => _isSelected; set { if (_isSelected != value) { _isSelected = value; OnPropertyChanged(); } } }
         public string Url { get; set; } = string.Empty;
         public string FileName { get; set; } = string.Empty;
         public string Extension { get; set; } = string.Empty;
-        public string FileSizeFormatted { get; set; } = "Pending...";
+        public string FileSizeFormatted { get => _fileSizeFormatted; set { if (_fileSizeFormatted != value) { _fileSizeFormatted = value; OnPropertyChanged(); } } }
+        public long FileSizeBytes { get => _fileSizeBytes; set { if (_fileSizeBytes != value) { _fileSizeBytes = value; OnPropertyChanged(); } } }
         public string LinkText { get; set; } = string.Empty;
         public FileCategory Category { get; set; } = FileCategory.General;
     }
@@ -404,6 +436,94 @@ namespace PRRX.IDM.Models
         public string SourcePageUrl { get; set; } = string.Empty;
         public string PageTitle { get; set; } = "Web Page";
         public List<BatchLinkItem> Links { get; set; } = new();
+    }
+
+    public enum GrabberFilterPreset
+    {
+        AllFiles = 0,
+        AllImages = 1,
+        AllDocuments = 2,
+        AllMedia = 3,
+        CompleteWebsite = 4,
+        Custom = 5
+    }
+
+    public enum GrabberScheduleMode
+    {
+        RunImmediately = 0,
+        RunOnceAtTime = 1,
+        PeriodicEveryNHours = 2
+    }
+
+    public enum GrabberStatus
+    {
+        Idle,
+        Crawling,
+        Downloading,
+        Paused,
+        Completed,
+        Stopped,
+        Scheduled,
+        Failed
+    }
+
+    public class GrabberFoundFile
+    {
+        public string Url { get; set; } = string.Empty;
+        public string FileName { get; set; } = string.Empty;
+        public string LocalPath { get; set; } = string.Empty;
+        public string FormattedSize { get; set; } = "Calculating...";
+        public long SizeBytes { get; set; }
+        public string Status { get; set; } = "Pending";
+        public double ProgressPercentage { get; set; }
+    }
+
+    public class GrabberProject : System.ComponentModel.INotifyPropertyChanged
+    {
+        private string _projectName = "My Grabber Project";
+        private string _startUrl = string.Empty;
+        private string _saveDirectory = string.Empty;
+        private int _explorationDepth = 2; // 1 to 5, or 0 for whole domain
+        private GrabberFilterPreset _filterPreset = GrabberFilterPreset.AllImages;
+        private string _customExtensions = "jpg,jpeg,png,webp,gif";
+        private string _regexFilter = string.Empty;
+        private bool _stayOnDomain = true;
+        private bool _saveStructure = true;
+        private GrabberScheduleMode _scheduleMode = GrabberScheduleMode.RunImmediately;
+        private DateTime? _scheduleStartTime;
+        private DateTime? _scheduleStopTime;
+        private int _periodicHours = 6;
+        private GrabberStatus _status = GrabberStatus.Idle;
+        private int _pagesCrawled;
+        private int _filesFound;
+        private int _filesDownloaded;
+        private long _totalBytesDownloaded;
+        private string _currentActivity = "Ready";
+
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        private void OnPropertyChanged([System.Runtime.CompilerServices.CallerMemberName] string? propName = null) =>
+            PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(propName));
+
+        public string Id { get; set; } = Guid.NewGuid().ToString("N");
+        public string ProjectName { get => _projectName; set { if (_projectName != value) { _projectName = value; OnPropertyChanged(); } } }
+        public string StartUrl { get => _startUrl; set { if (_startUrl != value) { _startUrl = value; OnPropertyChanged(); } } }
+        public string SaveDirectory { get => _saveDirectory; set { if (_saveDirectory != value) { _saveDirectory = value; OnPropertyChanged(); } } }
+        public int ExplorationDepth { get => _explorationDepth; set { if (_explorationDepth != value) { _explorationDepth = value; OnPropertyChanged(); } } }
+        public GrabberFilterPreset FilterPreset { get => _filterPreset; set { if (_filterPreset != value) { _filterPreset = value; OnPropertyChanged(); } } }
+        public string CustomExtensions { get => _customExtensions; set { if (_customExtensions != value) { _customExtensions = value; OnPropertyChanged(); } } }
+        public string RegexFilter { get => _regexFilter; set { if (_regexFilter != value) { _regexFilter = value; OnPropertyChanged(); } } }
+        public bool StayOnDomain { get => _stayOnDomain; set { if (_stayOnDomain != value) { _stayOnDomain = value; OnPropertyChanged(); } } }
+        public bool SaveStructure { get => _saveStructure; set { if (_saveStructure != value) { _saveStructure = value; OnPropertyChanged(); } } }
+        public GrabberScheduleMode ScheduleMode { get => _scheduleMode; set { if (_scheduleMode != value) { _scheduleMode = value; OnPropertyChanged(); } } }
+        public DateTime? ScheduleStartTime { get => _scheduleStartTime; set { if (_scheduleStartTime != value) { _scheduleStartTime = value; OnPropertyChanged(); } } }
+        public DateTime? ScheduleStopTime { get => _scheduleStopTime; set { if (_scheduleStopTime != value) { _scheduleStopTime = value; OnPropertyChanged(); } } }
+        public int PeriodicHours { get => _periodicHours; set { if (_periodicHours != value) { _periodicHours = value; OnPropertyChanged(); } } }
+        public GrabberStatus Status { get => _status; set { if (_status != value) { _status = value; OnPropertyChanged(); } } }
+        public int PagesCrawled { get => _pagesCrawled; set { if (_pagesCrawled != value) { _pagesCrawled = value; OnPropertyChanged(); } } }
+        public int FilesFound { get => _filesFound; set { if (_filesFound != value) { _filesFound = value; OnPropertyChanged(); } } }
+        public int FilesDownloaded { get => _filesDownloaded; set { if (_filesDownloaded != value) { _filesDownloaded = value; OnPropertyChanged(); } } }
+        public long TotalBytesDownloaded { get => _totalBytesDownloaded; set { if (_totalBytesDownloaded != value) { _totalBytesDownloaded = value; OnPropertyChanged(); } } }
+        public string CurrentActivity { get => _currentActivity; set { if (_currentActivity != value) { _currentActivity = value; OnPropertyChanged(); } } }
     }
 
     public class ChangelogItem

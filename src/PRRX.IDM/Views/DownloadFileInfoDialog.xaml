@@ -13,7 +13,7 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
         Title="PRRX IDM Module" 
-        Height="440" Width="660"
+        Height="500" Width="660"
         WindowStartupLocation="CenterScreen"
         WindowStyle="None"
         AllowsTransparency="True"
@@ -107,6 +107,7 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="90"/>
@@ -170,7 +171,24 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
                 <TextBlock Grid.Row="3" Grid.Column="0" Text="Description:" Foreground="#8FA0B8" VerticalAlignment="Top" Margin="0,6,0,0" FontWeight="Medium" FontSize="12"/>
                 <TextBox Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" Text="{Binding Description, UpdateSourceTrigger=PropertyChanged}"
                          Background="#161922" Foreground="#E2E8F0" BorderBrush="#2A3245" BorderThickness="1"
-                         Padding="10,6" Height="65" TextWrapping="Wrap" AcceptsReturn="True" FontSize="12"/>
+                         Padding="10,6" Height="50" TextWrapping="Wrap" AcceptsReturn="True" FontSize="12"/>
+
+                <!-- Authorization -->
+                <TextBlock Grid.Row="4" Grid.Column="0" Text="Auth:" Foreground="#8FA0B8" VerticalAlignment="Center" Margin="0,8,0,0" FontWeight="Medium" FontSize="12"/>
+                <StackPanel Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,8,0,0">
+                    <CheckBox Content="Use authorization" IsChecked="{Binding RequiresAuth, Mode=TwoWay}"
+                              Foreground="#8FA0B8" VerticalAlignment="Center" Margin="0,0,14,0" FontSize="11"/>
+                    <StackPanel Orientation="Horizontal" Visibility="{Binding RequiresAuth, Converter={StaticResource BoolToVis}}" VerticalAlignment="Center">
+                        <TextBlock Text="User:" Foreground="#8FA0B8" VerticalAlignment="Center" Margin="0,0,6,0" FontSize="11"/>
+                        <TextBox Width="120" Text="{Binding SiteUsername, UpdateSourceTrigger=PropertyChanged}"
+                                 Background="#161922" Foreground="#E2E8F0" BorderBrush="#2A3245" BorderThickness="1"
+                                 Padding="6,4" Margin="0,0,10,0" FontSize="11"/>
+                        <TextBlock Text="Pass:" Foreground="#8FA0B8" VerticalAlignment="Center" Margin="0,0,6,0" FontSize="11"/>
+                        <TextBox Width="120" Text="{Binding SitePassword, UpdateSourceTrigger=PropertyChanged}"
+                                 Background="#161922" Foreground="#E2E8F0" BorderBrush="#2A3245" BorderThickness="1"
+                                 Padding="6,4" FontSize="11"/>
+                    </StackPanel>
+                </StackPanel>
             </Grid>
 
             <!-- 3. Bottom Actions -->

@@ -47,7 +47,10 @@ namespace PRRX.IDM.Services
             string? referer = null,
             string? userAgent = null,
             string? cookies = null,
-            Dictionary<string, string>? customHeaders = null);
+            Dictionary<string, string>? customHeaders = null,
+            long initialTotalBytes = -1,
+            string? siteUsername = null,
+            string? sitePassword = null);
 
         void Pause();
         void Resume();
@@ -59,19 +62,91 @@ namespace PRRX.IDM.Services
     {
         public const int HighSpeedBufferSize = 1048576; // 1 MB Turbo High-Speed Buffer
 
-        private static readonly HttpClient HttpClient = new(new SocketsHttpHandler
+        private static readonly HttpClient DefaultHttpClient = CreateConfiguredClient();
+
+        public static HttpClient CreateConfiguredClient(
+            AppConfig? config = null,
+            string? siteUsername = null,
+            string? sitePassword = null,
+            Uri? targetUri = null)
         {
-            ConnectTimeout = TimeSpan.FromSeconds(15),
-            PooledConnectionLifetime = TimeSpan.FromMinutes(15),
-            PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2),
-            MaxConnectionsPerServer = 64,
-            EnableMultipleHttp2Connections = true,
-            InitialHttp2StreamWindowSize = 8 * 1024 * 1024,
-            AutomaticDecompression = System.Net.DecompressionMethods.None,
-            KeepAlivePingPolicy = HttpKeepAlivePingPolicy.Always,
-            KeepAlivePingDelay = TimeSpan.FromSeconds(30),
-            KeepAlivePingTimeout = TimeSpan.FromSeconds(15)
-        }) { Timeout = TimeSpan.FromSeconds(45) };
+            var handler = new SocketsHttpHandler
+            {
+                ConnectTimeout = TimeSpan.FromSeconds(15),
+                PooledConnectionLifetime = TimeSpan.FromMinutes(15),
+                PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2),
+                MaxConnectionsPerServer = 64,
+                EnableMultipleHttp2Connections = true,
+                InitialHttp2StreamWindowSize = 8 * 1024 * 1024,
+                AutomaticDecompression = System.Net.DecompressionMethods.None,
+                KeepAlivePingPolicy = HttpKeepAlivePingPolicy.Always,
+                KeepAlivePingDelay = TimeSpan.FromSeconds(30),
+                KeepAlivePingTimeout = TimeSpan.FromSeconds(15)
+            };
+
+            // Manual proxy server configuration (HTTP, HTTPS, SOCKS4, SOCKS5)
+            if (config?.UseProxy == true && !string.IsNullOrWhiteSpace(config.ProxyHost))
+            {
+                var scheme = config.ProxyType switch
+                {
+                    ProxyType.Https => "https",
+                    ProxyType.Socks4 => "socks4",
+                    ProxyType.Socks5 => "socks5",
+                    _ => "http"
+                };
+                var proxyUri = new Uri($"{scheme}://{config.ProxyHost.Trim()}:{config.ProxyPort}");
+                var webProxy = new System.Net.WebProxy(proxyUri);
+                if (config.UseProxyAuth && !string.IsNullOrWhiteSpace(config.ProxyUsername))
+                {
+                    webProxy.Credentials = new System.Net.NetworkCredential(config.ProxyUsername, config.ProxyPassword ?? "");
+                }
+                else
+                {
+                    webProxy.Credentials = System.Net.CredentialCache.DefaultNetworkCredentials;
+                }
+                handler.Proxy = webProxy;
+                handler.UseProxy = true;
+            }
+            else
+            {
+                handler.UseProxy = false;
+            }
+
+            // Authentication: Basic, Digest, NTLM, and Negotiate (Kerberos SSO)
+            handler.DefaultProxyCredentials = System.Net.CredentialCache.DefaultNetworkCredentials;
+            var credentialCache = new System.Net.CredentialCache();
+            if (!string.IsNullOrWhiteSpace(siteUsername) && targetUri != null)
+            {
+                var netCred = new System.Net.NetworkCredential(siteUsername, sitePassword ?? "");
+                credentialCache.Add(targetUri, "Basic", netCred);
+                credentialCache.Add(targetUri, "Digest", netCred);
+                credentialCache.Add(targetUri, "NTLM", netCred);
+                credentialCache.Add(targetUri, "Negotiate", netCred);
+
+                try
+                {
+                    var rootUri = new Uri($"{targetUri.Scheme}://{targetUri.Authority}/");
+                    credentialCache.Add(rootUri, "Basic", netCred);
+                    credentialCache.Add(rootUri, "Digest", netCred);
+                    credentialCache.Add(rootUri, "NTLM", netCred);
+                    credentialCache.Add(rootUri, "Negotiate", netCred);
+                }
+                catch { }
+            }
+            else if (targetUri != null)
+            {
+                credentialCache.Add(targetUri, "Negotiate", System.Net.CredentialCache.DefaultNetworkCredentials);
+                try
+                {
+                    var rootUri = new Uri($"{targetUri.Scheme}://{targetUri.Authority}/");
+                    credentialCache.Add(rootUri, "Negotiate", System.Net.CredentialCache.DefaultNetworkCredentials);
+                }
+                catch { }
+            }
+            handler.Credentials = credentialCache;
+
+            return new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(45) };
+        }
 
         public event EventHandler<SegmentProgressEventArgs>? ProgressChanged;
         public event EventHandler<string>? DownloadCompleted;
@@ -81,6 +156,7 @@ namespace PRRX.IDM.Services
         public bool IsPaused { get; private set; }
         public SpeedLimiterSettings SpeedLimiter { get; } = new();
 
+        private readonly IConfigurationService? _configService;
         private CancellationTokenSource? _cts;
         private ManualResetEventSlim _pauseEvent = new(true);
         private readonly SemaphoreSlim _downloadLock = new(1, 1);
@@ -90,6 +166,7 @@ namespace PRRX.IDM.Services
         private Stopwatch _speedStopwatch = new();
         private long _lastBytesMeasured;
         private Timer? _progressTimer;
+        private HttpClient? _activeHttpClient;
 
         // Saved parameters for seamless resume
         private string? _currentUrl;
@@ -99,6 +176,14 @@ namespace PRRX.IDM.Services
         private string? _currentUserAgent;
         private string? _currentCookies;
         private Dictionary<string, string>? _currentHeaders;
+        private long _currentInitialTotalBytes = -1;
+        private string? _currentSiteUsername;
+        private string? _currentSitePassword;
+
+        public SegmentedDownloadEngine(IConfigurationService? configService = null)
+        {
+            _configService = configService;
+        }
 
         public void SetSpeedLimit(bool isEnabled, int maxSpeedKbps)
         {
@@ -146,7 +231,10 @@ namespace PRRX.IDM.Services
                         _currentReferer,
                         _currentUserAgent,
                         _currentCookies,
-                        _currentHeaders));
+                        _currentHeaders,
+                        _currentInitialTotalBytes,
+                        _currentSiteUsername,
+                        _currentSitePassword));
                 }
             }
         }
@@ -178,7 +266,10 @@ namespace PRRX.IDM.Services
             string? referer = null,
             string? userAgent = null,
             string? cookies = null,
-            Dictionary<string, string>? customHeaders = null)
+            Dictionary<string, string>? customHeaders = null,
+            long initialTotalBytes = -1,
+            string? siteUsername = null,
+            string? sitePassword = null)
         {
             await _downloadLock.WaitAsync();
             try
@@ -190,6 +281,22 @@ namespace PRRX.IDM.Services
                 _currentUserAgent = userAgent;
                 _currentCookies = cookies;
                 _currentHeaders = customHeaders;
+                _currentInitialTotalBytes = initialTotalBytes;
+                _currentSiteUsername = siteUsername;
+                _currentSitePassword = sitePassword;
+
+                if (initialTotalBytes > 0)
+                {
+                    _totalBytes = initialTotalBytes;
+                }
+
+                Uri.TryCreate(url, UriKind.Absolute, out var targetUri);
+                var effectiveConfig = _configService?.CurrentConfig;
+                if (effectiveConfig == null)
+                {
+                    try { effectiveConfig = new ConfigurationService().CurrentConfig; } catch { }
+                }
+                _activeHttpClient = CreateConfiguredClient(effectiveConfig, siteUsername, sitePassword, targetUri);
 
                 bool downloadSucceeded = false;
                 try
@@ -244,11 +351,31 @@ namespace PRRX.IDM.Services
                 // Streaming Media Provider Integration (YouTube, TikTok, Instagram, Twitter/X, SoundCloud, etc.)
                 if (MediaEngineService.IsStreamingUrl(url))
                 {
-                    var mediaEngine = new MediaEngineService();
+                    var mediaEngine = new MediaEngineService(_configService);
                     if (mediaEngine.IsEngineAvailable)
                     {
                         var ext = Path.GetExtension(destinationFilePath).TrimStart('.').ToLowerInvariant();
                         var isAudio = ext is "mp3" or "wav" or "m4a" or "flac" or "ogg" or "aac" or "opus" or "wma";
+
+                        var turbo = _configService?.CurrentConfig.TurboConnectionCount ?? 32;
+                        var simThreadCount = threadCount > 0 ? threadCount : Math.Clamp(turbo, 8, 64);
+                        _threads.Clear();
+                        var slicePercent = 100.0 / simThreadCount;
+                        for (int i = 0; i < simThreadCount; i++)
+                        {
+                            _threads.Add(new DownloadConnectionThread
+                            {
+                                ThreadId = i + 1,
+                                StartByte = i * 1000,
+                                EndByte = (i + 1) * 1000,
+                                CurrentByte = i * 1000,
+                                DownloadedBytes = 0,
+                                FormattedDownloaded = "0 KB",
+                                StatusInfo = "Connecting...",
+                                ProgressPercentage = 0.0,
+                                IsActive = true
+                            });
+                        }
 
                         var progressReporter = new Progress<DownloadProgressReport>(report =>
                         {
@@ -266,6 +393,50 @@ namespace PRRX.IDM.Services
                             var currentBytes = report.Percentage > 0 ? (long)(report.Percentage / 100.0 * totalBytesEst) : 0;
                             _totalDownloadedBytes = currentBytes;
 
+                            // Dynamically simulate visual connection segments corresponding to concurrent fragments
+                            var pct = Math.Clamp(report.Percentage, 0.0, 100.0);
+                            long threadChunkBytes = totalBytesEst > 0 ? Math.Max(1, totalBytesEst / simThreadCount) : 1000;
+
+                            for (int i = 0; i < simThreadCount; i++)
+                            {
+                                var t = _threads[i];
+                                var threadStartPct = i * slicePercent;
+                                var threadEndPct = (i + 1) * slicePercent;
+
+                                t.StartByte = i * threadChunkBytes;
+                                t.EndByte = (i == simThreadCount - 1 && totalBytesEst > 0) ? totalBytesEst - 1 : (i + 1) * threadChunkBytes - 1;
+
+                                if (pct >= threadEndPct)
+                                {
+                                    t.DownloadedBytes = Math.Max(0, t.EndByte - t.StartByte + 1);
+                                    t.CurrentByte = t.EndByte + 1;
+                                    t.ProgressPercentage = 100.0;
+                                    t.StatusInfo = "Complete";
+                                    t.IsActive = false;
+                                }
+                                else if (pct > threadStartPct)
+                                {
+                                    var localFraction = (pct - threadStartPct) / slicePercent;
+                                    var threadTotal = Math.Max(1, t.EndByte - t.StartByte + 1);
+                                    t.DownloadedBytes = (long)(localFraction * threadTotal);
+                                    t.CurrentByte = t.StartByte + t.DownloadedBytes;
+                                    t.ProgressPercentage = Math.Min(99.9, localFraction * 100.0);
+                                    t.StatusInfo = !string.IsNullOrWhiteSpace(report.Speed) && !report.Speed.StartsWith("0", StringComparison.OrdinalIgnoreCase)
+                                        ? $"Receiving ({report.Speed})"
+                                        : "Receiving data...";
+                                    t.IsActive = true;
+                                }
+                                else
+                                {
+                                    t.DownloadedBytes = 0;
+                                    t.CurrentByte = t.StartByte;
+                                    t.ProgressPercentage = 0.0;
+                                    t.StatusInfo = i < (int)(pct / slicePercent) + 4 ? "Allocating..." : "Pending";
+                                    t.IsActive = i < (int)(pct / slicePercent) + 4;
+                                }
+                                t.FormattedDownloaded = FormatBytes(t.DownloadedBytes);
+                            }
+
                             ProgressChanged?.Invoke(this, new SegmentProgressEventArgs
                             {
                                 OverallPercentage = report.Percentage,
@@ -275,7 +446,18 @@ namespace PRRX.IDM.Services
                                 TimeLeftFormatted = string.IsNullOrWhiteSpace(report.Eta) ? "--:--" : report.Eta,
                                 StatusMessage = string.IsNullOrWhiteSpace(report.StatusMessage) ? (isAudio ? "Extracting audio stream..." : "Downloading media stream...") : report.StatusMessage,
                                 IsResumeSupported = true,
-                                Threads = new List<DownloadConnectionThread>()
+                                Threads = _threads.Select(t => new DownloadConnectionThread
+                                {
+                                    ThreadId = t.ThreadId,
+                                    StartByte = t.StartByte,
+                                    EndByte = t.EndByte,
+                                    CurrentByte = t.CurrentByte,
+                                    DownloadedBytes = t.DownloadedBytes,
+                                    FormattedDownloaded = t.FormattedDownloaded,
+                                    StatusInfo = t.StatusInfo,
+                                    ProgressPercentage = t.ProgressPercentage,
+                                    IsActive = t.IsActive
+                                }).ToList()
                             });
                         });
 
@@ -354,8 +536,9 @@ namespace PRRX.IDM.Services
                 _speedStopwatch.Restart();
                 _lastBytesMeasured = 0;
 
-                _totalBytes = -1;
+                _totalBytes = initialTotalBytes > 0 ? initialTotalBytes : -1;
                 bool acceptRanges = false;
+                var client = _activeHttpClient ?? DefaultHttpClient;
 
                 // 1. Probe HEAD to detect Content-Length and Accept-Ranges (with fast 2.5s timeout)
                 try
@@ -366,10 +549,10 @@ namespace PRRX.IDM.Services
                     using var headReq = new HttpRequestMessage(HttpMethod.Head, url);
                     ApplyStandardHeaders(headReq, url, referer, userAgent, cookies, customHeaders);
 
-                    using var headResp = await HttpClient.SendAsync(headReq, HttpCompletionOption.ResponseHeadersRead, headCts.Token);
+                    using var headResp = await client.SendAsync(headReq, HttpCompletionOption.ResponseHeadersRead, headCts.Token);
                     if (headResp.IsSuccessStatusCode)
                     {
-                        _totalBytes = headResp.Content.Headers.ContentLength ?? -1;
+                        _totalBytes = headResp.Content.Headers.ContentLength ?? _totalBytes;
                         acceptRanges = headResp.Headers.AcceptRanges.Contains("bytes") || headResp.Content.Headers.ContentRange != null;
                     }
                 }
@@ -390,7 +573,7 @@ namespace PRRX.IDM.Services
                         ApplyStandardHeaders(getReq, url, referer, userAgent, cookies, customHeaders);
                         getReq.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(0, 0);
 
-                        using var getResp = await HttpClient.SendAsync(getReq, HttpCompletionOption.ResponseHeadersRead, getCts.Token);
+                        using var getResp = await client.SendAsync(getReq, HttpCompletionOption.ResponseHeadersRead, getCts.Token);
                         if (getResp.StatusCode == System.Net.HttpStatusCode.PartialContent)
                         {
                             acceptRanges = true;
@@ -593,6 +776,9 @@ namespace PRRX.IDM.Services
                         try { Directory.Delete(partsDir, true); } catch { }
                     }
                 }
+
+                _activeHttpClient?.Dispose();
+                _activeHttpClient = null;
             }
         }
         finally
@@ -664,7 +850,8 @@ namespace PRRX.IDM.Services
                     thread.StatusInfo = retryCount > 0 ? $"Retry {retryCount}/{maxRetries}..." : "Connecting...";
                     thread.IsActive = true;
 
-                    using var response = await HttpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
+                    var workerClient = _activeHttpClient ?? DefaultHttpClient;
+                    using var response = await workerClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
 
                     if (response.StatusCode == System.Net.HttpStatusCode.RequestedRangeNotSatisfiable)
                     {
@@ -678,7 +865,25 @@ namespace PRRX.IDM.Services
 
                     // Check if server accepted the byte range or sent the entire body from offset 0
                     bool isPartial = response.StatusCode == System.Net.HttpStatusCode.PartialContent;
-                    if (!isPartial && reqStart > 0)
+                    if (isPartial && response.Content.Headers.ContentRange != null)
+                    {
+                        if (response.Content.Headers.ContentRange.From.HasValue &&
+                            response.Content.Headers.ContentRange.From.Value != reqStart)
+                        {
+                            // Server started from a different byte offset
+                            var serverStart = response.Content.Headers.ContentRange.From.Value;
+                            var offsetDiff = serverStart - thread.StartByte;
+                            if (offsetDiff >= 0 && (segmentTotal <= 0 || offsetDiff <= segmentTotal))
+                            {
+                                var delta = offsetDiff - thread.DownloadedBytes;
+                                existingBytes = offsetDiff;
+                                thread.DownloadedBytes = existingBytes;
+                                thread.CurrentByte = serverStart;
+                                Interlocked.Add(ref _totalDownloadedBytes, delta);
+                            }
+                        }
+                    }
+                    else if (!isPartial && reqStart > 0)
                     {
                         // Server ignored Range header and returned full payload from byte 0!
                         // Truncate part and restart from byte 0 to prevent appending duplicate data
@@ -709,8 +914,16 @@ namespace PRRX.IDM.Services
 
                     thread.StatusInfo = "Receiving data...";
                     using var contentStream = await response.Content.ReadAsStreamAsync(token);
-                    var fileMode = existingBytes > 0 && isPartial ? FileMode.Append : FileMode.Create;
-                    using var fileStream = new FileStream(tempPartPath, fileMode, FileAccess.Write, FileShare.None, HighSpeedBufferSize, FileOptions.Asynchronous | FileOptions.SequentialScan);
+                    await using var fileStream = new FileStream(tempPartPath, FileMode.OpenOrCreate, FileAccess.Write, FileShare.None, HighSpeedBufferSize, FileOptions.Asynchronous | FileOptions.SequentialScan);
+                    if (isPartial && existingBytes > 0)
+                    {
+                        fileStream.SetLength(existingBytes);
+                        fileStream.Seek(existingBytes, SeekOrigin.Begin);
+                    }
+                    else
+                    {
+                        fileStream.SetLength(0);
+                    }
 
                     var buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(HighSpeedBufferSize);
                     try
@@ -895,12 +1108,12 @@ namespace PRRX.IDM.Services
             }
         }
 
-        private static long ParseSizeStringToBytes(string sizeStr)
+        public static long ParseSizeStringToBytes(string sizeStr)
         {
             if (string.IsNullOrWhiteSpace(sizeStr)) return 0;
             try
             {
-                var clean = sizeStr.Trim();
+                var clean = sizeStr.Trim().TrimStart('~', '≈', '>', '<').Trim();
                 double multiplier = 1;
                 if (clean.EndsWith("GiB", StringComparison.OrdinalIgnoreCase) || clean.EndsWith("GB", StringComparison.OrdinalIgnoreCase))
                 {
@@ -922,6 +1135,8 @@ namespace PRRX.IDM.Services
                     clean = clean.Replace("B", "", StringComparison.OrdinalIgnoreCase).Trim();
                 }
 
+                clean = clean.Replace(",", "").Trim();
+
                 if (double.TryParse(clean, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var num))
                 {
                     return (long)(num * multiplier);
@@ -931,7 +1146,7 @@ namespace PRRX.IDM.Services
             return 0;
         }
 
-        private static string FormatBytes(long bytes)
+        public static string FormatBytes(long bytes)
         {
             if (bytes <= 0) return "0 B";
             if (bytes >= 1024 * 1024 * 1024) return $"{(bytes / (1024.0 * 1024.0 * 1024.0)):F2} GB";

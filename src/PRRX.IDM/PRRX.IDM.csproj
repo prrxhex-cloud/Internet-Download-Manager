@@ -29,6 +29,11 @@
     <RetainVMGarbageCollection>false</RetainVMGarbageCollection>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(Configuration)'=='Release'">
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+  </PropertyGroup>
+
   <ItemGroup>
     <Resource Include="Assets\app_icon.png" />
     <Resource Include="Assets\app_icon.ico" />

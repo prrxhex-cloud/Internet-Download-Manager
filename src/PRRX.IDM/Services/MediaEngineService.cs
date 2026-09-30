@@ -30,6 +30,13 @@ namespace PRRX.IDM.Services
         public bool IsError { get; set; } = false;
     }
 
+    public class StreamProgressState
+    {
+        public int PassCount { get; set; } = 0;
+        public double LastRawPercent { get; set; } = 0.0;
+        public double HighestMappedPercent { get; set; } = 1.0;
+    }
+
     public interface IMediaEngineService
     {
         string EngineExecutablePath { get; }
@@ -79,9 +86,14 @@ namespace PRRX.IDM.Services
 
     public class MediaEngineService : IMediaEngineService
     {
-        private static readonly Regex YtdlProgressRegex = new(
-            @"\[download\]\s+(\d+(?:\.\d+)?)%\s+of\s+(?:~\s*)?(\S+)\s+at\s+(\S+)\s+ETA\s+(\S+)",
-            RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        private static readonly Regex AnsiRegex = new(@"\x1B\[[^@-~]*[@-~]", RegexOptions.Compiled);
+        private static readonly Regex YtdlPercentRegex = new(@"\[download\]\s+([0-9]+(?:\.[0-9]+)?)%", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        private static readonly Regex YtdlSizeRegex = new(@"of\s+(?:~?\s*)([0-9.]+\s*[kKmMgGtTpP]?[iI]?[bB])", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        private static readonly Regex YtdlSpeedRegex = new(@"at\s+([0-9.]+\s*[kKmMgGtTpP]?[iI]?[bB]/s|Unknown(?:\s+speed)?)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        private static readonly Regex YtdlEtaRegex = new(@"ETA\s+([0-9:]+|Unknown)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        private static readonly Regex YtdlInTimeRegex = new(@"in\s+([0-9:]+)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        private static readonly Regex YtdlFragRegex = new(@"\(frag\s+(\d+)/(\d+)\)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        private static readonly Regex YtdlDestRegex = new(@"\[download\]\s+Destination:\s*(.+)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
         private static readonly Regex Aria2ProgressRegex = new(
             @"\[#[a-f0-9]+\s+(\S+)\/(\S+)\((\d+)%\).*?DL:(\S+)(?:.*?ETA:(\S+))?\]",
@@ -537,7 +549,39 @@ namespace PRRX.IDM.Services
             startInfo.ArgumentList.Add("--fragment-retries");
             startInfo.ArgumentList.Add("10");
             startInfo.ArgumentList.Add("--no-warnings");
+            startInfo.ArgumentList.Add("--no-color");
             startInfo.ArgumentList.Add("--no-check-certificates");
+
+            // Anti-stall progress reporting when stdout is redirected
+            startInfo.ArgumentList.Add("--progress");
+            startInfo.ArgumentList.Add("--progress-delta");
+            startInfo.ArgumentList.Add("0.1");
+            startInfo.ArgumentList.Add("--continue");
+
+            // Attach Proxy if configured
+            if (_configService?.CurrentConfig.UseProxy == true && !string.IsNullOrWhiteSpace(_configService.CurrentConfig.ProxyHost))
+            {
+                var scheme = _configService.CurrentConfig.ProxyType switch
+                {
+                    ProxyType.Socks5 => "socks5",
+                    ProxyType.Socks4 => "socks4",
+                    ProxyType.Https => "https",
+                    _ => "http"
+                };
+                string proxyUrl;
+                if (_configService.CurrentConfig.UseProxyAuth && !string.IsNullOrWhiteSpace(_configService.CurrentConfig.ProxyUsername))
+                {
+                    var user = Uri.EscapeDataString(_configService.CurrentConfig.ProxyUsername);
+                    var pass = Uri.EscapeDataString(_configService.CurrentConfig.ProxyPassword);
+                    proxyUrl = $"{scheme}://{user}:{pass}@{_configService.CurrentConfig.ProxyHost}:{_configService.CurrentConfig.ProxyPort}";
+                }
+                else
+                {
+                    proxyUrl = $"{scheme}://{_configService.CurrentConfig.ProxyHost}:{_configService.CurrentConfig.ProxyPort}";
+                }
+                startInfo.ArgumentList.Add("--proxy");
+                startInfo.ArgumentList.Add(proxyUrl);
+            }
         }
 
         public static string FormatBytes(long bytes)
@@ -1147,11 +1191,12 @@ namespace PRRX.IDM.Services
 
             try
             {
+                var streamState = new StreamProgressState();
                 using var process = new Process { StartInfo = startInfo };
                 process.OutputDataReceived += (_, e) =>
                 {
                     if (string.IsNullOrWhiteSpace(e.Data)) return;
-                    ParseAndReportProgress(e.Data, progress);
+                    ParseAndReportProgress(e.Data, progress, streamState);
                 };
 
                 process.ErrorDataReceived += (_, e) =>
@@ -1165,6 +1210,10 @@ namespace PRRX.IDM.Services
                             ? "YouTube Authentication: Please ensure you are logged into YouTube in Chrome or load cookies.txt."
                             : e.Data.Trim();
                         progress?.Report(new DownloadProgressReport { StatusMessage = msg, IsError = true });
+                    }
+                    else
+                    {
+                        ParseAndReportProgress(e.Data, progress, streamState);
                     }
                 };
 
@@ -1376,11 +1425,12 @@ namespace PRRX.IDM.Services
 
             try
             {
+                var streamState = new StreamProgressState();
                 using var process = new Process { StartInfo = startInfo };
                 process.OutputDataReceived += (_, e) =>
                 {
                     if (string.IsNullOrWhiteSpace(e.Data)) return;
-                    ParseAndReportProgress(e.Data, progress);
+                    ParseAndReportProgress(e.Data, progress, streamState);
                 };
 
                 process.ErrorDataReceived += (_, e) =>
@@ -1394,6 +1444,10 @@ namespace PRRX.IDM.Services
                             ? "YouTube Authentication: Please ensure you are logged into YouTube in Chrome or load cookies.txt."
                             : e.Data.Trim();
                         progress?.Report(new DownloadProgressReport { StatusMessage = msg, IsError = true });
+                    }
+                    else
+                    {
+                        ParseAndReportProgress(e.Data, progress, streamState);
                     }
                 };
 
@@ -1651,79 +1705,193 @@ namespace PRRX.IDM.Services
             return false;
         }
 
-        private void ParseAndReportProgress(string line, IProgress<DownloadProgressReport>? progress)
+        public void ParseAndReportProgress(string rawData, IProgress<DownloadProgressReport>? progress, StreamProgressState? state = null)
         {
-            if (progress == null) return;
+            if (progress == null || string.IsNullOrWhiteSpace(rawData)) return;
 
-            // 1. Check Standard YTDL Progress
-            var match = YtdlProgressRegex.Match(line);
-            if (match.Success)
+            var cleanData = AnsiRegex.Replace(rawData, "");
+            var lines = cleanData.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+
+            foreach (var line in lines)
             {
-                if (double.TryParse(match.Groups[1].Value, NumberStyles.Any, CultureInfo.InvariantCulture, out var percent))
+                var trimmed = line.Trim();
+                if (string.IsNullOrWhiteSpace(trimmed)) continue;
+
+                // Destination line: gives early signal that download has commenced
+                var destMatch = YtdlDestRegex.Match(trimmed);
+                if (destMatch.Success)
                 {
-                    var rawSpeed = match.Groups[3].Value;
-                    if (!rawSpeed.StartsWith("0", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(rawSpeed))
+                    var destName = Path.GetFileName(destMatch.Groups[1].Value.Trim());
+                    if (state != null)
                     {
-                        _lastNonZeroSpeed = rawSpeed;
+                        state.PassCount++;
+                        double destPct = state.PassCount >= 2 ? 85.0 : 5.0;
+                        state.HighestMappedPercent = Math.Max(state.HighestMappedPercent, destPct);
+                    }
+                    var pct = state?.HighestMappedPercent ?? 5.0;
+                    progress.Report(new DownloadProgressReport
+                    {
+                        Percentage = pct,
+                        Speed = "Connecting...",
+                        Eta = "--:--",
+                        StatusMessage = state?.PassCount >= 2 ? $"Streaming audio stream: {destName}" : $"Streaming video target: {destName}"
+                    });
+                    continue;
+                }
+
+                // 1. Check Standard YTDL Progress
+                var pctMatch = YtdlPercentRegex.Match(trimmed);
+                if (pctMatch.Success && double.TryParse(pctMatch.Groups[1].Value, NumberStyles.Any, CultureInfo.InvariantCulture, out var percent))
+                {
+                    string totalSize = "";
+                    var sizeMatch = YtdlSizeRegex.Match(trimmed);
+                    if (sizeMatch.Success)
+                    {
+                        totalSize = sizeMatch.Groups[1].Value.Trim();
                     }
 
-                    var speedToDisplay = rawSpeed.StartsWith("0", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(_lastNonZeroSpeed)
-                        ? _lastNonZeroSpeed
-                        : rawSpeed;
+                    string speed = _lastNonZeroSpeed;
+                    var speedMatch = YtdlSpeedRegex.Match(trimmed);
+                    if (speedMatch.Success)
+                    {
+                        var rawSpeed = speedMatch.Groups[1].Value.Trim();
+                        if (!rawSpeed.StartsWith("0", StringComparison.OrdinalIgnoreCase) && 
+                            !rawSpeed.StartsWith("Unknown", StringComparison.OrdinalIgnoreCase))
+                        {
+                            _lastNonZeroSpeed = rawSpeed;
+                            speed = rawSpeed;
+                        }
+                    }
+
+                    string eta = "--:--";
+                    var etaMatch = YtdlEtaRegex.Match(trimmed);
+                    if (etaMatch.Success)
+                    {
+                        var rawEta = etaMatch.Groups[1].Value.Trim();
+                        if (!string.Equals(rawEta, "Unknown", StringComparison.OrdinalIgnoreCase))
+                        {
+                            eta = rawEta;
+                        }
+                    }
+                    else
+                    {
+                        var inMatch = YtdlInTimeRegex.Match(trimmed);
+                        if (inMatch.Success)
+                        {
+                            eta = inMatch.Groups[1].Value.Trim();
+                        }
+                    }
+
+                    double effectivePercent = percent;
+                    if (state != null)
+                    {
+                        if (percent < state.LastRawPercent - 15.0 && state.LastRawPercent > 70.0)
+                        {
+                            state.PassCount = Math.Max(2, state.PassCount + 1);
+                        }
+                        state.LastRawPercent = percent;
+
+                        if (state.PassCount >= 2)
+                        {
+                            // Audio pass: 0%..100% -> 85%..98%
+                            effectivePercent = 85.0 + (percent / 100.0 * 13.0);
+                        }
+                        else
+                        {
+                            // Video pass: 0%..100% -> 5%..85%
+                            effectivePercent = 5.0 + (percent / 100.0 * 80.0);
+                        }
+
+                        state.HighestMappedPercent = Math.Max(state.HighestMappedPercent, effectivePercent);
+                        effectivePercent = state.HighestMappedPercent;
+                    }
+
+                    string statusMsg;
+                    var fragMatch = YtdlFragRegex.Match(trimmed);
+                    if (fragMatch.Success)
+                    {
+                        statusMsg = $"Downloading fragment {fragMatch.Groups[1].Value}/{fragMatch.Groups[2].Value} ({effectivePercent:F1}% @ {speed})";
+                    }
+                    else
+                    {
+                        statusMsg = $"Downloading: {effectivePercent:F1}% @ {speed}";
+                    }
 
                     progress.Report(new DownloadProgressReport
                     {
-                        Percentage = percent,
-                        TotalSize = match.Groups[2].Value,
-                        Speed = speedToDisplay,
-                        Eta = match.Groups[4].Value,
-                        StatusMessage = $"Downloading: {percent:F1}% @ {speedToDisplay}"
+                        Percentage = effectivePercent,
+                        TotalSize = totalSize,
+                        Speed = speed,
+                        Eta = eta,
+                        StatusMessage = statusMsg
                     });
-                    return;
+                    continue;
                 }
-            }
 
-            // 2. Check Aria2c Progress
-            var ariaMatch = Aria2ProgressRegex.Match(line);
-            if (ariaMatch.Success)
-            {
-                if (double.TryParse(ariaMatch.Groups[3].Value, NumberStyles.Any, CultureInfo.InvariantCulture, out var percent))
+                // 2. Check Aria2c Progress
+                var ariaMatch = Aria2ProgressRegex.Match(trimmed);
+                if (ariaMatch.Success && double.TryParse(ariaMatch.Groups[3].Value, NumberStyles.Any, CultureInfo.InvariantCulture, out var ariaPercent))
                 {
                     var speed = ariaMatch.Groups[4].Value;
                     if (!string.IsNullOrWhiteSpace(speed)) _lastNonZeroSpeed = speed;
 
                     progress.Report(new DownloadProgressReport
                     {
-                        Percentage = percent,
+                        Percentage = ariaPercent,
                         TotalSize = ariaMatch.Groups[2].Value,
                         Speed = speed,
                         Eta = ariaMatch.Groups[5].Success ? ariaMatch.Groups[5].Value : "--:--",
-                        StatusMessage = $"Turbo Segmenting: {percent:F1}% @ {speed}"
+                        StatusMessage = $"Turbo Segmenting: {ariaPercent:F1}% @ {speed}"
                     });
-                    return;
+                    continue;
                 }
-            }
 
-            // 3. Status handling during multiplexing / format merging
-            if (line.Contains("[Merger]", StringComparison.OrdinalIgnoreCase) || line.Contains("Merging formats", StringComparison.OrdinalIgnoreCase))
-            {
-                progress.Report(new DownloadProgressReport
+                // 3. Status handling during multiplexing / format merging
+                if (trimmed.Contains("[Merger]", StringComparison.OrdinalIgnoreCase) || trimmed.Contains("Merging formats", StringComparison.OrdinalIgnoreCase))
                 {
-                    Percentage = 98.0,
-                    Speed = _lastNonZeroSpeed,
-                    Eta = "00:01",
-                    StatusMessage = "Turbo Multiplexing video and audio streams with FFmpeg (Finalizing)..."
-                });
-            }
-            else if (line.Contains("[ExtractAudio]", StringComparison.OrdinalIgnoreCase) || line.Contains("[FixupM3u8]", StringComparison.OrdinalIgnoreCase))
-            {
-                progress.Report(new DownloadProgressReport
+                    if (state != null) state.HighestMappedPercent = Math.Max(state.HighestMappedPercent, 98.0);
+                    progress.Report(new DownloadProgressReport
+                    {
+                        Percentage = state?.HighestMappedPercent ?? 98.0,
+                        Speed = _lastNonZeroSpeed,
+                        Eta = "00:01",
+                        StatusMessage = "Turbo Multiplexing video and audio streams with FFmpeg (Finalizing)..."
+                    });
+                    continue;
+                }
+                else if (trimmed.Contains("[ExtractAudio]", StringComparison.OrdinalIgnoreCase) || trimmed.Contains("[FixupM3u8]", StringComparison.OrdinalIgnoreCase))
                 {
-                    Percentage = 96.0,
-                    Speed = _lastNonZeroSpeed,
-                    Eta = "00:01",
-                    StatusMessage = "Transcoding pristine high-fidelity audio stream..."
-                });
+                    if (state != null) state.HighestMappedPercent = Math.Max(state.HighestMappedPercent, 96.0);
+                    progress.Report(new DownloadProgressReport
+                    {
+                        Percentage = state?.HighestMappedPercent ?? 96.0,
+                        Speed = _lastNonZeroSpeed,
+                        Eta = "00:01",
+                        StatusMessage = "Transcoding pristine high-fidelity audio stream..."
+                    });
+                    continue;
+                }
+
+                // 4. Initial handshake & format resolution signals (immediate feedback <100ms)
+                if (trimmed.StartsWith("[youtube]", StringComparison.OrdinalIgnoreCase) ||
+                    trimmed.StartsWith("[info]", StringComparison.OrdinalIgnoreCase) ||
+                    trimmed.StartsWith("[hlsnative]", StringComparison.OrdinalIgnoreCase) ||
+                    trimmed.StartsWith("[generic]", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (state != null && state.HighestMappedPercent < 5.0)
+                    {
+                        state.HighestMappedPercent = 3.0;
+                    }
+                    var pct = state?.HighestMappedPercent ?? 3.0;
+                    var cleanMsg = trimmed.Length > 75 ? trimmed.Substring(0, 72) + "..." : trimmed;
+                    progress.Report(new DownloadProgressReport
+                    {
+                        Percentage = pct,
+                        Speed = "Connecting...",
+                        Eta = "--:--",
+                        StatusMessage = cleanMsg
+                    });
+                }
             }
         }
 

@@ -186,6 +186,15 @@ namespace PRRX.IDM.ViewModels
                             vm.Cookies,
                             vm.CustomHeaders,
                             _historyService);
+
+                        if (vm.DetectedBytes.HasValue && vm.DetectedBytes.Value > 0)
+                        {
+                            activeVm.TotalBytes = vm.DetectedBytes.Value;
+                            activeVm.FileSizeFormatted = vm.FileSizeFormatted;
+                        }
+                        activeVm.SiteUsername = vm.SiteUsername;
+                        activeVm.SitePassword = vm.SitePassword;
+
                         var activeWin = new Views.ActiveDownloadWindow(activeVm);
                         activeWin.Show();
                     }

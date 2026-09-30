@@ -200,18 +200,32 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     }
   } else if (info.menuItemId === "prrx_download_all") {
     if (tab?.id) {
-      chrome.tabs.sendMessage(tab.id, { action: "collect_all_links" }, (response) => {
-        if (response && response.links && response.links.length > 0) {
-          sendToPrrxIdm({
-            action: "batch",
-            url: tab.url,
-            pageTitle: tab.title,
-            referer: tab.url,
-            userAgent: navigator.userAgent,
-            links: response.links
-          });
-        }
-      });
+      const sendCollect = () => {
+        chrome.tabs.sendMessage(tab.id, { action: "collect_all_links" }, (response) => {
+          if (chrome.runtime.lastError) {
+            console.debug("PRRX IDM: collect_all_links notice:", chrome.runtime.lastError.message);
+            return;
+          }
+          if (response && response.links && response.links.length > 0) {
+            sendToPrrxIdm({
+              action: "batch",
+              url: tab.url,
+              pageTitle: tab.title,
+              referer: tab.url,
+              userAgent: navigator.userAgent,
+              links: response.links
+            });
+          }
+        });
+      };
+
+      if (chrome.scripting && chrome.scripting.executeScript) {
+        chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["content.js"] })
+          .then(sendCollect)
+          .catch(sendCollect);
+      } else {
+        sendCollect();
+      }
     }
   }
 });

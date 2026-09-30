@@ -794,6 +794,51 @@ namespace PRRX.IDM.Services
 
                 dlg.Closed += (_, _) =>
                 {
+                    if (vm.IsConfirmed)
+                    {
+                        var selected = vm.SelectedLinks;
+                        var saveDir = vm.SaveDirectory;
+                        try { Directory.CreateDirectory(saveDir); } catch { }
+
+                        foreach (var link in selected)
+                        {
+                            var fullPath = Path.Combine(saveDir, link.FileName);
+                            _historyService?.AddItem(new DownloadItem
+                            {
+                                Title = link.FileName,
+                                Url = link.Url,
+                                TargetFilePath = fullPath,
+                                FileSizeFormatted = link.FileSizeFormatted,
+                                Status = DownloadStatus.Downloading,
+                                Type = link.Category == FileCategory.Music ? MediaType.Audio : MediaType.Video,
+                                CreatedAt = DateTime.UtcNow,
+                                IsBrowserInitiated = true,
+                                Source = "IDM Batch Download"
+                            });
+
+                            var activeVm = new ActiveDownloadViewModel(
+                                link.Url,
+                                fullPath,
+                                null,
+                                null,
+                                null,
+                                payload.Referer,
+                                payload.UserAgent,
+                                payload.Cookies,
+                                payload.Headers,
+                                _historyService);
+
+                            if (link.FileSizeBytes > 0)
+                            {
+                                activeVm.TotalBytes = link.FileSizeBytes;
+                                activeVm.FileSizeFormatted = link.FileSizeFormatted;
+                            }
+
+                            var activeWin = new ActiveDownloadWindow(activeVm);
+                            activeWin.Closed += (_, _) => MemoryOptimizer.TrimMemory();
+                            activeWin.Show();
+                        }
+                    }
                     MemoryOptimizer.TrimMemory();
                 };
             }
@@ -885,6 +930,14 @@ namespace PRRX.IDM.Services
                             vm.Cookies,
                             vm.CustomHeaders,
                             _historyService);
+
+                        if (vm.DetectedBytes.HasValue && vm.DetectedBytes.Value > 0)
+                        {
+                            activeVm.TotalBytes = vm.DetectedBytes.Value;
+                            activeVm.FileSizeFormatted = vm.FileSizeFormatted;
+                        }
+                        activeVm.SiteUsername = vm.SiteUsername;
+                        activeVm.SitePassword = vm.SitePassword;
 
                         var activeWin = new ActiveDownloadWindow(activeVm);
                         activeWin.Closed += (_, _) => MemoryOptimizer.TrimMemory();

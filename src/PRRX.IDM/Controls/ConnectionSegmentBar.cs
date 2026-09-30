@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // Copyright (c) 2026 PRRX Cooperation. All Rights Reserved.
 // PRRX IDM (TM) - Intelligent Download Manager Engine
 // Watermark: PRRX-IDM-CORE-WATERMARK-SECURE-VAULT-2026
@@ -230,14 +230,14 @@ namespace PRRX.IDM.Controls
             double width = ActualWidth;
             double height = ActualHeight;
 
-            if (total <= 0 || (threads.Count == 1 && threads[0].EndByte < threads[0].StartByte))
+            if (threads.Count == 1)
             {
-                // Single stream or unknown total size: render active stream proportionally
+                // Single stream: render active stream proportionally
                 var single = threads[0];
                 var singleSlot = new Rect(0, 1.0, width, Math.Max(1.0, height - 2));
                 dc.DrawRectangle(SlotBackgroundBrush, null, singleSlot);
 
-                if (single.DownloadedBytes > 0)
+                if (single.DownloadedBytes > 0 || single.ProgressPercentage > 0)
                 {
                     double pct = (single.EndByte >= single.StartByte && single.StartByte >= 0 && single.ProgressPercentage > 0)
                         ? Math.Clamp(single.ProgressPercentage / 100.0, 0.05, 1.0)
@@ -249,26 +249,49 @@ namespace PRRX.IDM.Controls
                 return;
             }
 
-            // 2. Draw each thread's segment block with visual boundary and progress
+            // Multi-connection rendering (8-64 threads)
+            long maxEnd = threads.Max(t => t.EndByte);
+            bool useByteAccurate = total > 1 && maxEnd > 0 && threads.Any(t => t.EndByte > t.StartByte);
+            if (useByteAccurate)
+            {
+                total = Math.Max(total, maxEnd + 1);
+            }
+
+            double slotWidth = width / threads.Count;
+
             for (int i = 0; i < threads.Count; i++)
             {
                 var thread = threads[i];
-                if (thread.StartByte < 0 || thread.EndByte < thread.StartByte) continue;
+                double xStart;
+                double xEnd;
+                double segmentWidth;
 
-                double startRatio = Math.Clamp((double)thread.StartByte / total, 0.0, 1.0);
-                double endRatio = Math.Clamp((double)(thread.EndByte + 1) / total, 0.0, 1.0);
-
-                double xStart = startRatio * width;
-                double xEnd = endRatio * width;
-                double segmentWidth = Math.Max(1.0, xEnd - xStart);
+                if (useByteAccurate && thread.StartByte >= 0 && thread.EndByte >= thread.StartByte)
+                {
+                    double startRatio = Math.Clamp((double)thread.StartByte / total, 0.0, 1.0);
+                    double endRatio = Math.Clamp((double)(thread.EndByte + 1) / total, 0.0, 1.0);
+                    xStart = startRatio * width;
+                    xEnd = endRatio * width;
+                    segmentWidth = Math.Max(1.0, xEnd - xStart);
+                }
+                else
+                {
+                    xStart = i * slotWidth;
+                    xEnd = (i == threads.Count - 1) ? width : (i + 1) * slotWidth;
+                    segmentWidth = Math.Max(1.0, xEnd - xStart);
+                }
 
                 // Slot background & thread boundary separator
                 var slotRect = new Rect(xStart, 1.0, segmentWidth, Math.Max(1.0, height - 2));
                 dc.DrawRectangle(SlotBackgroundBrush, SlotSeparatorPen, slotRect);
 
-                // Downloaded bytes portion within this thread's segment
-                long threadTotal = Math.Max(1, thread.EndByte - thread.StartByte + 1);
-                double progress = Math.Clamp((double)thread.DownloadedBytes / threadTotal, 0.0, 1.0);
+                // Progress calculation
+                double progress = Math.Clamp(thread.ProgressPercentage / 100.0, 0.0, 1.0);
+                if (thread.DownloadedBytes > 0 && thread.EndByte > thread.StartByte)
+                {
+                    long threadTotal = thread.EndByte - thread.StartByte + 1;
+                    progress = Math.Max(progress, Math.Clamp((double)thread.DownloadedBytes / threadTotal, 0.0, 1.0));
+                }
 
                 if (progress > 0)
                 {
