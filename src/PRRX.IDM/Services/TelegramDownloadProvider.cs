@@ -521,7 +521,19 @@ namespace PRRX.IDM.Services
 
                 Action<long, long> progressCallback = (downloaded, total) =>
                 {
-                    if (total > 0 && totalBytes <= 0) totalBytes = total;
+                    if (total > 0 && totalBytes <= 0)
+                    {
+                        totalBytes = total;
+                        segmentSize = Math.Max(1, (long)Math.Ceiling((double)totalBytes / concurrency));
+                        for (int i = 0; i < concurrency; i++)
+                        {
+                            long segStart = i * segmentSize;
+                            long segEnd = (i == concurrency - 1) ? totalBytes - 1 : Math.Min(totalBytes - 1, segStart + segmentSize - 1);
+                            threads[i].StartByte = segStart;
+                            threads[i].EndByte = Math.Max(segStart, segEnd);
+                            threads[i].CurrentByte = segStart;
+                        }
+                    }
 
                     var now = stopwatch.ElapsedMilliseconds;
                     if (now - lastReportTime >= 200 || downloaded >= totalBytes)
@@ -532,41 +544,48 @@ namespace PRRX.IDM.Services
                         lastReportBytes = downloaded;
 
                         double speedBps = timeDiff > 0 ? (bytesDiff / timeDiff) : 0;
-                        double pct = totalBytes > 0 ? Math.Clamp((double)downloaded / totalBytes * 100.0, 0, 100) : 0;
+                        double pct = totalBytes > 0 ? Math.Clamp((double)downloaded / totalBytes * 100.0, 0, 100.0) : 0;
                         long remaining = Math.Max(0, totalBytes - downloaded);
                         string eta = speedBps > 1024 ? FormatEta(remaining / speedBps) : "--:--";
 
-                        // Update 32 connection thread visual blocks dynamically
+                        // Update dynamic connection thread visual blocks
                         if (segmentSize > 0)
                         {
+                            var slicePercent = 100.0 / concurrency;
                             for (int i = 0; i < concurrency; i++)
                             {
                                 var t = threads[i];
-                                if (downloaded >= t.EndByte)
+                                var threadStartPct = i * slicePercent;
+                                var threadEndPct = (i + 1) * slicePercent;
+
+                                if (pct >= threadEndPct)
                                 {
-                                    t.DownloadedBytes = t.EndByte - t.StartByte + 1;
+                                    t.DownloadedBytes = Math.Max(0, t.EndByte - t.StartByte + 1);
+                                    t.CurrentByte = t.EndByte + 1;
                                     t.ProgressPercentage = 100.0;
                                     t.StatusInfo = "Complete";
                                     t.IsActive = false;
-                                    t.FormattedDownloaded = FormatBytes(t.DownloadedBytes);
                                 }
-                                else if (downloaded >= t.StartByte)
+                                else if (pct > threadStartPct)
                                 {
-                                    t.DownloadedBytes = Math.Max(0, downloaded - t.StartByte);
-                                    long slot = Math.Max(1, t.EndByte - t.StartByte + 1);
-                                    t.ProgressPercentage = Math.Clamp((double)t.DownloadedBytes / slot * 100.0, 0, 100);
-                                    t.StatusInfo = "Receiving data...";
+                                    var localFraction = (pct - threadStartPct) / slicePercent;
+                                    var slotLen = Math.Max(1, t.EndByte - t.StartByte + 1);
+                                    t.DownloadedBytes = (long)(localFraction * slotLen);
+                                    t.CurrentByte = t.StartByte + t.DownloadedBytes;
+                                    t.ProgressPercentage = Math.Clamp(localFraction * 100.0, 0.0, 99.9);
+                                    t.StatusInfo = speedBps > 1024 ? $"Receiving ({FormatSpeed(speedBps)})" : "Receiving data...";
                                     t.IsActive = true;
-                                    t.FormattedDownloaded = FormatBytes(t.DownloadedBytes);
                                 }
                                 else
                                 {
+                                    bool isAllocating = i < (int)(pct / slicePercent) + 3;
                                     t.DownloadedBytes = 0;
+                                    t.CurrentByte = t.StartByte;
                                     t.ProgressPercentage = 0.0;
-                                    t.StatusInfo = "Pending";
-                                    t.IsActive = false;
-                                    t.FormattedDownloaded = "0 KB";
+                                    t.StatusInfo = isAllocating ? "Allocating..." : "Pending";
+                                    t.IsActive = isAllocating;
                                 }
+                                t.FormattedDownloaded = FormatBytes(t.DownloadedBytes);
                             }
                         }
 
@@ -614,6 +633,19 @@ namespace PRRX.IDM.Services
                     if (File.Exists(destinationPath)) File.Delete(destinationPath);
                     File.Move(tempPath, destinationPath);
                     PRRX.IDM.Security.SecurityGuard.ApplyMarkOfTheWeb(destinationPath, request.DirectStreamUrl ?? request.Url);
+
+                    for (int i = 0; i < concurrency; i++)
+                    {
+                        var t = threads[i];
+                        t.ProgressPercentage = 100.0;
+                        t.IsActive = false;
+                        t.StatusInfo = "Complete";
+                        if (t.EndByte >= t.StartByte && t.StartByte >= 0)
+                        {
+                            t.DownloadedBytes = Math.Max(t.DownloadedBytes, t.EndByte - t.StartByte + 1);
+                            t.FormattedDownloaded = FormatBytes(t.DownloadedBytes);
+                        }
+                    }
 
                     progress?.Report(new SegmentProgressEventArgs
                     {
@@ -722,7 +754,13 @@ namespace PRRX.IDM.Services
                 });
             }
 
-            var chunkQueue = new ConcurrentQueue<int>();
+            // Partition chunks across segments for true parallel dynamic segmentation
+            var segmentQueues = new ConcurrentQueue<int>[concurrency];
+            for (int s = 0; s < concurrency; s++)
+            {
+                segmentQueues[s] = new ConcurrentQueue<int>();
+            }
+
             for (int i = 0; i < totalChunks; i++)
             {
                 if (completedChunkIndices.ContainsKey(i))
@@ -738,13 +776,16 @@ namespace PRRX.IDM.Services
                     t.CurrentByte = chunkOffset + currentChunkSize;
                     t.FormattedDownloaded = FormatBytes(t.DownloadedBytes);
                     long slotLen = Math.Max(1, t.EndByte - t.StartByte + 1);
+                    t.ProgressPercentage = Math.Clamp((double)t.DownloadedBytes / slotLen * 100.0, 0.0, 100.0);
                     bool isSlotDone = t.DownloadedBytes >= slotLen;
                     t.StatusInfo = isSlotDone ? "Complete" : "Receiving data...";
                     t.IsActive = !isSlotDone;
                 }
                 else
                 {
-                    chunkQueue.Enqueue(i);
+                    long chunkOffset = (long)i * chunkSize;
+                    int sIdx = segmentSize > 0 ? Math.Clamp((int)(chunkOffset / segmentSize), 0, concurrency - 1) : 0;
+                    segmentQueues[sIdx].Enqueue(i);
                 }
             }
 
@@ -756,8 +797,29 @@ namespace PRRX.IDM.Services
                 int currentWorker = workerId;
                 activeWorkers.Add(Task.Run(async () =>
                 {
-                    while (!cancellationToken.IsCancellationRequested && chunkQueue.TryDequeue(out int chunkIndex))
+                    while (!cancellationToken.IsCancellationRequested)
                     {
+                        int chunkIndex = -1;
+                        // 1. First attempt to pull a chunk assigned to this worker's segment
+                        if (segmentQueues[currentWorker].TryDequeue(out var ownChunk))
+                        {
+                            chunkIndex = ownChunk;
+                        }
+                        else
+                        {
+                            // 2. Work-stealing: take an available chunk from any other segment
+                            for (int s = 0; s < concurrency; s++)
+                            {
+                                if (segmentQueues[s].TryDequeue(out var stolenChunk))
+                                {
+                                    chunkIndex = stolenChunk;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (chunkIndex == -1) break; // All chunks are claimed or completed
+
                         long chunkOffset = (long)chunkIndex * chunkSize;
                         int currentChunkSize = (int)Math.Min(chunkSize, totalBytes - chunkOffset);
 
@@ -784,6 +846,7 @@ namespace PRRX.IDM.Services
                                         targetThread.CurrentByte = chunkOffset + chunkBytes.Length;
                                         targetThread.FormattedDownloaded = FormatBytes(targetThread.DownloadedBytes);
                                         long slotLen = Math.Max(1, targetThread.EndByte - targetThread.StartByte + 1);
+                                        targetThread.ProgressPercentage = Math.Clamp((double)targetThread.DownloadedBytes / slotLen * 100.0, 0.0, 100.0);
                                         bool isSlotComplete = targetThread.DownloadedBytes >= slotLen;
                                         targetThread.StatusInfo = isSlotComplete ? "Complete" : "Receiving data...";
                                         targetThread.IsActive = !isSlotComplete;
@@ -870,6 +933,19 @@ namespace PRRX.IDM.Services
             File.Move(tempPath, destinationPath);
             try { if (File.Exists(statePath)) File.Delete(statePath); } catch { }
             PRRX.IDM.Security.SecurityGuard.ApplyMarkOfTheWeb(destinationPath, request.DirectStreamUrl ?? request.Url);
+
+            for (int i = 0; i < concurrency; i++)
+            {
+                var t = threads[i];
+                t.ProgressPercentage = 100.0;
+                t.IsActive = false;
+                t.StatusInfo = "Complete";
+                if (t.EndByte >= t.StartByte && t.StartByte >= 0)
+                {
+                    t.DownloadedBytes = Math.Max(t.DownloadedBytes, t.EndByte - t.StartByte + 1);
+                    t.FormattedDownloaded = FormatBytes(t.DownloadedBytes);
+                }
+            }
 
             progress?.Report(new SegmentProgressEventArgs
             {

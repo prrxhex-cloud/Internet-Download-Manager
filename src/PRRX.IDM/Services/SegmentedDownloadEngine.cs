@@ -314,7 +314,7 @@ namespace PRRX.IDM.Services
                     {
                         tgReq.DestinationFilePath = destinationFilePath;
 
-                        if (url.StartsWith("tg://", StringComparison.OrdinalIgnoreCase))
+                        if (url.StartsWith("tg://", StringComparison.OrdinalIgnoreCase) || !string.IsNullOrWhiteSpace(tgReq.FileId) || tgReq.MessageId > 0)
                         {
                             var progressReporter = new Progress<SegmentProgressEventArgs>(args =>
                             {
@@ -480,9 +480,10 @@ namespace PRRX.IDM.Services
                         IsRunning = false;
                         if (success)
                         {
-                            var finalPath = File.Exists(destinationFilePath) && new FileInfo(destinationFilePath).Length > 0
-                                ? destinationFilePath
-                                : null;
+                            var expectedAudioTarget = isAudio ? Path.ChangeExtension(destinationFilePath, ext) : destinationFilePath;
+                            var finalPath = File.Exists(expectedAudioTarget) && new FileInfo(expectedAudioTarget).Length > 0
+                                ? expectedAudioTarget
+                                : (File.Exists(destinationFilePath) && new FileInfo(destinationFilePath).Length > 0 ? destinationFilePath : null);
 
                             if (finalPath == null && Directory.Exists(outDir))
                             {
@@ -507,6 +508,24 @@ namespace PRRX.IDM.Services
                                         if (File.Exists(destinationFilePath)) finalPath = destinationFilePath;
                                         else finalPath = match;
                                     }
+                                }
+                            }
+
+                            if (finalPath == null && Directory.Exists(outDir))
+                            {
+                                var recent = Directory.GetFiles(outDir, isAudio ? $"*.{ext}" : "*.*")
+                                    .Where(f => !f.EndsWith(".part", StringComparison.OrdinalIgnoreCase) &&
+                                                !f.EndsWith(".ytdl", StringComparison.OrdinalIgnoreCase) &&
+                                                !f.EndsWith(".aria2", StringComparison.OrdinalIgnoreCase) &&
+                                                !f.EndsWith(".temp", StringComparison.OrdinalIgnoreCase) &&
+                                                !f.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase))
+                                    .Select(f => new FileInfo(f))
+                                    .Where(fi => fi.Length > 0 && (DateTime.UtcNow - fi.LastWriteTimeUtc).TotalMinutes < 2)
+                                    .OrderByDescending(fi => fi.LastWriteTimeUtc)
+                                    .FirstOrDefault();
+                                if (recent != null)
+                                {
+                                    finalPath = recent.FullName;
                                 }
                             }
 
@@ -547,13 +566,31 @@ namespace PRRX.IDM.Services
                 bool acceptRanges = false;
                 var client = _activeHttpClient ?? DefaultHttpClient;
 
+                // Immediately seed initial connection blocks so the segment bar animates instantly
+                var preliminaryThreadCount = Math.Clamp(_configService?.CurrentConfig.TurboConnectionCount ?? 8, 4, 32);
+                for (int i = 0; i < preliminaryThreadCount; i++)
+                {
+                    _threads.Add(new DownloadConnectionThread
+                    {
+                        ThreadId = i + 1,
+                        StartByte = i * 1000,
+                        EndByte = (i + 1) * 1000,
+                        CurrentByte = i * 1000,
+                        DownloadedBytes = 0,
+                        FormattedDownloaded = "0 KB",
+                        StatusInfo = "Connecting...",
+                        ProgressPercentage = 0.0,
+                        IsActive = true
+                    });
+                }
+
                 ReportProgress("Connecting...");
 
-                // 1. Probe HEAD to detect Content-Length and Accept-Ranges (with fast 2.5s timeout)
+                // 1. Probe HEAD to detect Content-Length and Accept-Ranges (with rapid 1.5s timeout)
                 try
                 {
                     using var headCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
-                    headCts.CancelAfter(TimeSpan.FromSeconds(2.5));
+                    headCts.CancelAfter(TimeSpan.FromSeconds(1.5));
 
                     using var headReq = new HttpRequestMessage(HttpMethod.Head, url);
                     ApplyStandardHeaders(headReq, url, referer, userAgent, cookies, customHeaders);
@@ -570,13 +607,13 @@ namespace PRRX.IDM.Services
                     // Fallback to GET with Range immediately
                 }
 
-                // 2. If HEAD failed, returned non-2xx, or didn't yield size/ranges: probe with GET Range: bytes=0-0 (with fast 3s timeout)
+                // 2. If HEAD failed, returned non-2xx, or didn't yield size/ranges: probe with GET Range: bytes=0-0 (with rapid 2.0s timeout)
                 if ((_totalBytes <= 0 || !acceptRanges) && !_cts.IsCancellationRequested)
                 {
                     try
                     {
                         using var getCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
-                        getCts.CancelAfter(TimeSpan.FromSeconds(3.0));
+                        getCts.CancelAfter(TimeSpan.FromSeconds(2.0));
 
                         using var getReq = new HttpRequestMessage(HttpMethod.Get, url);
                         ApplyStandardHeaders(getReq, url, referer, userAgent, cookies, customHeaders);
@@ -628,6 +665,9 @@ namespace PRRX.IDM.Services
 
                 var partsDir = destinationFilePath + ".prrx_parts";
                 Directory.CreateDirectory(partsDir);
+
+                // Clear preliminary connecting threads before allocating real byte-range segments
+                _threads.Clear();
 
                 // Initialize Threads and Byte Ranges
                 var segmentSize = _totalBytes > 0 ? Math.Max(1, _totalBytes / threadCount) : -1;

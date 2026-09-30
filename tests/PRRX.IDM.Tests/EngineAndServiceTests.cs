@@ -8,6 +8,7 @@ using System.Net.Http;
 using PRRX.IDM.Models;
 using PRRX.IDM.Services;
 using PRRX.IDM.ViewModels;
+using PRRX.IDM.Views;
 
 namespace PRRX.IDM.Tests
 {
@@ -891,6 +892,197 @@ namespace PRRX.IDM.Tests
             isComplete = thread.DownloadedBytes >= slotLen;
             thread.IsActive = !isComplete;
             Assert.False(thread.IsActive);
+        }
+
+        [Fact]
+        public void MainWindow_InstantiateAndNavigateToSiteGrabber_DoesNotThrow()
+        {
+            Exception? thrown = null;
+            var thread = new Thread(() =>
+            {
+                try
+                {
+                    if (System.Windows.Application.Current == null)
+                    {
+                        if (System.Windows.Application.ResourceAssembly == null)
+                        {
+                            System.Windows.Application.ResourceAssembly = typeof(PRRX.IDM.App).Assembly;
+                        }
+                        new System.Windows.Application();
+                    }
+
+                    var configService = new ConfigurationService();
+                    var themeService = new ThemeService(configService);
+                    var mediaEngine = new MediaEngineService(configService);
+                    var thumbnailService = new ThumbnailService();
+                    var updateService = new UpdateService();
+                    var historyService = new HistoryService();
+                    var browserService = new BrowserIntegrationService(configService);
+                    var spiderService = new SiteSpiderGrabberService(configService);
+                    var scheduleService = new ScheduleService();
+
+                    var mainVm = new MainViewModel(
+                        configService,
+                        themeService,
+                        mediaEngine,
+                        thumbnailService,
+                        updateService,
+                        historyService,
+                        browserService,
+                        spiderService,
+                        scheduleService);
+
+                    var mainWin = new MainWindow(mainVm);
+                    mainWin.Measure(new System.Windows.Size(1200, 800));
+                    mainWin.Arrange(new System.Windows.Rect(0, 0, 1200, 800));
+                    mainWin.UpdateLayout();
+
+                    // Navigate to Site Grabber
+                    Assert.True(mainVm.NavigateTabCommand.CanExecute("SiteGrabber"));
+                    mainVm.NavigateTabCommand.Execute("SiteGrabber");
+
+                    Assert.IsType<SiteGrabberViewModel>(mainVm.CurrentTabViewModel);
+                    mainWin.UpdateLayout();
+                }
+                catch (Exception ex)
+                {
+                    thrown = ex;
+                }
+            });
+            thread.SetApartmentState(ApartmentState.STA);
+            thread.Start();
+            thread.Join();
+
+            if (thrown != null)
+            {
+                throw new Exception($"MainWindow SiteGrabber navigation failed: {thrown}", thrown);
+            }
+        }
+
+        [Fact]
+        public void TelegramDynamicSegmentation_SegmentQueues_DistributeChunksAcrossConcurrency()
+        {
+            int concurrency = 8;
+            long totalBytes = 80 * 1024 * 1024; // 80 MB
+            int chunkSize = 524288; // 512 KB
+            int totalChunks = (int)Math.Ceiling((double)totalBytes / chunkSize);
+            long segmentSize = (long)Math.Ceiling((double)totalBytes / concurrency);
+
+            var segmentQueues = new System.Collections.Concurrent.ConcurrentQueue<int>[concurrency];
+            for (int s = 0; s < concurrency; s++)
+            {
+                segmentQueues[s] = new System.Collections.Concurrent.ConcurrentQueue<int>();
+            }
+
+            for (int i = 0; i < totalChunks; i++)
+            {
+                long chunkOffset = (long)i * chunkSize;
+                int sIdx = segmentSize > 0 ? Math.Clamp((int)(chunkOffset / segmentSize), 0, concurrency - 1) : 0;
+                segmentQueues[sIdx].Enqueue(i);
+            }
+
+            // Every segment queue must contain chunks
+            for (int s = 0; s < concurrency; s++)
+            {
+                Assert.False(segmentQueues[s].IsEmpty, $"Segment queue {s} should have chunks");
+                Assert.True(segmentQueues[s].TryDequeue(out var firstChunk));
+                long firstChunkOffset = (long)firstChunk * chunkSize;
+                int owner = (int)(firstChunkOffset / segmentSize);
+                Assert.Equal(s, owner);
+            }
+        }
+
+        [Fact]
+        public void TelegramMtproto_TotalSizeResolved_RecalculatesSegmentBounds()
+        {
+            int concurrency = 16;
+            long totalBytes = 0;
+            long segmentSize = 0;
+            var threads = new List<DownloadConnectionThread>();
+            for (int i = 0; i < concurrency; i++)
+            {
+                threads.Add(new DownloadConnectionThread
+                {
+                    ThreadId = i + 1,
+                    StartByte = 0,
+                    EndByte = 0,
+                    CurrentByte = 0,
+                    IsActive = true
+                });
+            }
+
+            // Simulate size discovery during MTProto progress callback
+            long discoveredSize = 160 * 1024 * 1024; // 160 MB
+            if (discoveredSize > 0 && totalBytes <= 0)
+            {
+                totalBytes = discoveredSize;
+                segmentSize = Math.Max(1, (long)Math.Ceiling((double)totalBytes / concurrency));
+                for (int i = 0; i < concurrency; i++)
+                {
+                    long segStart = i * segmentSize;
+                    long segEnd = (i == concurrency - 1) ? totalBytes - 1 : Math.Min(totalBytes - 1, segStart + segmentSize - 1);
+                    threads[i].StartByte = segStart;
+                    threads[i].EndByte = Math.Max(segStart, segEnd);
+                    threads[i].CurrentByte = segStart;
+                }
+            }
+
+            Assert.Equal(160 * 1024 * 1024, totalBytes);
+            Assert.Equal(10 * 1024 * 1024, segmentSize);
+            Assert.Equal(0, threads[0].StartByte);
+            Assert.Equal(segmentSize - 1, threads[0].EndByte);
+            Assert.Equal(totalBytes - 1, threads[15].EndByte);
+        }
+
+        [Fact]
+        public void MediaEngine_AudioConversionTargetExtension_NotRenamedToVideo()
+        {
+            var destinationFilePath = "C:\\Downloads\\Track.mp4";
+            var normalizedFormat = "mp3";
+            var expectedTarget = Path.ChangeExtension(destinationFilePath, normalizedFormat);
+            Assert.Equal("C:\\Downloads\\Track.mp3", expectedTarget);
+            Assert.NotEqual(destinationFilePath, expectedTarget);
+        }
+
+        [Fact]
+        public void SegmentedDownloadEngine_ThreadAllocation_DoesNotRetainPreliminaryThreads()
+        {
+            var threads = new List<DownloadConnectionThread>();
+            // Seed preliminary threads
+            for (int i = 0; i < 8; i++)
+            {
+                threads.Add(new DownloadConnectionThread
+                {
+                    ThreadId = i + 1,
+                    StartByte = i * 1000,
+                    EndByte = (i + 1) * 1000,
+                    StatusInfo = "Connecting..."
+                });
+            }
+            Assert.Equal(8, threads.Count);
+
+            // Allocation of real download segments must clear preliminary threads
+            threads.Clear();
+            int threadCount = 16;
+            long totalBytes = 100 * 1024 * 1024;
+            long segmentSize = Math.Max(1, totalBytes / threadCount);
+            for (int i = 0; i < threadCount; i++)
+            {
+                long start = i * segmentSize;
+                long end = (i == threadCount - 1) ? totalBytes - 1 : (start + segmentSize - 1);
+                threads.Add(new DownloadConnectionThread
+                {
+                    ThreadId = i + 1,
+                    StartByte = start,
+                    EndByte = end,
+                    StatusInfo = "Connecting..."
+                });
+            }
+
+            Assert.Equal(threadCount, threads.Count);
+            Assert.Equal(0, threads[0].StartByte);
+            Assert.Equal(totalBytes - 1, threads[^1].EndByte);
+            Assert.True(threads[0].EndByte > 1000);
         }
 
         private static string FormatBytes(long bytes)

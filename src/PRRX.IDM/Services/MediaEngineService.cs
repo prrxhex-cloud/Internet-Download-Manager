@@ -1494,25 +1494,35 @@ namespace PRRX.IDM.Services
                     });
                 }
 
-                if (process.ExitCode == 0 && !string.IsNullOrWhiteSpace(destinationFilePath) && !File.Exists(destinationFilePath))
+                if (process.ExitCode == 0 && !string.IsNullOrWhiteSpace(destinationFilePath))
                 {
                     try
                     {
-                        var baseName = Path.GetFileNameWithoutExtension(destinationFilePath);
-                        var dir = Path.GetDirectoryName(destinationFilePath) ?? outputDirectory;
-                        if (Directory.Exists(dir))
+                        var expectedTarget = Path.ChangeExtension(destinationFilePath, normalizedFormat);
+                        if (!File.Exists(expectedTarget) && !File.Exists(destinationFilePath))
                         {
-                            var match = Directory.GetFiles(dir, $"{baseName}.*")
-                                .Where(f => !f.EndsWith(".part", StringComparison.OrdinalIgnoreCase) &&
-                                            !f.EndsWith(".ytdl", StringComparison.OrdinalIgnoreCase) &&
-                                            !f.EndsWith(".aria2", StringComparison.OrdinalIgnoreCase) &&
-                                            !f.EndsWith(".temp", StringComparison.OrdinalIgnoreCase) &&
-                                            !f.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase))
-                                .OrderByDescending(f => File.GetLastWriteTimeUtc(f))
-                                .FirstOrDefault();
-                            if (match != null && !string.Equals(match, destinationFilePath, StringComparison.OrdinalIgnoreCase))
+                            var baseName = Path.GetFileNameWithoutExtension(destinationFilePath);
+                            var dir = Path.GetDirectoryName(destinationFilePath) ?? outputDirectory;
+                            if (Directory.Exists(dir))
                             {
-                                File.Move(match, destinationFilePath, true);
+                                var match = Directory.GetFiles(dir, $"{baseName}.*")
+                                    .Where(f => !f.EndsWith(".part", StringComparison.OrdinalIgnoreCase) &&
+                                                !f.EndsWith(".ytdl", StringComparison.OrdinalIgnoreCase) &&
+                                                !f.EndsWith(".aria2", StringComparison.OrdinalIgnoreCase) &&
+                                                !f.EndsWith(".temp", StringComparison.OrdinalIgnoreCase) &&
+                                                !f.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase))
+                                    .OrderByDescending(f => File.GetLastWriteTimeUtc(f))
+                                    .FirstOrDefault();
+                                if (match != null)
+                                {
+                                    var targetToUse = string.Equals(Path.GetExtension(match), "." + normalizedFormat, StringComparison.OrdinalIgnoreCase)
+                                        ? expectedTarget
+                                        : destinationFilePath;
+                                    if (!string.Equals(match, targetToUse, StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        File.Move(match, targetToUse, true);
+                                    }
+                                }
                             }
                         }
                     }
