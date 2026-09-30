@@ -562,6 +562,109 @@ namespace PRRX.IDM.Tests
             Assert.Null(ex);
         }
 
+        [Fact]
+        public void TelegramBotSyncService_ParseTaskFromJson_ExtractsAllFields()
+        {
+            var json = """
+            {
+                "id": "tg_task_123",
+                "url": "https://example.com/movie.mp4",
+                "fileName": "movie.mp4",
+                "fileSize": 104857600,
+                "formattedSize": "100.00 MB",
+                "mediaType": "video",
+                "source": "Telegram @PRRX_IDM_Bot",
+                "fileId": "BAACAgUAAxkBAAI...",
+                "mimeType": "video/mp4",
+                "chatId": "123456789",
+                "messageId": 42
+            }
+            """;
+
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            var task = TelegramBotSyncService.ParseTaskFromJson(doc.RootElement);
+
+            Assert.Equal("tg_task_123", task.Id);
+            Assert.Equal("https://example.com/movie.mp4", task.Url);
+            Assert.Equal("movie.mp4", task.FileName);
+            Assert.Equal(104857600L, task.FileSize);
+            Assert.Equal("100.00 MB", task.FormattedSize);
+            Assert.Equal("video", task.MediaType);
+            Assert.Equal("Telegram @PRRX_IDM_Bot", task.Source);
+            Assert.Equal("BAACAgUAAxkBAAI...", task.FileId);
+            Assert.Equal("video/mp4", task.MimeType);
+            Assert.Equal("123456789", task.ChatId);
+            Assert.Equal(42L, task.MessageId);
+        }
+
+        [Fact]
+        public void TelegramBotSyncService_ParseTaskFromJson_ConstructsTgFileUrlWhenUrlEmpty()
+        {
+            var json = """
+            {
+                "id": "tg_task_456",
+                "url": "",
+                "fileName": "archive.zip",
+                "fileSize": 52428800,
+                "mediaType": "document",
+                "fileId": "FILE_ID_ABC",
+                "mimeType": "application/zip",
+                "chatId": "987654321",
+                "messageId": 99
+            }
+            """;
+
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            var task = TelegramBotSyncService.ParseTaskFromJson(doc.RootElement);
+
+            Assert.StartsWith("tg://file?", task.Url);
+            Assert.Contains("file_id=FILE_ID_ABC", task.Url);
+            Assert.Contains("file_name=archive.zip", task.Url);
+            Assert.Contains("chat_id=987654321", task.Url);
+            Assert.Equal("50 MB", task.FormattedSize);
+        }
+
+        [Fact]
+        public void TelegramBotSyncService_ClientId_PreservedInConfiguration()
+        {
+            var configService = new ConfigurationService();
+            var service1 = new TelegramBotSyncService(configService);
+            var clientId1 = service1.ClientId;
+
+            Assert.False(string.IsNullOrWhiteSpace(clientId1));
+            Assert.Equal(clientId1, configService.CurrentConfig.TelegramClientId);
+
+            // A second instance with the same config should preserve the same ClientId
+            var service2 = new TelegramBotSyncService(configService);
+            Assert.Equal(clientId1, service2.ClientId);
+        }
+
+        [Fact]
+        public void SettingsViewModel_TelegramCommands_ExecuteWithoutException()
+        {
+            var configService = new ConfigurationService();
+            var themeService = new ThemeService(configService);
+            var updateService = new UpdateService();
+            var mediaEngine = new MediaEngineService(configService);
+            var syncService = new TelegramBotSyncService(configService, "http://127.0.0.1:59998");
+
+            var vm = new SettingsViewModel(configService, themeService, updateService, mediaEngine);
+
+            // TestConnectionCommand
+            Assert.True(vm.TestTelegramConnectionCommand.CanExecute(null));
+            vm.TestTelegramConnectionCommand.Execute(null);
+
+            // ForceTelegramHeartbeatCommand
+            Assert.True(vm.ForceTelegramHeartbeatCommand.CanExecute(null));
+            vm.ForceTelegramHeartbeatCommand.Execute(null);
+
+            // UnlinkTelegramCommand
+            Assert.True(vm.UnlinkTelegramCommand.CanExecute(null));
+            vm.UnlinkTelegramCommand.Execute(null);
+
+            Assert.False(string.IsNullOrWhiteSpace(vm.TelegramPairingCode));
+        }
+
         private static string FormatBytes(long bytes)
         {
             if (bytes <= 0) return "Unknown";

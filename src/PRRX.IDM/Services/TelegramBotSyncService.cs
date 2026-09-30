@@ -500,7 +500,7 @@ namespace PRRX.IDM.Services
             }
         }
 
-        private static TelegramRemoteTask ParseTaskFromJson(JsonElement taskElem)
+        internal static TelegramRemoteTask ParseTaskFromJson(JsonElement taskElem)
         {
             var task = new TelegramRemoteTask
             {

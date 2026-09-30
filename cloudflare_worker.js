@@ -950,11 +950,26 @@ export default {
         return new Response(JSON.stringify({ error: "Cloudflare D1 database binding (DB) is not configured" }), { status: 503, headers: corsHeaders });
       }
 
+      // Background / On-Demand Presence Check Endpoint (GET / POST)
+      if ((path === "/api/telegram/check-presence" || path === "/api/telegram/cron") && (method === "GET" || method === "POST")) {
+        const result = await checkPresenceForAllStaleClients(env);
+        return new Response(JSON.stringify({ success: true, ...result }), { status: 200, headers: corsHeaders });
+      }
+
       // Route Not Found
       return new Response(JSON.stringify({ error: "Endpoint not found", path: path }), { status: 404, headers: corsHeaders });
 
     } catch (err) {
       return new Response(JSON.stringify({ error: "Internal Server Error", message: err.message }), { status: 500, headers: corsHeaders });
+    }
+  },
+
+  async scheduled(event, env, ctx) {
+    currentWorkerEnv = env;
+    if (ctx && ctx.waitUntil) {
+      ctx.waitUntil(checkPresenceForAllStaleClients(env));
+    } else {
+      await checkPresenceForAllStaleClients(env);
     }
   }
 };
@@ -1037,6 +1052,48 @@ async function ensureTelegramTables(db) {
     telegramTablesInitialized = true;
   } catch (err) {
     console.error("Failed to initialize telegram tables in D1:", err);
+  }
+}
+
+async function checkPresenceForAllStaleClients(env) {
+  if (!env?.DB) return { checked: 0, markedOffline: 0 };
+  await ensureTelegramTables(env.DB);
+  let markedOffline = 0;
+  try {
+    const staleUsers = await env.DB.prepare(`
+      SELECT chat_id, client_id, client_status, is_notified_offline,
+             CAST((strftime('%s', 'now') - strftime('%s', coalesce(last_seen, CURRENT_TIMESTAMP))) AS INTEGER) AS sec_since
+      FROM telegram_users
+      WHERE client_status = 'online'
+    `).all();
+
+    for (const u of (staleUsers.results || [])) {
+      if ((u.sec_since || 0) > 75) {
+        markedOffline++;
+        if (u.is_notified_offline === 0) {
+          await sendTelegramMessage(u.chat_id,
+            `⚠️ <b>PRRX IDM Disconnected</b>\n\n` +
+            `Your PC client (PRRX IDM) has disconnected or been closed.\n` +
+            `Any files or links you send here will be queued securely in Cloudflare and will download automatically when your PC reconnects.`,
+            env,
+            {
+              inline_keyboard: [
+                [{ text: "📊 Check Status", callback_data: "cmd_status" }, { text: "📥 View Queue", callback_data: "cmd_queue" }]
+              ]
+            }
+          );
+        }
+        await env.DB.prepare(`
+          UPDATE telegram_users
+          SET client_status = 'offline', is_notified_offline = 1
+          WHERE chat_id = ?1
+        `).bind(u.chat_id).run();
+      }
+    }
+    return { checked: (staleUsers.results || []).length, markedOffline };
+  } catch (err) {
+    console.error("checkPresenceForAllStaleClients error:", err);
+    return { error: err.message };
   }
 }
 
@@ -1712,7 +1769,12 @@ async function handleStatusCommand(chatId, env) {
           `⚠️ <b>PRRX IDM Disconnected</b>\n\n` +
           `Your PC client (PRRX IDM) has disconnected or been closed.\n` +
           `Any files or links you send here will be queued securely in Cloudflare and will download automatically when your PC reconnects.`,
-          env
+          env,
+          {
+            inline_keyboard: [
+              [{ text: "📊 Check Status", callback_data: "cmd_status" }, { text: "📥 View Queue", callback_data: "cmd_queue" }]
+            ]
+          }
         );
       }
       try {
