@@ -31,21 +31,41 @@ namespace PRRX.IDM.Services
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     }
 
+    public enum TelegramBotConnectionStatus
+    {
+        Disconnected,
+        Connecting,
+        Connected,
+        PairingRequired
+    }
+
     public interface ITelegramBotSyncService
     {
         bool IsEnabled { get; set; }
         bool IsConnected { get; }
+        TelegramBotConnectionStatus Status { get; }
+        string StatusText { get; }
+        string StatusColorHex { get; }
         string ClientId { get; }
         string PairingCode { get; }
         string BotUsername { get; }
         string BotDeepLink { get; }
+        string? LinkedChatId { get; }
+        string? LinkedUsername { get; }
+        DateTime? LastHeartbeat { get; }
+        int PendingTaskCount { get; }
         event EventHandler<TelegramRemoteTask>? TaskReceived;
         event EventHandler<string>? PairingCodeChanged;
+        event EventHandler? StatusChanged;
         Task InitializeAsync();
         void Start();
         void Stop();
         Task<List<TelegramRemoteTask>> HydratePendingTasksAsync(CancellationToken ct = default);
         Task<bool> AcknowledgeTasksAsync(IEnumerable<string> taskIds, CancellationToken ct = default);
+        Task<bool> TestConnectionAsync(CancellationToken ct = default);
+        Task ForceHeartbeatAsync(CancellationToken ct = default);
+        Task<bool> UnlinkAsync(CancellationToken ct = default);
+        Task SendOfflineStatusAsync(CancellationToken ct = default);
     }
 
     public class TelegramBotSyncService : ITelegramBotSyncService
@@ -57,7 +77,7 @@ namespace PRRX.IDM.Services
             AllowAutoRedirect = true
         })
         {
-            Timeout = TimeSpan.FromSeconds(5)
+            Timeout = TimeSpan.FromSeconds(6)
         };
 
         public static TelegramBotSyncService? Current { get; internal set; }
@@ -82,20 +102,51 @@ namespace PRRX.IDM.Services
             }
         }
 
-        public bool IsConnected { get; private set; }
+        private TelegramBotConnectionStatus _status = TelegramBotConnectionStatus.Connecting;
+        public TelegramBotConnectionStatus Status
+        {
+            get => _status;
+            private set => UpdateStatus(value);
+        }
+
+        public bool IsConnected => Status == TelegramBotConnectionStatus.Connected;
+
+        public string StatusText => Status switch
+        {
+            TelegramBotConnectionStatus.Connected => "Connected & Active",
+            TelegramBotConnectionStatus.Connecting => "Connecting / Polling...",
+            TelegramBotConnectionStatus.PairingRequired => "Pairing Required",
+            TelegramBotConnectionStatus.Disconnected => "Disconnected / Offline",
+            _ => "Unknown"
+        };
+
+        public string StatusColorHex => Status switch
+        {
+            TelegramBotConnectionStatus.Connected => "#107C41",
+            TelegramBotConnectionStatus.Connecting => "#CA5010",
+            TelegramBotConnectionStatus.PairingRequired => "#F7630C",
+            TelegramBotConnectionStatus.Disconnected => "#8A8886",
+            _ => "#8A8886"
+        };
+
         public string ClientId { get; private set; } = string.Empty;
         public string PairingCode { get; private set; } = "PRRX-INIT";
         public string BotUsername => "PRRX_IDM_Bot";
         public string BotDeepLink => $"https://t.me/{BotUsername}?start={PairingCode}";
+        public string? LinkedChatId { get; private set; }
+        public string? LinkedUsername { get; private set; }
+        public DateTime? LastHeartbeat { get; private set; }
+        public int PendingTaskCount { get; private set; }
 
         public event EventHandler<TelegramRemoteTask>? TaskReceived;
         public event EventHandler<string>? PairingCodeChanged;
+        public event EventHandler? StatusChanged;
 
         static TelegramBotSyncService()
         {
             if (!SharedHttpClient.DefaultRequestHeaders.Contains("User-Agent"))
             {
-                SharedHttpClient.DefaultRequestHeaders.Add("User-Agent", "PRRX-IDM-TelegramSync/1.7.0");
+                SharedHttpClient.DefaultRequestHeaders.Add("User-Agent", "PRRX-IDM-TelegramSync/1.8.0");
             }
         }
 
@@ -124,10 +175,20 @@ namespace PRRX.IDM.Services
             Current = this;
         }
 
+        private void UpdateStatus(TelegramBotConnectionStatus newStatus)
+        {
+            if (_status != newStatus)
+            {
+                _status = newStatus;
+                StatusChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+
         public async Task InitializeAsync()
         {
             try
             {
+                UpdateStatus(TelegramBotConnectionStatus.Connecting);
                 var pairUri = $"{_baseUrl}/api/telegram/pair";
                 var payloadObj = new
                 {
@@ -146,9 +207,9 @@ namespace PRRX.IDM.Services
                         codeElem.GetString() is { } code && !string.IsNullOrWhiteSpace(code))
                     {
                         PairingCode = code;
-                        IsConnected = true;
                         _lastPairRegistered = DateTime.UtcNow;
                         PairingCodeChanged?.Invoke(this, PairingCode);
+                        await SendHeartbeatAsync();
                         return;
                     }
                 }
@@ -158,6 +219,7 @@ namespace PRRX.IDM.Services
             catch
             {
                 ApplyFallbackPairingCode();
+                UpdateStatus(TelegramBotConnectionStatus.Disconnected);
             }
         }
 
@@ -182,24 +244,134 @@ namespace PRRX.IDM.Services
             _syncCts?.Cancel();
             _syncCts?.Dispose();
             _syncCts = null;
+            UpdateStatus(TelegramBotConnectionStatus.Disconnected);
+        }
+
+        public async Task<bool> SendHeartbeatAsync(CancellationToken ct = default)
+        {
+            try
+            {
+                var heartbeatUri = $"{_baseUrl}/api/telegram/heartbeat";
+                var payload = JsonSerializer.Serialize(new
+                {
+                    clientId = ClientId,
+                    status = "online"
+                });
+                using var content = new StringContent(payload, System.Text.Encoding.UTF8, "application/json");
+                using var resp = await SharedHttpClient.PostAsync(heartbeatUri, content, ct);
+                if (resp.IsSuccessStatusCode)
+                {
+                    var json = await resp.Content.ReadAsStringAsync(ct);
+                    using var doc = JsonDocument.Parse(json);
+                    var root = doc.RootElement;
+                    bool linked = root.TryGetProperty("linked", out var linkedElem) && linkedElem.GetBoolean();
+                    LastHeartbeat = DateTime.UtcNow;
+
+                    if (linked)
+                    {
+                        LinkedChatId = root.TryGetProperty("chatId", out var cElem) ? cElem.GetString() : null;
+                        LinkedUsername = root.TryGetProperty("username", out var uElem) ? uElem.GetString() : null;
+                        PendingTaskCount = root.TryGetProperty("pendingTasks", out var pElem) && pElem.TryGetInt32(out var cnt) ? cnt : 0;
+                        UpdateStatus(TelegramBotConnectionStatus.Connected);
+                    }
+                    else
+                    {
+                        LinkedChatId = null;
+                        LinkedUsername = null;
+                        PendingTaskCount = 0;
+                        UpdateStatus(TelegramBotConnectionStatus.PairingRequired);
+                    }
+                    return true;
+                }
+                else
+                {
+                    UpdateStatus(TelegramBotConnectionStatus.Disconnected);
+                    return false;
+                }
+            }
+            catch
+            {
+                UpdateStatus(TelegramBotConnectionStatus.Disconnected);
+                return false;
+            }
+        }
+
+        public async Task<bool> TestConnectionAsync(CancellationToken ct = default)
+        {
+            UpdateStatus(TelegramBotConnectionStatus.Connecting);
+            return await SendHeartbeatAsync(ct);
+        }
+
+        public async Task ForceHeartbeatAsync(CancellationToken ct = default)
+        {
+            await SendHeartbeatAsync(ct);
+            if (IsEnabled)
+            {
+                await PollRemoteTasksAsync(ct);
+            }
+        }
+
+        public async Task<bool> UnlinkAsync(CancellationToken ct = default)
+        {
+            try
+            {
+                var unlinkUri = $"{_baseUrl}/api/telegram/unlink";
+                var payload = JsonSerializer.Serialize(new { clientId = ClientId });
+                using var content = new StringContent(payload, System.Text.Encoding.UTF8, "application/json");
+                using var resp = await SharedHttpClient.PostAsync(unlinkUri, content, ct);
+
+                LinkedChatId = null;
+                LinkedUsername = null;
+                PendingTaskCount = 0;
+                UpdateStatus(TelegramBotConnectionStatus.PairingRequired);
+                await InitializeAsync();
+                return resp.IsSuccessStatusCode;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public async Task SendOfflineStatusAsync(CancellationToken ct = default)
+        {
+            try
+            {
+                var statusUri = $"{_baseUrl}/api/telegram/status";
+                var payload = JsonSerializer.Serialize(new
+                {
+                    clientId = ClientId,
+                    status = "offline"
+                });
+                using var content = new StringContent(payload, System.Text.Encoding.UTF8, "application/json");
+                using var resp = await SharedHttpClient.PostAsync(statusUri, content, ct);
+            }
+            catch
+            {
+                // Best effort on exit
+            }
         }
 
         private async Task PollTasksLoopAsync(CancellationToken ct)
         {
             int cycleCount = 0;
+            UpdateStatus(TelegramBotConnectionStatus.Connecting);
+
             while (!ct.IsCancellationRequested)
             {
                 cycleCount++;
                 try
                 {
-                    // Auto-retry registration if not yet connected, or renew pair code before 1-hour expiration
-                    if (!IsConnected || (DateTime.UtcNow - _lastPairRegistered).TotalMinutes >= 45)
+                    // Auto-retry registration if disconnected, or renew pair code before 1-hour expiration
+                    if (Status == TelegramBotConnectionStatus.Disconnected || (DateTime.UtcNow - _lastPairRegistered).TotalMinutes >= 45)
                     {
-                        if (!IsConnected || cycleCount % 7 == 0)
+                        if (Status == TelegramBotConnectionStatus.Disconnected || cycleCount % 7 == 0)
                         {
                             await InitializeAsync();
                         }
                     }
+
+                    await SendHeartbeatAsync(ct);
 
                     if (IsEnabled)
                     {
@@ -208,12 +380,12 @@ namespace PRRX.IDM.Services
                 }
                 catch
                 {
-                    // Ignore transient network errors
+                    UpdateStatus(TelegramBotConnectionStatus.Disconnected);
                 }
 
                 try
                 {
-                    await Task.Delay(TimeSpan.FromSeconds(4), ct);
+                    await Task.Delay(TimeSpan.FromSeconds(15), ct);
                 }
                 catch (OperationCanceledException)
                 {
@@ -221,6 +393,7 @@ namespace PRRX.IDM.Services
                 }
             }
         }
+
 
         public async Task<bool> AcknowledgeTasksAsync(IEnumerable<string> taskIds, CancellationToken ct = default)
         {
@@ -274,7 +447,7 @@ namespace PRRX.IDM.Services
                             {
                                 ackIds.Add(task.Id);
                             }
-                            IsConnected = true;
+                            UpdateStatus(TelegramBotConnectionStatus.Connected);
                             TaskReceived?.Invoke(this, task);
                         }
                     }
@@ -315,7 +488,7 @@ namespace PRRX.IDM.Services
                         {
                             ackIds.Add(task.Id);
                         }
-                        IsConnected = true;
+                        UpdateStatus(TelegramBotConnectionStatus.Connected);
                         TaskReceived?.Invoke(this, task);
                     }
                 }

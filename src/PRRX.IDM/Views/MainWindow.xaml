@@ -116,6 +116,26 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
                         </StackPanel>
                     </Border>
 
+                    <!-- Telegram Bot Cloud Sync Status Pill -->
+                    <Border Background="{Binding TelegramStatusBackgroundBrush}" 
+                            BorderBrush="{Binding TelegramStatusBorderBrush}" 
+                            BorderThickness="1" CornerRadius="8" Padding="12,8" Margin="0,0,0,10"
+                            Cursor="Hand" ToolTip="{Binding TelegramStatusTooltip}">
+                        <Border.InputBindings>
+                            <MouseBinding MouseAction="LeftClick" Command="{Binding NavigateTabCommand}" CommandParameter="Settings"/>
+                        </Border.InputBindings>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Ellipse Width="8" Height="8" Fill="{Binding TelegramStatusDotBrush}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                            <TextBlock Grid.Column="1" Text="Telegram Bot" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="2" Text="{Binding TelegramStatusShortText}" FontSize="10" FontWeight="SemiBold" Foreground="{Binding TelegramStatusDotBrush}" VerticalAlignment="Center"/>
+                        </Grid>
+                    </Border>
+
                     <ui:Button Content="Settings &amp; Updates" Icon="{ui:SymbolIcon Symbol=Settings24}"
                                Command="{Binding NavigateTabCommand}" CommandParameter="Settings"
                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"

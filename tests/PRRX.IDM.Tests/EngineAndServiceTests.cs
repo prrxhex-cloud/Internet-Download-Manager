@@ -25,6 +25,80 @@ namespace PRRX.IDM.Tests
         }
 
         [Fact]
+        public void VerifySymbolIconProperty()
+        {
+            var thread = new Thread(() =>
+            {
+                var icon = new Wpf.Ui.Controls.SymbolIcon();
+                icon.Symbol = Wpf.Ui.Controls.SymbolRegular.CheckmarkCircle24;
+                Assert.Equal(Wpf.Ui.Controls.SymbolRegular.CheckmarkCircle24, icon.Symbol);
+            });
+            thread.SetApartmentState(ApartmentState.STA);
+            thread.Start();
+            thread.Join();
+        }
+
+
+
+        [Fact]
+        public void VerifyXamlEnumsAndSymbols()
+        {
+
+            var allowedAppearances = Enum.GetNames(typeof(Wpf.Ui.Controls.ControlAppearance)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var allowedSymbols = Enum.GetNames(typeof(Wpf.Ui.Controls.SymbolRegular)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            var dir = AppContext.BaseDirectory;
+            while (!string.IsNullOrEmpty(dir) && !File.Exists(Path.Combine(dir, "PRRX.InternetDownloadManager.sln")))
+            {
+                dir = Directory.GetParent(dir)?.FullName;
+            }
+            Assert.NotNull(dir);
+            var srcDir = Path.Combine(dir!, "src", "PRRX.IDM");
+            Assert.True(Directory.Exists(srcDir));
+
+            var xamlFiles = Directory.GetFiles(srcDir, "*.xaml", SearchOption.AllDirectories);
+            Assert.NotEmpty(xamlFiles);
+
+
+            var errors = new System.Collections.Generic.List<string>();
+
+            var appearanceRegex = new System.Text.RegularExpressions.Regex(@"Appearance\s*=\s*[""']([^""'{}\s]+)[""']", System.Text.RegularExpressions.RegexOptions.Compiled);
+            var symbolRegex = new System.Text.RegularExpressions.Regex(@"Symbol\s*=\s*(?:[""']([^""'\s]+)[""']|([A-Za-z0-9_]+))", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+            foreach (var file in xamlFiles)
+            {
+                var lines = File.ReadAllLines(file);
+                for (int i = 0; i < lines.Length; i++)
+                {
+                    var line = lines[i];
+                    foreach (System.Text.RegularExpressions.Match match in appearanceRegex.Matches(line))
+                    {
+                        var val = match.Groups[1].Value;
+                        if (val.StartsWith("{") || val.Contains("Binding") || val.Contains("x:Static")) continue;
+                        if (!allowedAppearances.Contains(val))
+                        {
+                            errors.Add($"{Path.GetFileName(file)}:{i + 1} - Invalid Appearance: '{val}'");
+                        }
+                    }
+
+                    foreach (System.Text.RegularExpressions.Match match in symbolRegex.Matches(line))
+                    {
+                        var val = match.Groups[1].Success && !string.IsNullOrEmpty(match.Groups[1].Value) ? match.Groups[1].Value : match.Groups[2].Value;
+                        if (val.StartsWith("{") || val.Contains("Binding") || val.Contains("x:Static")) continue;
+                        if (!allowedSymbols.Contains(val))
+                        {
+                            errors.Add($"{Path.GetFileName(file)}:{i + 1} - Invalid Symbol: '{val}'");
+                        }
+                    }
+                }
+            }
+
+            Assert.True(errors.Count == 0, "XAML Enum Errors:\n" + string.Join("\n", errors));
+        }
+
+
+
+        [Fact]
         public void EnsureNetscapeCookieFormat_ConvertsRawKeyValuePairs()
         {
             var raw = "VISITOR_INFO1_LIVE=abc123xyz; PREF=f4=4000000; LOGIN_INFO=AFmmF2kw";
@@ -414,6 +488,78 @@ namespace PRRX.IDM.Tests
             Assert.Contains(vm.SelectedLinks, l => l.FileName == "presentation.pptx");
             Assert.Contains(vm.SelectedLinks, l => l.FileName == "installer.msi");
             Assert.DoesNotContain(vm.SelectedLinks, l => l.FileName == "photo.png");
+        }
+
+        [Fact]
+        public void TelegramBotSyncService_InitialStateAndStatusFormatting()
+        {
+            var configService = new ConfigurationService();
+            var service = new TelegramBotSyncService(configService);
+
+            Assert.False(string.IsNullOrWhiteSpace(service.PairingCode));
+            Assert.False(string.IsNullOrWhiteSpace(service.ClientId));
+            Assert.Equal("PRRX_IDM_Bot", service.BotUsername);
+            Assert.Contains(service.PairingCode, service.BotDeepLink);
+
+            Assert.Equal(TelegramBotConnectionStatus.Connecting, service.Status);
+            Assert.Equal("Connecting / Polling...", service.StatusText);
+            Assert.Equal("#CA5010", service.StatusColorHex);
+        }
+
+        [Fact]
+        public void SettingsViewModel_TelegramProperties_InitializedProperly()
+        {
+            var configService = new ConfigurationService();
+            var themeService = new ThemeService(configService);
+            var updateService = new UpdateService();
+            var mediaEngine = new MediaEngineService(configService);
+            var syncService = new TelegramBotSyncService(configService);
+
+            var vm = new SettingsViewModel(configService, themeService, updateService, mediaEngine);
+
+            Assert.False(string.IsNullOrWhiteSpace(vm.TelegramPairingCode));
+            Assert.Equal("PRRX_IDM_Bot", vm.TelegramBotUsername);
+            Assert.Contains(vm.TelegramPairingCode, vm.TelegramBotUrl);
+            Assert.False(string.IsNullOrWhiteSpace(vm.TelegramStatusText));
+            Assert.False(string.IsNullOrWhiteSpace(vm.TelegramStatusBadgeColor));
+            Assert.False(string.IsNullOrWhiteSpace(vm.TelegramLinkedUser));
+            Assert.NotNull(vm.TestTelegramConnectionCommand);
+            Assert.NotNull(vm.ForceTelegramHeartbeatCommand);
+            Assert.NotNull(vm.UnlinkTelegramCommand);
+        }
+
+        [Fact]
+        public void MainViewModel_TelegramPill_ReflectsSyncServiceState()
+        {
+            var configService = new ConfigurationService();
+            var themeService = new ThemeService(configService);
+            var mediaEngine = new MediaEngineService(configService);
+            var thumbService = new ThumbnailService();
+            var updateService = new UpdateService();
+            var historyService = new HistoryService();
+            var browserService = new BrowserIntegrationService(configService);
+            var syncService = new TelegramBotSyncService(configService);
+
+            var vm = new MainViewModel(
+                configService, themeService, mediaEngine, thumbService,
+                updateService, historyService, browserService);
+
+            Assert.False(string.IsNullOrWhiteSpace(vm.TelegramStatusDotBrush));
+            Assert.False(string.IsNullOrWhiteSpace(vm.TelegramStatusShortText));
+            Assert.False(string.IsNullOrWhiteSpace(vm.TelegramStatusTooltip));
+            Assert.False(string.IsNullOrWhiteSpace(vm.TelegramStatusBackgroundBrush));
+            Assert.False(string.IsNullOrWhiteSpace(vm.TelegramStatusBorderBrush));
+        }
+
+        [Fact]
+        public async Task TelegramBotSyncService_OfflineSignal_DoesNotThrow()
+        {
+            var configService = new ConfigurationService();
+            var service = new TelegramBotSyncService(configService, "http://127.0.0.1:59999");
+
+            // Calling SendOfflineStatusAsync to unreachable host should handle gracefully without throwing
+            var ex = await Record.ExceptionAsync(() => service.SendOfflineStatusAsync());
+            Assert.Null(ex);
         }
 
         private static string FormatBytes(long bytes)

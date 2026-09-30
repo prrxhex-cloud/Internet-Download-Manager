@@ -209,7 +209,8 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
                                    Appearance="Danger" Command="{Binding StopCommand}" Height="40" Padding="16,0" Margin="0,0,10,0"/>
 
                         <ui:Button Grid.Column="3" Content="Download All Discovered" Icon="{ui:SymbolIcon Symbol=ArrowDownload24}"
-                                   Appearance="Accent" Command="{Binding DownloadAllCommand}" Height="40" Padding="16,0" Margin="0,0,10,0"/>
+                                   Appearance="Primary" Command="{Binding DownloadAllCommand}" Height="40" Padding="16,0" Margin="0,0,10,0"/>
+
 
                         <ui:Button Grid.Column="4" Content="Clear Results" Icon="{ui:SymbolIcon Symbol=Delete24}"
                                    Appearance="Secondary" Command="{Binding ClearResultsCommand}" Height="40" Padding="14,0"/>

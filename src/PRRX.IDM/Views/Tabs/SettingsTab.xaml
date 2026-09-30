@@ -267,7 +267,7 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
                     CornerRadius="12" Padding="20" Margin="0,0,0,18"
                     BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1">
                 <StackPanel>
-                    <Grid Margin="0,0,0,10">
+                    <Grid Margin="0,0,0,12">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
@@ -279,23 +279,36 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
                                        Opacity="0.7" FontSize="12" Margin="0,2,0,0" TextWrapping="Wrap"/>
                         </StackPanel>
 
-                        <Border Grid.Column="1" Background="#200088CC" BorderBrush="#400088CC" BorderThickness="1" CornerRadius="8" Padding="10,4" VerticalAlignment="Center">
-                            <TextBlock Text="@PRRX_IDM_Bot Ready" FontWeight="Bold" FontSize="11" Foreground="#0088CC"/>
+                        <!-- Live Status Badge -->
+                        <Border Grid.Column="1" Background="{Binding TelegramStatusBadgeBackground}" 
+                                BorderBrush="{Binding TelegramStatusBorderColor}" 
+                                BorderThickness="1" CornerRadius="8" Padding="10,5" VerticalAlignment="Center">
+                            <StackPanel Orientation="Horizontal">
+                                <ui:SymbolIcon Symbol="{Binding TelegramStatusSymbol}" FontSize="14" Margin="0,0,6,0" Foreground="{Binding TelegramStatusBadgeColor}"/>
+                                <TextBlock Text="{Binding TelegramStatusText}" FontWeight="Bold" FontSize="11" Foreground="{Binding TelegramStatusBadgeColor}" VerticalAlignment="Center"/>
+                            </StackPanel>
                         </Border>
                     </Grid>
 
+                    <!-- Pairing and Status Panel -->
                     <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="14,12" Margin="0,0,0,12">
                         <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
-                            <StackPanel>
+
+                            <StackPanel Grid.Row="0" Grid.Column="0">
                                 <TextBlock Text="PAIRING CODE FOR THIS PC" FontSize="11" FontWeight="Bold" Opacity="0.6"/>
                                 <TextBlock Text="{Binding TelegramPairingCode}" FontSize="22" FontWeight="Bold" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" Margin="0,4,0,0"/>
                                 <TextBlock Text="Send this pairing code to @PRRX_IDM_Bot or click Open Bot below." Opacity="0.7" FontSize="12" Margin="0,4,0,0"/>
                             </StackPanel>
-                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Orientation="Horizontal">
+
+                            <StackPanel Grid.Row="0" Grid.Column="1" VerticalAlignment="Center" Orientation="Horizontal">
                                 <ui:Button Content="Open Bot (@PRRX_IDM_Bot)" Icon="{ui:SymbolIcon Symbol=Send24}"
                                            Appearance="Primary" Command="{Binding OpenTelegramBotCommand}" 
                                            Height="40" Margin="0,0,8,0" Padding="16,0"/>
@@ -303,7 +316,73 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
                                            Appearance="Secondary" Command="{Binding RefreshTelegramPairingCommand}" 
                                            Height="40" Padding="12,0"/>
                             </StackPanel>
+
+                            <!-- Live Connection Details Grid -->
+                            <Border Grid.Row="1" Grid.ColumnSpan="2" Margin="0,12,0,0" Padding="12,10" CornerRadius="6" Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+
+                                    <!-- Linked User -->
+                                    <StackPanel Grid.Column="0">
+                                        <TextBlock Text="LINKED TELEGRAM" FontSize="10" FontWeight="Bold" Opacity="0.6"/>
+                                        <TextBlock Text="{Binding TelegramLinkedUser}" FontSize="13" FontWeight="SemiBold" Margin="0,2,0,0" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"/>
+                                    </StackPanel>
+
+                                    <!-- Last Heartbeat -->
+                                    <StackPanel Grid.Column="1">
+                                        <TextBlock Text="LAST CLOUD SYNC" FontSize="10" FontWeight="Bold" Opacity="0.6"/>
+                                        <TextBlock Text="{Binding TelegramLastHeartbeatText}" FontSize="12" FontWeight="Normal" Margin="0,2,0,0"/>
+                                    </StackPanel>
+
+                                    <!-- Pending Queue -->
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Text="REMOTE QUEUE" FontSize="10" FontWeight="Bold" Opacity="0.6"/>
+                                        <TextBlock Text="{Binding TelegramActiveTasksCount, StringFormat='{}{0} tasks queued'}" FontSize="12" FontWeight="Normal" Margin="0,2,0,0"/>
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
                         </Grid>
+                    </Border>
+
+                    <!-- Action Controls & Diagnostic Buttons -->
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                        <ui:Button Content="Test Connection" Icon="{ui:SymbolIcon Symbol=ArrowClockwise24}"
+                                   Appearance="Secondary" Command="{Binding TestTelegramConnectionCommand}"
+                                   Height="34" Margin="0,0,8,0" Padding="12,0"
+                                   IsEnabled="{Binding IsTestingTelegram, Converter={StaticResource InvBool}}"/>
+                        <ui:Button Content="Force Heartbeat" Icon="{ui:SymbolIcon Symbol=ArrowClockwise24}"
+                                   Appearance="Secondary" Command="{Binding ForceTelegramHeartbeatCommand}"
+                                   Height="34" Margin="0,0,8,0" Padding="12,0"
+                                   IsEnabled="{Binding IsTestingTelegram, Converter={StaticResource InvBool}}"/>
+                        <ui:Button Content="Unlink PC" Icon="{ui:SymbolIcon Symbol=Dismiss24}"
+                                   Appearance="Danger" Command="{Binding UnlinkTelegramCommand}"
+                                   Height="34" Padding="12,0"
+                                   IsEnabled="{Binding IsTelegramLinked}"/>
+                    </StackPanel>
+
+                    <!-- Action Feedback Banner -->
+                    <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="6" Padding="12,8" Margin="0,0,0,10">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Visibility" Value="Visible"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding TelegramActionFeedback}" Value="">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding TelegramActionFeedback}" Value="{x:Null}">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <StackPanel Orientation="Horizontal">
+                            <ui:SymbolIcon Symbol="Info24" Margin="0,0,8,0" VerticalAlignment="Center" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"/>
+                            <TextBlock Text="{Binding TelegramActionFeedback}" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                        </StackPanel>
                     </Border>
 
                     <CheckBox Content="Enable automated background download sync from @PRRX_IDM_Bot"

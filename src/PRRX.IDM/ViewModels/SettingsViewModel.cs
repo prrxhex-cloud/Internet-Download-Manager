@@ -457,8 +457,90 @@ namespace PRRX.IDM.ViewModels
         public string TelegramBotUsername => "PRRX_IDM_Bot";
         public string TelegramBotUrl => $"https://t.me/{TelegramBotUsername}?start={TelegramPairingCode}";
 
+        private string _telegramStatusText = "Connecting / Polling...";
+        private string _telegramStatusBadgeColor = "#CA5010";
+        private string _telegramStatusBadgeBackground = "#18CA5010";
+        private string _telegramStatusBorderColor = "#40CA5010";
+        private Wpf.Ui.Controls.SymbolRegular _telegramStatusSymbol = Wpf.Ui.Controls.SymbolRegular.ArrowClockwise24;
+        private string _telegramLinkedUser = "Not Paired Yet";
+        private string _telegramLastHeartbeatText = "Pending...";
+        private int _telegramActiveTasksCount = 0;
+        private string _telegramActionFeedback = string.Empty;
+        private bool _isTelegramLinked = false;
+        private bool _isTestingTelegram = false;
+
+        public string TelegramStatusText
+        {
+            get => _telegramStatusText;
+            set => SetProperty(ref _telegramStatusText, value);
+        }
+
+        public string TelegramStatusBadgeColor
+        {
+            get => _telegramStatusBadgeColor;
+            set => SetProperty(ref _telegramStatusBadgeColor, value);
+        }
+
+        public string TelegramStatusBadgeBackground
+        {
+            get => _telegramStatusBadgeBackground;
+            set => SetProperty(ref _telegramStatusBadgeBackground, value);
+        }
+
+        public string TelegramStatusBorderColor
+        {
+            get => _telegramStatusBorderColor;
+            set => SetProperty(ref _telegramStatusBorderColor, value);
+        }
+
+        public Wpf.Ui.Controls.SymbolRegular TelegramStatusSymbol
+        {
+            get => _telegramStatusSymbol;
+            set => SetProperty(ref _telegramStatusSymbol, value);
+        }
+
+        public string TelegramLinkedUser
+        {
+            get => _telegramLinkedUser;
+            set => SetProperty(ref _telegramLinkedUser, value);
+        }
+
+        public string TelegramLastHeartbeatText
+        {
+            get => _telegramLastHeartbeatText;
+            set => SetProperty(ref _telegramLastHeartbeatText, value);
+        }
+
+        public int TelegramActiveTasksCount
+        {
+            get => _telegramActiveTasksCount;
+            set => SetProperty(ref _telegramActiveTasksCount, value);
+        }
+
+        public string TelegramActionFeedback
+        {
+            get => _telegramActionFeedback;
+            set => SetProperty(ref _telegramActionFeedback, value);
+        }
+
+        public bool IsTelegramLinked
+        {
+            get => _isTelegramLinked;
+            set => SetProperty(ref _isTelegramLinked, value);
+        }
+
+        public bool IsTestingTelegram
+        {
+            get => _isTestingTelegram;
+            set => SetProperty(ref _isTestingTelegram, value);
+        }
+
         public ICommand OpenTelegramBotCommand { get; }
         public ICommand RefreshTelegramPairingCommand { get; }
+        public ICommand TestTelegramConnectionCommand { get; }
+        public ICommand ForceTelegramHeartbeatCommand { get; }
+        public ICommand UnlinkTelegramCommand { get; }
+
 
         public string UpdateStatusMessage
         {
@@ -657,6 +739,10 @@ namespace PRRX.IDM.ViewModels
                         OnPropertyChanged(nameof(TelegramBotUrl));
                     }));
                 };
+                TelegramBotSyncService.Current.StatusChanged += (s, e) =>
+                {
+                    App.Current?.Dispatcher?.BeginInvoke(new Action(UpdateTelegramStatusProperties));
+                };
             }
             else
             {
@@ -688,7 +774,86 @@ namespace PRRX.IDM.ViewModels
                     TelegramPairingCode = "PRRX-" + Guid.NewGuid().ToString("N").Substring(0, 4).ToUpperInvariant();
                 }
                 OnPropertyChanged(nameof(TelegramBotUrl));
+                UpdateTelegramStatusProperties();
             });
+
+            TestTelegramConnectionCommand = new AsyncRelayCommand(async () =>
+            {
+                if (TelegramBotSyncService.Current == null)
+                {
+                    TelegramActionFeedback = "Telegram sync service is not initialized.";
+                    return;
+                }
+
+                IsTestingTelegram = true;
+                TelegramActionFeedback = "Testing connection to Cloudflare & Telegram...";
+                try
+                {
+                    bool ok = await TelegramBotSyncService.Current.TestConnectionAsync();
+                    UpdateTelegramStatusProperties();
+                    TelegramActionFeedback = ok
+                        ? (TelegramBotSyncService.Current.Status == TelegramBotConnectionStatus.Connected
+                            ? "✓ Connected successfully! PRRX IDM Bot is active."
+                            : "✓ Cloudflare Worker reachable. Waiting for Telegram pairing.")
+                        : "⚠️ Could not reach Cloudflare Worker. Check your internet connection.";
+                }
+                catch (Exception ex)
+                {
+                    TelegramActionFeedback = $"⚠️ Connection error: {ex.Message}";
+                }
+                finally
+                {
+                    IsTestingTelegram = false;
+                }
+            });
+
+            ForceTelegramHeartbeatCommand = new AsyncRelayCommand(async () =>
+            {
+                if (TelegramBotSyncService.Current == null) return;
+                IsTestingTelegram = true;
+                TelegramActionFeedback = "Forcing heartbeat sync & task poll...";
+                try
+                {
+                    await TelegramBotSyncService.Current.ForceHeartbeatAsync();
+                    UpdateTelegramStatusProperties();
+                    TelegramActionFeedback = "✓ Heartbeat & task sync completed.";
+                }
+                catch (Exception ex)
+                {
+                    TelegramActionFeedback = $"⚠️ Heartbeat error: {ex.Message}";
+                }
+                finally
+                {
+                    IsTestingTelegram = false;
+                }
+            });
+
+            UnlinkTelegramCommand = new AsyncRelayCommand(async () =>
+            {
+                if (TelegramBotSyncService.Current == null) return;
+                IsTestingTelegram = true;
+                TelegramActionFeedback = "Unlinking Telegram account...";
+                try
+                {
+                    bool ok = await TelegramBotSyncService.Current.UnlinkAsync();
+                    TelegramPairingCode = TelegramBotSyncService.Current.PairingCode;
+                    OnPropertyChanged(nameof(TelegramBotUrl));
+                    UpdateTelegramStatusProperties();
+                    TelegramActionFeedback = ok
+                        ? "✓ Device unlinked. New pairing code generated."
+                        : "⚠️ Unlink request failed on server, but local state was reset.";
+                }
+                catch (Exception ex)
+                {
+                    TelegramActionFeedback = $"⚠️ Unlink error: {ex.Message}";
+                }
+                finally
+                {
+                    IsTestingTelegram = false;
+                }
+            });
+
+            UpdateTelegramStatusProperties();
 
             // Initial server traffic check
             _ = System.Threading.Tasks.Task.Run(async () =>
@@ -1342,6 +1507,71 @@ namespace PRRX.IDM.ViewModels
             {
                 IsUpdatingEngine = false;
             }
+        }
+
+        private void UpdateTelegramStatusProperties()
+        {
+            var service = TelegramBotSyncService.Current;
+            if (service == null)
+            {
+                TelegramStatusText = "Service Disabled";
+                TelegramStatusBadgeColor = "#8A8886";
+                TelegramStatusBadgeBackground = "#188A8886";
+                TelegramStatusBorderColor = "#408A8886";
+                TelegramStatusSymbol = Wpf.Ui.Controls.SymbolRegular.PlugDisconnected24;
+                TelegramLinkedUser = "Disabled";
+                TelegramLastHeartbeatText = "N/A";
+                TelegramActiveTasksCount = 0;
+                IsTelegramLinked = false;
+                return;
+            }
+
+            switch (service.Status)
+            {
+                case TelegramBotConnectionStatus.Connected:
+                    TelegramStatusText = "Connected & Active";
+                    TelegramStatusBadgeColor = "#107C41";
+                    TelegramStatusBadgeBackground = "#18107C41";
+                    TelegramStatusBorderColor = "#40107C41";
+                    TelegramStatusSymbol = Wpf.Ui.Controls.SymbolRegular.CheckmarkCircle24;
+                    IsTelegramLinked = true;
+                    break;
+                case TelegramBotConnectionStatus.Connecting:
+                    TelegramStatusText = "Connecting / Polling...";
+                    TelegramStatusBadgeColor = "#CA5010";
+                    TelegramStatusBadgeBackground = "#18CA5010";
+                    TelegramStatusBorderColor = "#40CA5010";
+                    TelegramStatusSymbol = Wpf.Ui.Controls.SymbolRegular.ArrowClockwise24;
+                    IsTelegramLinked = !string.IsNullOrEmpty(service.LinkedChatId);
+                    break;
+                case TelegramBotConnectionStatus.PairingRequired:
+                    TelegramStatusText = "Pairing Required";
+                    TelegramStatusBadgeColor = "#D83B01";
+                    TelegramStatusBadgeBackground = "#18D83B01";
+                    TelegramStatusBorderColor = "#40D83B01";
+                    TelegramStatusSymbol = Wpf.Ui.Controls.SymbolRegular.QrCode24;
+                    IsTelegramLinked = false;
+                    break;
+                case TelegramBotConnectionStatus.Disconnected:
+                default:
+                    TelegramStatusText = "Disconnected / Offline";
+                    TelegramStatusBadgeColor = "#E81123";
+                    TelegramStatusBadgeBackground = "#18E81123";
+                    TelegramStatusBorderColor = "#40E81123";
+                    TelegramStatusSymbol = Wpf.Ui.Controls.SymbolRegular.PlugDisconnected24;
+                    IsTelegramLinked = !string.IsNullOrEmpty(service.LinkedChatId);
+                    break;
+            }
+
+            TelegramLinkedUser = !string.IsNullOrEmpty(service.LinkedUsername)
+                ? "@" + service.LinkedUsername.TrimStart('@')
+                : (!string.IsNullOrEmpty(service.LinkedChatId) ? $"ID: {service.LinkedChatId}" : "Not Paired Yet");
+
+            TelegramLastHeartbeatText = service.LastHeartbeat.HasValue
+                ? service.LastHeartbeat.Value.ToLocalTime().ToString("HH:mm:ss (yyyy-MM-dd)")
+                : "Pending...";
+
+            TelegramActiveTasksCount = service.PendingTaskCount;
         }
     }
 }

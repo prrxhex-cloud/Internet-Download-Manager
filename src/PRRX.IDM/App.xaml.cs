@@ -903,9 +903,17 @@ namespace PRRX.IDM
 
         protected override void OnExit(ExitEventArgs e)
         {
+            try
+            {
+                // Explicitly send offline status to Telegram gateway so user is immediately notified
+                _telegramBotSyncService?.SendOfflineStatusAsync().Wait(TimeSpan.FromSeconds(2));
+            }
+            catch { }
+
             _telegramBotSyncService?.Stop();
             _browserService?.StopIpcServer();
             base.OnExit(e);
         }
+
     }
 }

@@ -63,6 +63,42 @@ namespace PRRX.IDM.ViewModels
             set => SetProperty(ref _selectedTabKey, value);
         }
 
+        private string _telegramStatusDotBrush = "#8A8886";
+        private string _telegramStatusBackgroundBrush = "#108A8886";
+        private string _telegramStatusBorderBrush = "#308A8886";
+        private string _telegramStatusShortText = "Offline";
+        private string _telegramStatusTooltip = "Telegram Bot Remote Sync is not connected.";
+
+        public string TelegramStatusDotBrush
+        {
+            get => _telegramStatusDotBrush;
+            set => SetProperty(ref _telegramStatusDotBrush, value);
+        }
+
+        public string TelegramStatusBackgroundBrush
+        {
+            get => _telegramStatusBackgroundBrush;
+            set => SetProperty(ref _telegramStatusBackgroundBrush, value);
+        }
+
+        public string TelegramStatusBorderBrush
+        {
+            get => _telegramStatusBorderBrush;
+            set => SetProperty(ref _telegramStatusBorderBrush, value);
+        }
+
+        public string TelegramStatusShortText
+        {
+            get => _telegramStatusShortText;
+            set => SetProperty(ref _telegramStatusShortText, value);
+        }
+
+        public string TelegramStatusTooltip
+        {
+            get => _telegramStatusTooltip;
+            set => SetProperty(ref _telegramStatusTooltip, value);
+        }
+
         public ICommand NavigateTabCommand { get; }
 
         public MainViewModel(
@@ -115,6 +151,63 @@ namespace PRRX.IDM.ViewModels
                     MemoryOptimizer.TrimMemory();
                 }
             });
+
+            if (TelegramBotSyncService.Current != null)
+            {
+                TelegramBotSyncService.Current.StatusChanged += (s, e) =>
+                {
+                    App.Current?.Dispatcher?.BeginInvoke(new Action(UpdateTelegramStatusPill));
+                };
+            }
+            UpdateTelegramStatusPill();
+        }
+
+        private void UpdateTelegramStatusPill()
+        {
+            var service = TelegramBotSyncService.Current;
+            if (service == null || !service.IsEnabled)
+            {
+                TelegramStatusDotBrush = "#8A8886";
+                TelegramStatusBackgroundBrush = "#108A8886";
+                TelegramStatusBorderBrush = "#308A8886";
+                TelegramStatusShortText = "Disabled";
+                TelegramStatusTooltip = "Telegram Bot Remote Sync is disabled. Click to configure in Settings.";
+                return;
+            }
+
+            switch (service.Status)
+            {
+                case TelegramBotConnectionStatus.Connected:
+                    TelegramStatusDotBrush = "#107C41";
+                    TelegramStatusBackgroundBrush = "#15107C41";
+                    TelegramStatusBorderBrush = "#40107C41";
+                    TelegramStatusShortText = "Online";
+                    var user = !string.IsNullOrEmpty(service.LinkedUsername) ? "@" + service.LinkedUsername.TrimStart('@') : (!string.IsNullOrEmpty(service.LinkedChatId) ? service.LinkedChatId : "Active");
+                    TelegramStatusTooltip = $"PRRX IDM Bot Online & Synced ({user}). Click to view Settings.";
+                    break;
+                case TelegramBotConnectionStatus.Connecting:
+                    TelegramStatusDotBrush = "#CA5010";
+                    TelegramStatusBackgroundBrush = "#15CA5010";
+                    TelegramStatusBorderBrush = "#40CA5010";
+                    TelegramStatusShortText = "Polling";
+                    TelegramStatusTooltip = "Connecting to Cloudflare & Telegram Bot...";
+                    break;
+                case TelegramBotConnectionStatus.PairingRequired:
+                    TelegramStatusDotBrush = "#D83B01";
+                    TelegramStatusBackgroundBrush = "#15D83B01";
+                    TelegramStatusBorderBrush = "#40D83B01";
+                    TelegramStatusShortText = "Pair Required";
+                    TelegramStatusTooltip = $"Pairing required. Code: {service.PairingCode}. Click to pair.";
+                    break;
+                case TelegramBotConnectionStatus.Disconnected:
+                default:
+                    TelegramStatusDotBrush = "#E81123";
+                    TelegramStatusBackgroundBrush = "#15E81123";
+                    TelegramStatusBorderBrush = "#40E81123";
+                    TelegramStatusShortText = "Offline";
+                    TelegramStatusTooltip = "Disconnected from Cloudflare / Telegram Bot service. Click to check settings.";
+                    break;
+            }
         }
     }
 }

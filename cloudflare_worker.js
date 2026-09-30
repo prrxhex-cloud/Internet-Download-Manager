@@ -520,6 +520,34 @@ export default {
 
             tasks = rows.results || [];
 
+            // Presence tracking: Polling tasks proves client is online and active!
+            const userRow = await env.DB.prepare(
+              "SELECT chat_id, client_status, is_notified_offline FROM telegram_users WHERE client_id = ?1"
+            ).bind(clientId).first();
+
+            if (userRow) {
+              if (userRow.client_status === "offline" || userRow.is_notified_offline === 1) {
+                await sendTelegramMessage(userRow.chat_id,
+                  `🟢 <b>PRRX IDM Connected</b>\n\n` +
+                  `Your PC client is now online and active! Ready to receive downloads.`,
+                  env,
+                  {
+                    inline_keyboard: [
+                      [{ text: "📊 Bot Status", callback_data: "cmd_status" }, { text: "📥 View Queue", callback_data: "cmd_queue" }]
+                    ]
+                  }
+                );
+              }
+              await env.DB.prepare(`
+                UPDATE telegram_users
+                SET last_seen = CURRENT_TIMESTAMP,
+                    last_active = CURRENT_TIMESTAMP,
+                    client_status = 'online',
+                    is_notified_offline = 0
+                WHERE client_id = ?1
+              `).bind(clientId).run();
+            }
+
             if (tasks.length > 0 && autoAck) {
               const ids = tasks.map(t => t.id);
               const placeholders = ids.map(() => "?").join(",");
@@ -566,7 +594,11 @@ export default {
           }
         }
 
-        return new Response(JSON.stringify({ tasks: tasks }), { status: 200, headers: corsHeaders });
+        return new Response(JSON.stringify({
+          tasks: tasks,
+          client_status: "online",
+          last_seen: new Date().toISOString()
+        }), { status: 200, headers: corsHeaders });
       }
 
       // Desktop App Task Acknowledge Endpoint (POST)
@@ -609,6 +641,260 @@ export default {
         }
         return new Response(JSON.stringify({ success: true, count: taskIds.length }), { status: 200, headers: corsHeaders });
       }
+
+      // Telegram Bot Heartbeat Endpoint (POST)
+      if (path === "/api/telegram/heartbeat" && method === "POST") {
+        const body = await request.json().catch(() => ({}));
+        const rawClientId = body.clientId || body.client_id;
+        const clientId = (typeof rawClientId === "string" && /^[a-zA-Z0-9_-]{8,64}$/.test(rawClientId)) ? rawClientId : null;
+        if (!clientId) {
+          return new Response(JSON.stringify({ error: "Invalid client_id" }), { status: 400, headers: corsHeaders });
+        }
+
+        let isLinked = false;
+        let linkedChatId = null;
+        let linkedUsername = null;
+        let linkedFirstName = null;
+        let pendingTasksCount = 0;
+
+        if (env.DB) {
+          await ensureTelegramTables(env.DB);
+          try {
+            const userRow = await env.DB.prepare(
+              "SELECT chat_id, client_id, client_status, is_notified_offline, username, first_name FROM telegram_users WHERE client_id = ?1"
+            ).bind(clientId).first();
+
+            if (userRow) {
+              isLinked = true;
+              linkedChatId = userRow.chat_id;
+              linkedUsername = userRow.username || "";
+              linkedFirstName = userRow.first_name || "";
+
+              if (userRow.client_status === "offline" || userRow.is_notified_offline === 1) {
+                await sendTelegramMessage(userRow.chat_id,
+                  `🟢 <b>PRRX IDM Connected</b>\n\n` +
+                  `Your PC client is now online and active! Ready to receive downloads.`,
+                  env,
+                  {
+                    inline_keyboard: [
+                      [{ text: "📊 Bot Status", callback_data: "cmd_status" }, { text: "📥 View Queue", callback_data: "cmd_queue" }]
+                    ]
+                  }
+                );
+              }
+
+              await env.DB.prepare(`
+                UPDATE telegram_users
+                SET last_seen = CURRENT_TIMESTAMP,
+                    last_active = CURRENT_TIMESTAMP,
+                    client_status = 'online',
+                    is_notified_offline = 0
+                WHERE client_id = ?1
+              `).bind(clientId).run();
+
+              const countRow = await env.DB.prepare(
+                "SELECT COUNT(*) AS count FROM telegram_tasks WHERE client_id = ?1 AND status = 'pending'"
+              ).bind(clientId).first();
+              if (countRow) pendingTasksCount = countRow.count || 0;
+            }
+          } catch (e) {
+            console.error("D1 heartbeat error:", e);
+          }
+        }
+
+        return new Response(JSON.stringify({
+          success: true,
+          status: isLinked ? "online" : "unpaired",
+          linked: isLinked,
+          chatId: linkedChatId,
+          username: linkedUsername,
+          firstName: linkedFirstName,
+          pendingTasks: pendingTasksCount,
+          lastSeen: new Date().toISOString()
+        }), { status: 200, headers: corsHeaders });
+      }
+
+      // Telegram Bot Client Offline / Status Signal Endpoint (POST)
+      if (path === "/api/telegram/status" && method === "POST") {
+        const body = await request.json().catch(() => ({}));
+        const rawClientId = body.clientId || body.client_id;
+        const clientId = (typeof rawClientId === "string" && /^[a-zA-Z0-9_-]{8,64}$/.test(rawClientId)) ? rawClientId : null;
+        const statusReq = (body.status || "offline").toLowerCase();
+
+        if (clientId && env.DB) {
+          await ensureTelegramTables(env.DB);
+          try {
+            const userRow = await env.DB.prepare(
+              "SELECT chat_id, client_id, client_status, is_notified_offline FROM telegram_users WHERE client_id = ?1"
+            ).bind(clientId).first();
+
+            if (userRow) {
+              if (statusReq === "offline") {
+                if (userRow.is_notified_offline === 0) {
+                  await sendTelegramMessage(userRow.chat_id,
+                    `⚠️ <b>PRRX IDM Disconnected</b>\n\n` +
+                    `Your PC client (PRRX IDM) has disconnected or been closed.\n` +
+                    `Any files or links you send here will be queued securely in Cloudflare and will download automatically when your PC reconnects.`,
+                    env,
+                    {
+                      inline_keyboard: [
+                        [{ text: "📊 Check Status", callback_data: "cmd_status" }, { text: "📥 View Queue", callback_data: "cmd_queue" }]
+                      ]
+                    }
+                  );
+                }
+                await env.DB.prepare(`
+                  UPDATE telegram_users
+                  SET client_status = 'offline',
+                      is_notified_offline = 1,
+                      last_seen = CURRENT_TIMESTAMP
+                  WHERE client_id = ?1
+                `).bind(clientId).run();
+              } else if (statusReq === "online") {
+                if (userRow.is_notified_offline === 1 || userRow.client_status === "offline") {
+                  await sendTelegramMessage(userRow.chat_id,
+                    `🟢 <b>PRRX IDM Connected</b>\n\n` +
+                    `Your PC client is now online and active! Ready to receive downloads.`,
+                    env,
+                    {
+                      inline_keyboard: [
+                        [{ text: "📊 Bot Status", callback_data: "cmd_status" }, { text: "📥 View Queue", callback_data: "cmd_queue" }]
+                      ]
+                    }
+                  );
+                }
+                await env.DB.prepare(`
+                  UPDATE telegram_users
+                  SET client_status = 'online',
+                      is_notified_offline = 0,
+                      last_seen = CURRENT_TIMESTAMP
+                  WHERE client_id = ?1
+                `).bind(clientId).run();
+              }
+            }
+          } catch (e) {
+            console.error("D1 set status error:", e);
+          }
+        }
+
+        return new Response(JSON.stringify({ success: true, status: statusReq }), { status: 200, headers: corsHeaders });
+      }
+
+      // Telegram Bot Unlink PC Endpoint (POST)
+      if (path === "/api/telegram/unlink" && method === "POST") {
+        const body = await request.json().catch(() => ({}));
+        const rawClientId = body.clientId || body.client_id;
+        const clientId = (typeof rawClientId === "string" && /^[a-zA-Z0-9_-]{8,64}$/.test(rawClientId)) ? rawClientId : null;
+
+        if (clientId && env.DB) {
+          await ensureTelegramTables(env.DB);
+          try {
+            const rows = await env.DB.prepare(
+              "SELECT chat_id FROM telegram_users WHERE client_id = ?1"
+            ).bind(clientId).all();
+
+            for (const row of (rows.results || [])) {
+              await sendTelegramMessage(row.chat_id,
+                `🔌 <b>PRRX IDM Unlinked</b>\n\n` +
+                `Your PC client has unlinked from this Telegram bot.\n` +
+                `To reconnect, generate a new pairing code in PRRX IDM settings.`,
+                env,
+                {
+                  inline_keyboard: [
+                    [{ text: "❓ How to Re-Pair", callback_data: "cmd_help" }]
+                  ]
+                }
+              );
+              userClientMap.delete(row.chat_id.toString());
+              if (env.PRRX_KV) {
+                await env.PRRX_KV.delete(`user:${row.chat_id}`).catch(() => {});
+              }
+            }
+
+            await env.DB.prepare("DELETE FROM telegram_users WHERE client_id = ?1").bind(clientId).run();
+          } catch (e) {
+            console.error("D1 unlink error:", e);
+          }
+        }
+
+        return new Response(JSON.stringify({ success: true }), { status: 200, headers: corsHeaders });
+      }
+
+      // Telegram Bot Client Status Check Endpoint (GET)
+      if (path === "/api/telegram/client-status" && method === "GET") {
+        const clientId = url.searchParams.get("client_id");
+        if (!clientId || !/^[a-zA-Z0-9_-]{8,64}$/.test(clientId)) {
+          return new Response(JSON.stringify({ error: "Invalid client_id" }), { status: 400, headers: corsHeaders });
+        }
+
+        let isLinked = false;
+        let status = "unpaired";
+        let chatId = null;
+        let username = null;
+        let lastSeen = null;
+        let pendingTasks = 0;
+
+        if (env.DB) {
+          await ensureTelegramTables(env.DB);
+          try {
+            const userRow = await env.DB.prepare(`
+              SELECT chat_id, client_id, client_status, is_notified_offline, username, first_name, last_seen,
+                     CAST((strftime('%s', 'now') - strftime('%s', coalesce(last_seen, CURRENT_TIMESTAMP))) AS INTEGER) AS seconds_since_seen
+              FROM telegram_users
+              WHERE client_id = ?1
+            `).bind(clientId).first();
+
+            if (userRow) {
+              isLinked = true;
+              chatId = userRow.chat_id;
+              username = userRow.username || "";
+              lastSeen = userRow.last_seen;
+
+              const secondsSinceSeen = userRow.seconds_since_seen || 0;
+              if (secondsSinceSeen > 75 && userRow.client_status === "online") {
+                status = "offline";
+                if (userRow.is_notified_offline === 0) {
+                  await sendTelegramMessage(userRow.chat_id,
+                    `⚠️ <b>PRRX IDM Disconnected</b>\n\n` +
+                    `Your PC client (PRRX IDM) has disconnected or been closed.\n` +
+                    `Any files or links you send here will be queued securely in Cloudflare and will download automatically when your PC reconnects.`,
+                    env,
+                    {
+                      inline_keyboard: [
+                        [{ text: "📊 Check Status", callback_data: "cmd_status" }, { text: "📥 View Queue", callback_data: "cmd_queue" }]
+                      ]
+                    }
+                  );
+                }
+                await env.DB.prepare(`
+                  UPDATE telegram_users
+                  SET client_status = 'offline', is_notified_offline = 1
+                  WHERE client_id = ?1
+                `).bind(clientId).run();
+              } else {
+                status = userRow.client_status || "online";
+              }
+
+              const countRow = await env.DB.prepare(
+                "SELECT COUNT(*) AS count FROM telegram_tasks WHERE client_id = ?1 AND status = 'pending'"
+              ).bind(clientId).first();
+              if (countRow) pendingTasks = countRow.count || 0;
+            }
+          } catch (e) {
+            console.error("D1 client-status error:", e);
+          }
+        }
+
+        return new Response(JSON.stringify({
+          linked: isLinked,
+          status: status,
+          chatId: chatId,
+          username: username,
+          lastSeen: lastSeen,
+          pendingTasks: pendingTasks
+        }), { status: 200, headers: corsHeaders });
+      }
+
 
       // Client Configuration Endpoint for Desktop App (GET)
       if (path === "/api/telegram/client-config" && method === "GET") {
@@ -703,7 +989,12 @@ async function ensureTelegramTables(db) {
           chat_id TEXT PRIMARY KEY,
           client_id TEXT NOT NULL,
           linked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-          last_active DATETIME DEFAULT CURRENT_TIMESTAMP
+          last_active DATETIME DEFAULT CURRENT_TIMESTAMP,
+          last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
+          client_status TEXT DEFAULT 'online',
+          is_notified_offline INTEGER DEFAULT 0,
+          username TEXT,
+          first_name TEXT
         )
       `),
       db.prepare(`
@@ -736,6 +1027,13 @@ async function ensureTelegramTables(db) {
     try { await db.prepare("ALTER TABLE telegram_tasks ADD COLUMN chat_id TEXT").run(); } catch (_) {}
     try { await db.prepare("ALTER TABLE telegram_tasks ADD COLUMN message_id INTEGER").run(); } catch (_) {}
 
+    try { await db.prepare("ALTER TABLE telegram_users ADD COLUMN last_seen DATETIME").run(); } catch (_) {}
+    try { await db.prepare("ALTER TABLE telegram_users ADD COLUMN client_status TEXT DEFAULT 'online'").run(); } catch (_) {}
+    try { await db.prepare("ALTER TABLE telegram_users ADD COLUMN is_notified_offline INTEGER DEFAULT 0").run(); } catch (_) {}
+    try { await db.prepare("ALTER TABLE telegram_users ADD COLUMN username TEXT").run(); } catch (_) {}
+    try { await db.prepare("ALTER TABLE telegram_users ADD COLUMN first_name TEXT").run(); } catch (_) {}
+
+
     telegramTablesInitialized = true;
   } catch (err) {
     console.error("Failed to initialize telegram tables in D1:", err);
@@ -744,17 +1042,48 @@ async function ensureTelegramTables(db) {
 
 async function handleTelegramUpdate(update, env, ctx) {
   if (!update) return;
+
+  // Handle Telegram Callback Queries from Inline Keyboards
+  if (update.callback_query) {
+    const cb = update.callback_query;
+    const chatId = cb.message?.chat?.id;
+    const queryId = cb.id;
+    const data = cb.data || "";
+
+    if (queryId) {
+      if (ctx && ctx.waitUntil) {
+        ctx.waitUntil(answerCallbackQuery(queryId, "⚡ Action updated", env));
+      } else {
+        await answerCallbackQuery(queryId, "⚡ Action updated", env);
+      }
+    }
+
+    if (chatId) {
+      if (data === "cmd_status" || data === "cmd_refresh_status") {
+        await handleStatusCommand(chatId, env);
+      } else if (data === "cmd_queue" || data === "cmd_refresh_queue") {
+        await handleQueueCommand(chatId, env);
+      } else if (data === "cmd_help") {
+        await handleHelpCommand(chatId, env);
+      } else if (data === "cmd_boost") {
+        await handleBoostCommand(chatId, env);
+      } else if (data === "cmd_unlink") {
+        await handleUnlinkCommand(chatId, env);
+      }
+    }
+    return;
+  }
+
   const msg = update.message || update.edited_message || update.channel_post;
   if (!msg || !msg.chat) return;
 
   const chatId = msg.chat.id;
   const text = (msg.text || msg.caption || "").trim();
+  const fromUser = msg.from || {};
+  const tgUsername = fromUser.username || "";
+  const tgFirstName = fromUser.first_name || "";
 
   // 1. Check for pairing commands or codes:
-  // - /pair [CODE], /pair_[CODE], pair [CODE]
-  // - /start [CODE], /start_[CODE], start [CODE]
-  // - Bare code: PRRX-XXXX, PRRX XXXX, PRRX_XXXX, PRRXXXXX
-  // - Bare 4-8 character code: e.g. 986A, RYMF
   let pairingCodeAttempt = null;
   let isPairOrStartCommand = false;
 
@@ -783,7 +1112,14 @@ async function handleTelegramUpdate(update, env, ctx) {
       `1. Open PRRX IDM on your PC.\n` +
       `2. Go to <b>Settings → Telegram Bot</b> to view your pairing code.\n` +
       `3. Send your code here (e.g. <code>/pair PRRX-1234</code> or simply <code>PRRX-1234</code>).\n\n` +
-      `Once linked, any media, file, or download link forwarded here will automatically download on your PC at maximum 32-stream speed!`
+      `Once linked, any media, file, or download link forwarded here will automatically download on your PC at maximum 32-stream speed!`,
+      env,
+      {
+        inline_keyboard: [
+          [{ text: "📊 Check Status", callback_data: "cmd_status" }, { text: "❓ Help & Tips", callback_data: "cmd_help" }],
+          [{ text: "📥 View Queue", callback_data: "cmd_queue" }, { text: "⚡ Turbo Boost", callback_data: "cmd_boost" }]
+        ]
+      }
     );
     return;
   }
@@ -832,12 +1168,17 @@ async function handleTelegramUpdate(update, env, ctx) {
         try {
           await env.DB.batch([
             env.DB.prepare(`
-              INSERT INTO telegram_users (chat_id, client_id, linked_at, last_active)
-              VALUES (?1, ?2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+              INSERT INTO telegram_users (chat_id, client_id, linked_at, last_active, last_seen, client_status, is_notified_offline, username, first_name)
+              VALUES (?1, ?2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'online', 0, ?3, ?4)
               ON CONFLICT(chat_id) DO UPDATE SET
                 client_id = excluded.client_id,
-                last_active = CURRENT_TIMESTAMP
-            `).bind(chatId.toString(), matchedClientId),
+                last_active = CURRENT_TIMESTAMP,
+                last_seen = CURRENT_TIMESTAMP,
+                client_status = 'online',
+                is_notified_offline = 0,
+                username = excluded.username,
+                first_name = excluded.first_name
+            `).bind(chatId.toString(), matchedClientId, tgUsername, tgFirstName),
 
             env.DB.prepare("DELETE FROM telegram_pairs WHERE pair_code = ?1 OR pair_code = ?2 OR client_id = ?3")
               .bind(candidateCode, rawCode, matchedClientId)
@@ -859,11 +1200,19 @@ async function handleTelegramUpdate(update, env, ctx) {
 
       await sendTelegramMessage(chatId,
         `✅ <b>PC Successfully Linked!</b>\n\n` +
-        `💻 Your Telegram is now securely connected to <b>PRRX Internet Download Manager</b>.\n\n` +
+        `💻 Your Telegram is now securely connected to <b>PRRX Internet Download Manager</b>.\n` +
+        `🟢 <b>Client ID:</b> <code>${matchedClientId.substring(0, 8)}...</code>\n\n` +
         `🚀 <b>How to download:</b>\n` +
         `• Forward any <b>video, audio, document, or archive</b> directly to this chat.\n` +
         `• Or paste any download link (e.g. <code>https://...</code>)!\n\n` +
-        `Your PC will automatically receive and start downloading at maximum 32-stream Turbo speed!`
+        `Your PC will automatically receive and start downloading at maximum 32-stream Turbo speed!`,
+        env,
+        {
+          inline_keyboard: [
+            [{ text: "📊 Bot Status", callback_data: "cmd_status" }, { text: "📥 View Queue", callback_data: "cmd_queue" }],
+            [{ text: "⚡ Turbo Boost", callback_data: "cmd_boost" }, { text: "❓ Help & Tips", callback_data: "cmd_help" }]
+          ]
+        }
       );
       return;
     }
@@ -875,7 +1224,13 @@ async function handleTelegramUpdate(update, env, ctx) {
       `💡 <b>To connect your PC:</b>\n` +
       `1. Open PRRX IDM on your PC.\n` +
       `2. Go to <b>Settings → Telegram Bot</b> to view or refresh your pairing code.\n` +
-      `3. Send your code here (e.g. <code>/pair ${escapeHtml(candidateCode)}</code>).`
+      `3. Send your code here (e.g. <code>/pair ${escapeHtml(candidateCode)}</code>).`,
+      env,
+      {
+        inline_keyboard: [
+          [{ text: "❓ Help & Guide", callback_data: "cmd_help" }]
+        ]
+      }
     );
     return;
   }
@@ -912,92 +1267,38 @@ async function handleTelegramUpdate(update, env, ctx) {
     }
   }
 
-  // Handle /help, /info, /about
-  const helpMatch = text.match(/^\/(?:help|info|about)(?:@\w+)?$/i);
+  // Handle /status command
+  const statusMatch = text.match(/^\/(?:status|info)(?:@\w+)?$/i);
+  if (statusMatch) {
+    await handleStatusCommand(chatId, env);
+    return;
+  }
+
+  // Handle /queue command
+  const queueMatch = text.match(/^\/(?:queue|tasks|downloads)(?:@\w+)?$/i);
+  if (queueMatch) {
+    await handleQueueCommand(chatId, env);
+    return;
+  }
+
+  // Handle /help, /about
+  const helpMatch = text.match(/^\/(?:help|about)(?:@\w+)?$/i);
   if (helpMatch) {
-    const statusText = clientId
-      ? `✅ <b>Status:</b> Connected to Client <code>${clientId.substring(0, 8)}...</code>`
-      : `⚠️ <b>Status:</b> Not connected to any PC.`;
-    await sendTelegramMessage(chatId,
-      `👋 <b>PRRX Internet Download Manager Bot</b>\n\n` +
-      `${statusText}\n\n` +
-      `⚡ <b>Commands:</b>\n` +
-      `• <code>/pair [CODE]</code> — Connect your PC (e.g. <code>/pair PRRX-1234</code>)\n` +
-      `• <code>/boost</code> — View 32-stream turbo acceleration status\n` +
-      `• <code>/status</code> — Check current connection and queue status\n` +
-      `• <code>/unlink</code> — Disconnect your PC\n` +
-      `• <code>/help</code> — Show this help guide\n\n` +
-      `🚀 <b>How to download:</b> Forward any video, audio, document or paste download links to this chat!`
-    );
+    await handleHelpCommand(chatId, env);
     return;
   }
 
   // Handle /boost command
   const boostMatch = text.match(/^\/boost(?:@\w+)?(?:\s+(.*))?$/i);
   if (boostMatch) {
-    if (!clientId) {
-      await sendTelegramMessage(chatId,
-        `🚀 <b>PRRX Turbo Download Boost: 32-Stream Enabled</b>\n\n` +
-        `All downloads forwarded through @PRRX_IDM_Bot automatically utilize <b>32 multi-connection parallel streams</b> with 1 MB high-speed chunk buffers.\n\n` +
-        `⚠️ <b>PC Not Linked:</b> Open PRRX IDM on your PC, go to <b>Settings → Telegram Bot</b>, and send your code (e.g. <code>/pair PRRX-1234</code>) to begin receiving boosted downloads on your desktop!`
-      );
-    } else {
-      await sendTelegramMessage(chatId,
-        `🚀 <b>PRRX Turbo Download Boost: ACTIVE</b>\n\n` +
-        `⚡ <b>Multi-Connection:</b> 32 Parallel Streams\n` +
-        `📦 <b>Buffer Size:</b> 1 MB High-Speed Turbo Buffer\n` +
-        `💻 <b>Linked Client:</b> <code>${clientId.substring(0, 8)}...</code>\n\n` +
-        `All incoming downloads are accelerated at maximum network throughput with zero speed limits!`
-      );
-    }
-    return;
-  }
-
-  // Handle /status command
-  const statusMatch = text.match(/^\/status(?:@\w+)?$/i);
-  if (statusMatch) {
-    if (!clientId) {
-      await sendTelegramMessage(chatId,
-        `⚠️ <b>Status: PC Not Linked</b>\n\n` +
-        `Your Telegram account is not yet connected to PRRX IDM.\n` +
-        `Open PRRX IDM on your PC, go to <b>Settings → Telegram Bot</b>, and send your pairing code here.`
-      );
-    } else {
-      let pendingCount = 0;
-      if (env.DB) {
-        try {
-          const countRow = await env.DB.prepare(
-            "SELECT COUNT(*) AS count FROM telegram_tasks WHERE client_id = ? AND status = 'pending'"
-          ).bind(clientId).first();
-          if (countRow) pendingCount = countRow.count || 0;
-        } catch {}
-      }
-      await sendTelegramMessage(chatId,
-        `✅ <b>Status: Connected & Active</b>\n\n` +
-        `💻 <b>Client ID:</b> <code>${clientId.substring(0, 8)}...</code>\n` +
-        `⚡ <b>Turbo Speed:</b> 32-Stream Multi-Connection Enabled\n` +
-        `📥 <b>Pending Tasks:</b> ${pendingCount} in queue\n\n` +
-        `Any media or links forwarded here are sent directly to your PC.`
-      );
-    }
+    await handleBoostCommand(chatId, env);
     return;
   }
 
   // Handle /unlink or /unpair command
   const unlinkMatch = text.match(/^\/(?:unlink|unpair)(?:@\w+)?$/i);
   if (unlinkMatch) {
-    if (env.DB) {
-      await env.DB.prepare("DELETE FROM telegram_users WHERE chat_id = ?").bind(chatId.toString()).run().catch(() => {});
-    }
-    userClientMap.delete(chatId.toString());
-    if (env.PRRX_KV) {
-      await env.PRRX_KV.delete(`user:${chatId}`).catch(() => {});
-    }
-    await sendTelegramMessage(chatId,
-      `🔌 <b>PC Unlinked</b>\n\n` +
-      `Your Telegram account has been disconnected from PRRX IDM.\n` +
-      `To connect again, send a new pairing code from your PC.`
-    );
+    await handleUnlinkCommand(chatId, env);
     return;
   }
 
@@ -1009,9 +1310,49 @@ async function handleTelegramUpdate(update, env, ctx) {
       `<b>Quick Setup:</b>\n` +
       `1. Open PRRX IDM on your PC.\n` +
       `2. Go to <b>Settings → Telegram Bot</b> to find your pairing code.\n` +
-      `3. Send your code here (e.g. <code>/pair PRRX-1234</code> or simply <code>PRRX-1234</code>).`
+      `3. Send your code here (e.g. <code>/pair PRRX-1234</code> or simply <code>PRRX-1234</code>).`,
+      env,
+      {
+        inline_keyboard: [
+          [{ text: "❓ Help & Instructions", callback_data: "cmd_help" }]
+        ]
+      }
     );
     return;
+  }
+
+  // Check client connection presence for active task feedback
+  let clientIsOnline = true;
+  if (env.DB) {
+    try {
+      const uRow = await env.DB.prepare(`
+        SELECT client_status, is_notified_offline,
+               CAST((strftime('%s', 'now') - strftime('%s', coalesce(last_seen, CURRENT_TIMESTAMP))) AS INTEGER) AS sec_since
+        FROM telegram_users WHERE client_id = ?1
+      `).bind(clientId).first();
+      if (uRow) {
+        if (uRow.sec_since > 75 && uRow.client_status === "online") {
+          clientIsOnline = false;
+          if (uRow.is_notified_offline === 0) {
+            await sendTelegramMessage(chatId,
+              `⚠️ <b>PRRX IDM Disconnected</b>\n\n` +
+              `Your PC client (PRRX IDM) has disconnected or been closed.\n` +
+              `Any files or links you send here will be queued securely in Cloudflare and will download automatically when your PC reconnects.`,
+              env,
+              {
+                inline_keyboard: [
+                  [{ text: "📊 Check Status", callback_data: "cmd_status" }, { text: "📥 View Queue", callback_data: "cmd_queue" }]
+                ]
+              }
+            );
+          }
+          await env.DB.prepare("UPDATE telegram_users SET client_status = 'offline', is_notified_offline = 1 WHERE client_id = ?1")
+            .bind(clientId).run().catch(() => {});
+        } else {
+          clientIsOnline = (uRow.client_status !== "offline" && uRow.sec_since <= 75);
+        }
+      }
+    } catch {}
   }
 
   // 3. Check for Forwarded Source Information (Public Channel / Post)
@@ -1165,13 +1506,36 @@ async function handleTelegramUpdate(update, env, ctx) {
 
     await enqueueTask(clientId, task, env);
 
-    await sendTelegramMessage(chatId,
-      `🚀 <b>Sent to PRRX IDM on your PC! File: ${escapeHtml(fileName)} (${formattedSize})</b>\n\n` +
-      `📁 <b>Name:</b> <code>${escapeHtml(fileName)}</code>\n` +
-      `📦 <b>Size:</b> ${formattedSize}\n` +
-      `⚡ <b>Engine:</b> Native MTProto Turbo Engine (32 Parallel Streams)\n\n` +
-      `<i>PRRX IDM has detected this task and popped up the download dialog on your PC screen!</i>`
-    );
+    if (clientIsOnline) {
+      await sendTelegramMessage(chatId,
+        `🚀 <b>Sent to PRRX IDM on your PC!</b>\n\n` +
+        `📁 <b>File:</b> <code>${escapeHtml(fileName)}</code>\n` +
+        `📦 <b>Size:</b> ${formattedSize}\n` +
+        `🟢 <b>PC Status:</b> Connected & Active (32-Stream Turbo Engine)\n\n` +
+        `<i>PRRX IDM has detected this task and popped up the download dialog on your PC screen!</i>`,
+        env,
+        {
+          inline_keyboard: [
+            [{ text: "📥 View Queue", callback_data: "cmd_queue" }, { text: "📊 Bot Status", callback_data: "cmd_status" }]
+          ]
+        }
+      );
+    } else {
+      await sendTelegramMessage(chatId,
+        `📥 <b>Queued for PRRX IDM!</b>\n\n` +
+        `📁 <b>File:</b> <code>${escapeHtml(fileName)}</code>\n` +
+        `📦 <b>Size:</b> ${formattedSize}\n` +
+        `⏸ <b>PC Status:</b> Disconnected / Offline\n` +
+        `☁️ <b>Cloud Queue:</b> Saved securely in Cloudflare\n\n` +
+        `<i>This file will download automatically on your PC the moment PRRX IDM reconnects!</i>`,
+        env,
+        {
+          inline_keyboard: [
+            [{ text: "📥 View Queue", callback_data: "cmd_queue" }, { text: "📊 Bot Status", callback_data: "cmd_status" }]
+          ]
+        }
+      );
+    }
     return;
   }
 
@@ -1238,11 +1602,35 @@ async function handleTelegramUpdate(update, env, ctx) {
 
     await enqueueTask(clientId, task, env);
 
-    await sendTelegramMessage(chatId,
-      `🚀 <b>Sent to PRRX IDM on your PC! File: ${escapeHtml(urlFileName)} (Web Link)</b>\n\n` +
-      `🌐 <b>URL:</b> <code>${escapeHtml(extractedUrl.length > 70 ? extractedUrl.substring(0, 67) + "..." : extractedUrl)}</code>\n\n` +
-      `⚡ <i>PRRX IDM on your PC is analyzing and downloading this link.</i>`
-    );
+    if (clientIsOnline) {
+      await sendTelegramMessage(chatId,
+        `🚀 <b>Sent to PRRX IDM on your PC!</b>\n\n` +
+        `🌐 <b>URL:</b> <code>${escapeHtml(extractedUrl.length > 70 ? extractedUrl.substring(0, 67) + "..." : extractedUrl)}</code>\n` +
+        `📁 <b>Target Name:</b> <code>${escapeHtml(urlFileName)}</code>\n` +
+        `🟢 <b>PC Status:</b> Connected & Active\n\n` +
+        `⚡ <i>PRRX IDM on your PC is analyzing and downloading this link.</i>`,
+        env,
+        {
+          inline_keyboard: [
+            [{ text: "📥 View Queue", callback_data: "cmd_queue" }, { text: "📊 Bot Status", callback_data: "cmd_status" }]
+          ]
+        }
+      );
+    } else {
+      await sendTelegramMessage(chatId,
+        `📥 <b>Queued for PRRX IDM!</b>\n\n` +
+        `🌐 <b>URL:</b> <code>${escapeHtml(extractedUrl.length > 70 ? extractedUrl.substring(0, 67) + "..." : extractedUrl)}</code>\n` +
+        `📁 <b>Target Name:</b> <code>${escapeHtml(urlFileName)}</code>\n` +
+        `⏸ <b>PC Status:</b> Disconnected / Offline\n\n` +
+        `<i>This link will automatically download on your PC when PRRX IDM reconnects!</i>`,
+        env,
+        {
+          inline_keyboard: [
+            [{ text: "📥 View Queue", callback_data: "cmd_queue" }, { text: "📊 Bot Status", callback_data: "cmd_status" }]
+          ]
+        }
+      );
+    }
     return;
   }
 
@@ -1252,7 +1640,290 @@ async function handleTelegramUpdate(update, env, ctx) {
     `• <b>Forward any media or file</b> here to download directly to your PC.\n` +
     `• <b>Send any download link</b> (HTTP/HTTPS) here to grab it with PRRX IDM.\n` +
     `• <b>Pair your PC:</b> Send <code>/pair YOUR-CODE</code> (e.g. <code>/pair PRRX-1234</code>).\n` +
-    `• <b>Status:</b> Connected to Client <code>${clientId.substring(0, 8)}...</code>`
+    `• <b>Status:</b> Connected to Client <code>${clientId.substring(0, 8)}...</code>`,
+    env,
+    {
+      inline_keyboard: [
+        [{ text: "📊 Bot Status", callback_data: "cmd_status" }, { text: "📥 View Queue", callback_data: "cmd_queue" }],
+        [{ text: "❓ Help & Guide", callback_data: "cmd_help" }]
+      ]
+    }
+  );
+}
+
+// ============================================================================
+// BOT UX COMMAND HANDLERS
+// ============================================================================
+
+async function handleStatusCommand(chatId, env) {
+  let clientId = userClientMap.get(chatId.toString());
+  let userRow = null;
+
+  if (env.DB) {
+    await ensureTelegramTables(env.DB);
+    try {
+      userRow = await env.DB.prepare(`
+        SELECT chat_id, client_id, client_status, is_notified_offline, username, first_name, last_seen,
+               CAST((strftime('%s', 'now') - strftime('%s', coalesce(last_seen, CURRENT_TIMESTAMP))) AS INTEGER) AS seconds_since_seen
+        FROM telegram_users
+        WHERE chat_id = ?1
+      `).bind(chatId.toString()).first();
+
+      if (userRow) {
+        clientId = userRow.client_id;
+      }
+    } catch (e) {
+      console.error("D1 user lookup in status error:", e);
+    }
+  }
+
+  if (!clientId && env.PRRX_KV) {
+    clientId = await env.PRRX_KV.get(`user:${chatId}`);
+  }
+
+  if (!clientId) {
+    await sendTelegramMessage(chatId,
+      `⚠️ <b>Status: PC Not Linked</b>\n\n` +
+      `Your Telegram account is not yet connected to PRRX IDM.\n\n` +
+      `💡 <b>To connect your PC:</b>\n` +
+      `1. Open PRRX IDM on your PC.\n` +
+      `2. Go to <b>Settings → Telegram Bot</b> to view your pairing code.\n` +
+      `3. Send your code here (e.g. <code>/pair PRRX-1234</code> or simply <code>PRRX-1234</code>).`,
+      env,
+      {
+        inline_keyboard: [
+          [{ text: "❓ How to Pair (Help)", callback_data: "cmd_help" }]
+        ]
+      }
+    );
+    return;
+  }
+
+  let isOnline = true;
+  let lastSeenText = "Just now";
+  let pendingCount = 0;
+
+  if (userRow) {
+    const sec = userRow.seconds_since_seen || 0;
+    if (sec > 75 && userRow.client_status === "online") {
+      isOnline = false;
+      if (userRow.is_notified_offline === 0) {
+        await sendTelegramMessage(chatId,
+          `⚠️ <b>PRRX IDM Disconnected</b>\n\n` +
+          `Your PC client (PRRX IDM) has disconnected or been closed.\n` +
+          `Any files or links you send here will be queued securely in Cloudflare and will download automatically when your PC reconnects.`,
+          env
+        );
+      }
+      try {
+        await env.DB.prepare("UPDATE telegram_users SET client_status = 'offline', is_notified_offline = 1 WHERE chat_id = ?1")
+          .bind(chatId.toString()).run();
+      } catch {}
+    } else {
+      isOnline = (userRow.client_status !== "offline" && sec <= 75);
+    }
+
+    if (sec <= 10) lastSeenText = "Just now (<10s ago)";
+    else if (sec < 60) lastSeenText = `${sec} seconds ago`;
+    else if (sec < 3600) lastSeenText = `${Math.floor(sec / 60)} minute(s) ago`;
+    else lastSeenText = `${Math.floor(sec / 3600)} hour(s) ago`;
+  }
+
+  if (env.DB) {
+    try {
+      const countRow = await env.DB.prepare(
+        "SELECT COUNT(*) AS count FROM telegram_tasks WHERE client_id = ?1 AND status = 'pending'"
+      ).bind(clientId).first();
+      if (countRow) pendingCount = countRow.count || 0;
+    } catch {}
+  }
+
+  const statusBadge = isOnline
+    ? `🟢 <b>Connected & Active</b>`
+    : `🔴 <b>Disconnected / Offline</b>`;
+
+  const footerNotice = isOnline
+    ? `✨ <i>Your PC is online and ready. Forward any file or link to download instantly!</i>`
+    : `📦 <i>Your PC is currently offline. Any files sent will be queued safely in Cloudflare and will download automatically when your PC reconnects.</i>`;
+
+  await sendTelegramMessage(chatId,
+    `📊 <b>PRRX IDM Client Status</b>\n\n` +
+    `💻 <b>Client ID:</b> <code>${clientId.substring(0, 8)}...</code>\n` +
+    `📡 <b>Live Status:</b> ${statusBadge}\n` +
+    `⏱ <b>Last Heartbeat:</b> ${lastSeenText}\n` +
+    `📥 <b>Pending Queue:</b> ${pendingCount} download(s) waiting\n` +
+    `⚡ <b>Engine:</b> 32 Parallel Turbo Streams\n` +
+    `🔒 <b>Security:</b> AES-256 E2E Encrypted Vault\n\n` +
+    `${footerNotice}`,
+    env,
+    {
+      inline_keyboard: [
+        [{ text: "🔄 Refresh Status", callback_data: "cmd_refresh_status" }, { text: "📥 View Queue", callback_data: "cmd_queue" }],
+        [{ text: "❓ Help & Tips", callback_data: "cmd_help" }, { text: "🔌 Unlink PC", callback_data: "cmd_unlink" }]
+      ]
+    }
+  );
+}
+
+async function handleQueueCommand(chatId, env) {
+  let clientId = userClientMap.get(chatId.toString());
+  if (!clientId && env.DB) {
+    try {
+      const row = await env.DB.prepare("SELECT client_id FROM telegram_users WHERE chat_id = ?1").bind(chatId.toString()).first();
+      if (row) clientId = row.client_id;
+    } catch {}
+  }
+  if (!clientId && env.PRRX_KV) {
+    clientId = await env.PRRX_KV.get(`user:${chatId}`);
+  }
+
+  if (!clientId) {
+    await sendTelegramMessage(chatId,
+      `⚠️ <b>PC Not Linked!</b>\n\nPlease pair your PC first before viewing downloads queue.`,
+      env,
+      {
+        inline_keyboard: [[{ text: "❓ How to Pair", callback_data: "cmd_help" }]]
+      }
+    );
+    return;
+  }
+
+  let tasks = [];
+  if (env.DB) {
+    try {
+      const rows = await env.DB.prepare(`
+        SELECT id, file_name, file_size, formatted_size, media_type, created_at,
+               CAST((strftime('%s', 'now') - strftime('%s', created_at)) AS INTEGER) AS age_sec
+        FROM telegram_tasks
+        WHERE client_id = ?1 AND status = 'pending'
+        ORDER BY created_at ASC
+        LIMIT 10
+      `).bind(clientId).all();
+      tasks = rows.results || [];
+    } catch (e) {
+      console.error("D1 tasks query error:", e);
+    }
+  }
+
+  if (tasks.length === 0) {
+    await sendTelegramMessage(chatId,
+      `📥 <b>PRRX IDM Downloads Queue</b>\n\n` +
+      `✨ <b>Queue is Empty!</b>\n` +
+      `All forwarded files and links have been downloaded or delivered to your PC.\n\n` +
+      `💡 <i>Forward any video, audio, or document here to start a new download!</i>`,
+      env,
+      {
+        inline_keyboard: [
+          [{ text: "🔄 Refresh Queue", callback_data: "cmd_refresh_queue" }, { text: "📊 Bot Status", callback_data: "cmd_status" }]
+        ]
+      }
+    );
+    return;
+  }
+
+  let listText = "";
+  tasks.forEach((t, idx) => {
+    const age = t.age_sec || 0;
+    let timeStr = "Just now";
+    if (age >= 60 && age < 3600) timeStr = `${Math.floor(age / 60)}m ago`;
+    else if (age >= 3600) timeStr = `${Math.floor(age / 3600)}h ago`;
+
+    const icon = t.media_type === "video" ? "🎬" : (t.media_type === "audio" ? "🎵" : "📄");
+    listText += `${idx + 1}. ${icon} <b>${escapeHtml(t.file_name || "download.bin")}</b>\n` +
+                `   📦 ${escapeHtml(t.formatted_size || "Unknown Size")} • ⏱ Queued ${timeStr}\n\n`;
+  });
+
+  await sendTelegramMessage(chatId,
+    `📥 <b>PRRX IDM Downloads Queue (${tasks.length} pending)</b>\n\n` +
+    `${listText}` +
+    `<i>These tasks will download automatically when your PC is online.</i>`,
+    env,
+    {
+      inline_keyboard: [
+        [{ text: "🔄 Refresh Queue", callback_data: "cmd_refresh_queue" }, { text: "📊 Bot Status", callback_data: "cmd_status" }]
+      ]
+    }
+  );
+}
+
+async function handleHelpCommand(chatId, env) {
+  let clientId = userClientMap.get(chatId.toString());
+  if (!clientId && env.DB) {
+    try {
+      const row = await env.DB.prepare("SELECT client_id FROM telegram_users WHERE chat_id = ?1").bind(chatId.toString()).first();
+      if (row) clientId = row.client_id;
+    } catch {}
+  }
+  const isLinked = !!clientId;
+
+  await sendTelegramMessage(chatId,
+    `👋 <b>PRRX Internet Download Manager Bot Guide</b>\n\n` +
+    `⚡ <b>Commands:</b>\n` +
+    `• <code>/status</code> — Check live PC connection state & queue count\n` +
+    `• <code>/queue</code> — View files waiting in download queue\n` +
+    `• <code>/pair [CODE]</code> — Link your PC with a 4-digit code (e.g. <code>/pair PRRX-1234</code>)\n` +
+    `• <code>/boost</code> — View 32-stream turbo acceleration status\n` +
+    `• <code>/unlink</code> — Disconnect your PC from this bot\n` +
+    `• <code>/help</code> — Show this commands menu\n\n` +
+    `🚀 <b>How to Download:</b>\n` +
+    `1. Forward any <b>movie, video, audio, or document</b> from any channel or chat.\n` +
+    `2. Or paste any direct download link (<code>https://...</code>).\n` +
+    `3. PRRX IDM on your PC will automatically catch it and download at maximum turbo speed!\n\n` +
+    `💡 <i>If your PC is offline, files are safely preserved in Cloudflare and will download the second your PC turns on.</i>`,
+    env,
+    {
+      inline_keyboard: [
+        [{ text: "📊 Check Status", callback_data: "cmd_status" }, { text: "📥 View Queue", callback_data: "cmd_queue" }],
+        [{ text: "⚡ Turbo Boost", callback_data: "cmd_boost" }, ...(isLinked ? [{ text: "🔌 Unlink PC", callback_data: "cmd_unlink" }] : [])]
+      ]
+    }
+  );
+}
+
+async function handleBoostCommand(chatId, env) {
+  await sendTelegramMessage(chatId,
+    `🚀 <b>PRRX Turbo Download Boost: ACTIVE</b>\n\n` +
+    `⚡ <b>Multi-Connection:</b> 32 Parallel Streams\n` +
+    `📦 <b>Buffer Size:</b> 1 MB High-Speed Turbo Buffer\n` +
+    `🔥 <b>Protocol:</b> Native Telegram MTProto API & HTTP/2 Multi-Segment\n` +
+    `🛡 <b>Bypass:</b> Direct CDN Segment Fetching (No 20MB bot API limit!)\n\n` +
+    `All incoming downloads are accelerated at maximum network throughput with zero speed throttling.`,
+    env,
+    {
+      inline_keyboard: [
+        [{ text: "📊 Check Status", callback_data: "cmd_status" }, { text: "📥 View Queue", callback_data: "cmd_queue" }]
+      ]
+    }
+  );
+}
+
+async function handleUnlinkCommand(chatId, env) {
+  let clientId = userClientMap.get(chatId.toString());
+  if (env.DB) {
+    try {
+      const row = await env.DB.prepare("SELECT client_id FROM telegram_users WHERE chat_id = ?1").bind(chatId.toString()).first();
+      if (row) clientId = row.client_id;
+      await env.DB.prepare("DELETE FROM telegram_users WHERE chat_id = ?1").bind(chatId.toString()).run();
+    } catch (e) {
+      console.error("D1 unlink error:", e);
+    }
+  }
+
+  userClientMap.delete(chatId.toString());
+  if (env.PRRX_KV) {
+    await env.PRRX_KV.delete(`user:${chatId}`).catch(() => {});
+  }
+
+  await sendTelegramMessage(chatId,
+    `🔌 <b>PC Disconnected & Unlinked</b>\n\n` +
+    `Your Telegram account has been disconnected from PRRX IDM.\n\n` +
+    `To reconnect again, open PRRX IDM on your PC, go to <b>Settings → Telegram Bot</b>, and send your new pairing code here.`,
+    env,
+    {
+      inline_keyboard: [
+        [{ text: "❓ How to Re-Pair", callback_data: "cmd_help" }]
+      ]
+    }
   );
 }
 
@@ -1317,24 +1988,46 @@ async function getTelegramFileInfo(fileId, env) {
   return null;
 }
 
-async function sendTelegramMessage(chatId, htmlText, env) {
+async function sendTelegramMessage(chatId, htmlText, env, replyMarkup = null) {
   try {
     const apiBase = await getTelegramApiBase(env);
     if (!apiBase) {
       console.warn("sendTelegramMessage: Telegram bot token not configured.");
       return;
     }
+    const payload = {
+      chat_id: chatId,
+      text: htmlText,
+      parse_mode: "HTML",
+      disable_web_page_preview: true
+    };
+    if (replyMarkup) {
+      payload.reply_markup = replyMarkup;
+    }
     await fetch(`${apiBase}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text: htmlText,
-        parse_mode: "HTML"
-      })
+      body: JSON.stringify(payload)
     });
   } catch (e) {
     console.error("Failed to send telegram message:", e);
+  }
+}
+
+async function answerCallbackQuery(queryId, text, env) {
+  try {
+    const apiBase = await getTelegramApiBase(env);
+    if (!apiBase || !queryId) return;
+    await fetch(`${apiBase}/answerCallbackQuery`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        callback_query_id: queryId,
+        text: text || ""
+      })
+    });
+  } catch (e) {
+    console.error("Failed to answer callback query:", e);
   }
 }
 
@@ -1361,3 +2054,4 @@ function escapeHtml(str) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
 }
+
