@@ -10,6 +10,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -1175,11 +1176,79 @@ namespace PRRX.IDM.Services
                 CreateNoWindow = true
             };
 
+            // Direct Cloud Acceleration Pre-Download (SASA High-Speed Zero-Lag Stream)
+            if ((formatId == "cloud_cdn_stream" || string.IsNullOrWhiteSpace(formatId)) && _cloudResolver.CanResolve(safeUrl))
+            {
+                try
+                {
+                    using var resolveCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    resolveCts.CancelAfter(TimeSpan.FromSeconds(5));
+                    var directStreamUrl = await _cloudResolver.ResolveDirectDownloadUrlAsync(safeUrl, resolveCts.Token);
+                    if (!string.IsNullOrWhiteSpace(directStreamUrl) && Uri.TryCreate(directStreamUrl, UriKind.Absolute, out _))
+                    {
+                        var targetFile = destinationFilePath;
+                        if (string.IsNullOrWhiteSpace(targetFile))
+                        {
+                            var title = Path.GetFileNameWithoutExtension(safeUrl.Split('?')[0]);
+                            if (string.IsNullOrWhiteSpace(title) || title == "watch") title = $"Video_{DateTime.Now:yyyyMMdd_HHmmss}";
+                            var ext = !string.IsNullOrWhiteSpace(targetContainer) && targetContainer != "auto" ? targetContainer.TrimStart('.') : "mp4";
+                            targetFile = Path.Combine(outputDirectory, $"{title}.{ext}");
+                        }
+
+                        progress?.Report(new DownloadProgressReport { StatusMessage = "Connecting high-speed cloud direct stream...", Percentage = 5 });
+                        using var directClient = new HttpClient { Timeout = TimeSpan.FromHours(2) };
+                        using var resp = await directClient.GetAsync(directStreamUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                        if (resp.IsSuccessStatusCode)
+                        {
+                            var totalLen = resp.Content.Headers.ContentLength ?? -1L;
+                            var dir = Path.GetDirectoryName(targetFile);
+                            if (!string.IsNullOrWhiteSpace(dir)) Directory.CreateDirectory(dir);
+
+                            using (var src = await resp.Content.ReadAsStreamAsync(cancellationToken))
+                            using (var dst = File.Create(targetFile))
+                            {
+                                var buffer = new byte[64 * 1024];
+                                long downloaded = 0;
+                                int read;
+                                var sw = Stopwatch.StartNew();
+                                while ((read = await src.ReadAsync(buffer, 0, buffer.Length, cancellationToken)) > 0)
+                                {
+                                    await dst.WriteAsync(buffer, 0, read, cancellationToken);
+                                    downloaded += read;
+                                    if (sw.ElapsedMilliseconds > 250)
+                                    {
+                                        var pct = totalLen > 0 ? (int)(downloaded * 100 / totalLen) : 50;
+                                        progress?.Report(new DownloadProgressReport
+                                        {
+                                            Percentage = Math.Clamp(pct, 0, 99),
+                                            StatusMessage = "Downloading cloud direct stream..."
+                                        });
+                                        sw.Restart();
+                                    }
+                                }
+                            }
+
+                            if (File.Exists(targetFile) && new FileInfo(targetFile).Length > 0)
+                            {
+                                progress?.Report(new DownloadProgressReport { Percentage = 100, StatusMessage = "Complete - Direct stream saved" });
+                                return true;
+                            }
+                        }
+                    }
+                }
+                catch
+                {
+                    // Fall back cleanly to native yt-dlp extraction below
+                }
+            }
+
             startInfo.ArgumentList.Add("-f");
             var effectiveFormat = formatId;
-            if (string.IsNullOrWhiteSpace(effectiveFormat) || effectiveFormat == "telegram_cdn_stream")
+            if (string.IsNullOrWhiteSpace(effectiveFormat) ||
+                effectiveFormat == "telegram_cdn_stream" ||
+                effectiveFormat == "cloud_cdn_stream")
             {
-                effectiveFormat = "best";
+                effectiveFormat = "bestvideo+bestaudio/best";
             }
             startInfo.ArgumentList.Add(effectiveFormat);
             startInfo.ArgumentList.Add("--newline");

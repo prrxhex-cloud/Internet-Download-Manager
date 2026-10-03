@@ -87,6 +87,7 @@ namespace PRRX.IDM.ViewModels
         public ObservableCollection<string> AvailableProviders { get; } = new()
         {
             "All Stores",
+            "Unified Engine (search_dl)",
             "Ultra Store (v2)",
             "HappyMod MODs",
             "AN1 MODs",
@@ -129,7 +130,10 @@ namespace PRRX.IDM.ViewModels
 
             // Populate initial trending discovery batch
             SearchQuery = "WhatsApp";
-            _ = PerformSearchAsync();
+            if (Application.Current != null)
+            {
+                _ = PerformSearchAsync();
+            }
         }
 
         public async Task PerformSearchAsync()
@@ -147,6 +151,7 @@ namespace PRRX.IDM.ViewModels
             {
                 var providerKey = SelectedProvider switch
                 {
+                    "Unified Engine (search_dl)" => "search_dl",
                     "Ultra Store (v2)" => "ultra",
                     "HappyMod MODs" => "happymod",
                     "AN1 MODs" => "an1",

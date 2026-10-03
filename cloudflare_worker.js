@@ -1165,7 +1165,11 @@ export default {
           } else if (lowerUrl.includes("pinterest.com") || lowerUrl.includes("pin.it")) {
             upstreamPath = "/api/pinterest/dl";
           } else if (lowerUrl.includes("twitter.com") || lowerUrl.includes("x.com")) {
-            upstreamPath = "/api/twitter";
+            if (reqFormat.includes("v2") || reqFormat === "2") {
+              upstreamPath = "/api/twitter_v2";
+            } else {
+              upstreamPath = "/api/twitter";
+            }
           }
           // B. Cloud Storage Direct Link Bypasser (Debrid)
           else if (lowerUrl.includes("drive.google.com")) {
@@ -1185,13 +1189,20 @@ export default {
           } else if (lowerUrl.includes("slmix.lk") || lowerUrl.includes("slmix")) {
             upstreamPath = "/api/slmixlk/download";
           }
-          // D. Document Scraper
+          // D. Document Scraper & Web Features
           else if (lowerUrl.includes("paperhub")) {
             upstreamPath = "/api/download";
             queryParams.set("site", "paperhub");
+          } else if (lowerUrl.includes("pastpapers") || lowerUrl.includes("past-papers")) {
+            upstreamPath = "/api/download";
+            queryParams.set("site", "pastpapers");
           } else if (lowerUrl.endsWith(".pdf") || lowerUrl.includes("pdf")) {
             upstreamPath = "/api/download";
             queryParams.set("site", "pdf");
+          }
+          // E. Android APK store direct link bypass / download
+          else if (lowerUrl.includes("apkpure.com") || lowerUrl.includes("uptodown.com") || lowerUrl.includes("happymod.com") || lowerUrl.includes("an1.com") || lowerUrl.endsWith(".apk")) {
+            upstreamPath = "/api/download/apkdownload";
           } else {
             // Default universal media fallback
             upstreamPath = "/api/download";
@@ -1219,9 +1230,10 @@ export default {
           else if (sub === "/spotify") upstreamPath = "/api/spotify";
           else if (sub === "/sinhanada" || sub === "/sinhanada/download") upstreamPath = "/api/sinhanada/download";
           else if (sub === "/slmix" || sub === "/slmixlk/download") upstreamPath = "/api/slmixlk/download";
-          else if (sub === "/download") upstreamPath = "/api/download";
-          else if (sub === "/paperhub") { upstreamPath = "/api/download"; queryParams.set("site", "paperhub"); }
-          else if (sub === "/pdf") { upstreamPath = "/api/download"; queryParams.set("site", "pdf"); }
+          else if (sub === "/download" || sub === "/download/universal") upstreamPath = "/api/download";
+          else if (sub === "/paperhub" || sub === "/download/paperhub") { upstreamPath = "/api/download"; queryParams.set("site", "paperhub"); }
+          else if (sub === "/pastpapers" || sub === "/past-papers" || sub === "/download/pastpapers") { upstreamPath = "/api/download"; queryParams.set("site", "pastpapers"); }
+          else if (sub === "/pdf" || sub === "/download/pdf") { upstreamPath = "/api/download"; queryParams.set("site", "pdf"); }
           else if (sub === "/search/apksearch" || sub === "/apk/search") upstreamPath = "/api/search/apksearch";
           else if (sub === "/download/apkdownload" || sub === "/apk/download") upstreamPath = "/api/download/apkdownload";
           else if (sub === "/search/apk" || sub === "/apk/search-dl") {
@@ -1261,14 +1273,20 @@ export default {
           const textBody = await upstreamRes.text();
 
           // 9. Inspect Upstream Rate Limits & Quotas
-          if (resStatus === 429 || textBody.toLowerCase().includes("rate limit") || textBody.toLowerCase().includes("rate limited")) {
-            let parsedErr = {};
-            try { parsedErr = JSON.parse(textBody); } catch {}
+          let parsedBody = null;
+          try { parsedBody = JSON.parse(textBody); } catch {}
+
+          const isRateLimit = resStatus === 429 ||
+            (parsedBody && parsedBody.error && typeof parsedBody.error === "string" && parsedBody.error.toLowerCase().includes("rate limit")) ||
+            textBody.toLowerCase().includes("rate limit") ||
+            textBody.toLowerCase().includes("rate limited");
+
+          if (isRateLimit) {
             return new Response(JSON.stringify({
               status: false,
               success: false,
               error: "Upstream API quota or rate limit exceeded.",
-              details: parsedErr.error || textBody.slice(0, 200),
+              details: parsedBody?.error || textBody.slice(0, 200),
               rateLimitExceeded: true,
               retryAfter: 60,
               fallbackRequired: true
@@ -1292,14 +1310,46 @@ export default {
             });
           }
 
-          // 11. Edge Caching for Successful Responses
-          if (resStatus === 200 && textBody.trim().startsWith("{")) {
-            const ttlSeconds = (upstreamPath.includes("search") || upstreamPath.includes("apk")) ? 900
-              : (upstreamPath.includes("thumb") ? 1800 : 300);
-            setCachedCloudResponse(cacheKey, textBody, ttlSeconds);
+          // If upstream returns status: false, do NOT cache and signal fallback
+          const isUpstreamSuccess = resStatus === 200 && parsedBody && parsedBody.status !== false && !parsedBody.error;
+
+          // Normalize /api/cloud/resolve responses for unified client consumption
+          let responsePayload = textBody;
+          if (path === "/api/cloud/resolve" && parsedBody && isUpstreamSuccess) {
+            const directUrl = parsedBody.download_url || parsedBody.download_url_alt ||
+              (parsedBody.result && (parsedBody.result.download || parsedBody.result.url || parsedBody.result.link || parsedBody.result.direct || parsedBody.result.download_url)) ||
+              parsedBody.download || parsedBody.url || parsedBody.link || "";
+
+            const title = parsedBody.title || (parsedBody.result && parsedBody.result.title) || "";
+            const thumbnail = parsedBody.thumbnail || (parsedBody.result && (parsedBody.result.thumbnail || (parsedBody.result.best && parsedBody.result.best.url))) || parsedBody.preview_url || "";
+            const size = parsedBody.size || parsedBody.file_size || (parsedBody.result && (parsedBody.result.size || parsedBody.result.filesize)) || "";
+
+            const normalized = {
+              status: true,
+              success: true,
+              result: {
+                download: directUrl,
+                download_url: directUrl,
+                title: title,
+                thumbnail: thumbnail,
+                size: size
+              },
+              download_url: directUrl,
+              title: title,
+              thumbnail: thumbnail,
+              size: size
+            };
+            responsePayload = JSON.stringify(normalized);
           }
 
-          return new Response(textBody, {
+          // 11. Edge Caching strictly for Successful Responses
+          if (isUpstreamSuccess) {
+            const ttlSeconds = (upstreamPath.includes("search") || upstreamPath.includes("apk")) ? 900
+              : (upstreamPath.includes("thumb") ? 1800 : 300);
+            setCachedCloudResponse(cacheKey, responsePayload, ttlSeconds);
+          }
+
+          return new Response(responsePayload, {
             status: resStatus,
             headers: {
               ...corsHeaders,

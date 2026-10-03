@@ -42,7 +42,7 @@ namespace PRRX.IDM.Services
         private readonly string _baseUrl;
 
         private static readonly Regex CloudResolvableDomains = new(
-            @"(youtube\.com|youtu\.be|tiktok\.com|facebook\.com|fb\.watch|instagram\.com|pinterest\.com|pin\.it|twitter\.com|x\.com|drive\.google\.com|mediafire\.com|pixeldrain\.com|usersdrive\.com|spotify\.com|sinhanada\.net|slmix\.lk|paperhub)",
+            @"(youtube\.com|youtu\.be|tiktok\.com|facebook\.com|fb\.watch|instagram\.com|pinterest\.com|pin\.it|twitter\.com|x\.com|drive\.google\.com|mediafire\.com|pixeldrain\.com|usersdrive\.com|spotify\.com|sinhanada\.net|slmix\.lk|paperhub|pastpapers|an1\.com|happymod\.com|apkpure\.com|uptodown\.com|\.apk($|\?)|\.pdf($|\?))",
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
         public string BaseUrl => _baseUrl;
@@ -135,7 +135,7 @@ namespace PRRX.IDM.Services
                 }
 
                 bool status = root.TryGetProperty("status", out var stEl) && (stEl.ValueKind == JsonValueKind.True || (stEl.ValueKind == JsonValueKind.String && stEl.GetString() == "true"));
-                if (!status && response.StatusCode != HttpStatusCode.OK)
+                if (!status || response.StatusCode != HttpStatusCode.OK)
                 {
                     return new CloudResolvedMedia
                     {
@@ -146,107 +146,196 @@ namespace PRRX.IDM.Services
                     };
                 }
 
-                var resolved = new CloudResolvedMedia
-                {
-                    Success = true,
-                    Url = url
-                };
+                string? extractedDirectUrl = null;
+                string? extractedTitle = null;
+                string? extractedThumbnail = null;
+                string? extractedSize = null;
 
-                // Extract Result Object or String
+                // Check root-level properties (Google Drive, Pixeldrain, UsersDrive, etc.)
+                if (root.TryGetProperty("download_url", out var rootDlUrl)) extractedDirectUrl = rootDlUrl.GetString();
+                else if (root.TryGetProperty("download_url_alt", out var rootDlUrlAlt)) extractedDirectUrl = rootDlUrlAlt.GetString();
+                else if (root.TryGetProperty("download", out var rootDl)) extractedDirectUrl = rootDl.GetString();
+                else if (root.TryGetProperty("url", out var rootUrl)) extractedDirectUrl = rootUrl.GetString();
+                else if (root.TryGetProperty("link", out var rootLink)) extractedDirectUrl = rootLink.GetString();
+                else if (root.TryGetProperty("direct", out var rootDirect)) extractedDirectUrl = rootDirect.GetString();
+
+                if (root.TryGetProperty("title", out var rootTitle)) extractedTitle = rootTitle.GetString();
+                else if (root.TryGetProperty("file_name", out var rootFileName)) extractedTitle = rootFileName.GetString();
+                else if (root.TryGetProperty("name", out var rootName)) extractedTitle = rootName.GetString();
+
+                if (root.TryGetProperty("thumbnail", out var rootThumb)) extractedThumbnail = rootThumb.GetString();
+                else if (root.TryGetProperty("image", out var rootImg)) extractedThumbnail = rootImg.GetString();
+                else if (root.TryGetProperty("preview_url", out var rootPrev)) extractedThumbnail = rootPrev.GetString();
+
+                if (root.TryGetProperty("size", out var rootSz)) extractedSize = rootSz.GetString();
+                else if (root.TryGetProperty("file_size", out var rootFileSz)) extractedSize = rootFileSz.GetString();
+
+                // Check result property (can be Object, String, or Array)
                 if (root.TryGetProperty("result", out var resEl))
                 {
                     if (resEl.ValueKind == JsonValueKind.Object)
                     {
-                        // Direct download link
-                        if (resEl.TryGetProperty("download", out var dlEl))
+                        if (string.IsNullOrWhiteSpace(extractedDirectUrl))
                         {
-                            resolved.DirectStreamUrl = dlEl.GetString();
-                        }
-                        else if (resEl.TryGetProperty("url", out var uEl))
-                        {
-                            resolved.DirectStreamUrl = uEl.GetString();
-                        }
-                        else if (resEl.TryGetProperty("link", out var lkEl))
-                        {
-                            resolved.DirectStreamUrl = lkEl.GetString();
-                        }
-                        else if (resEl.TryGetProperty("direct", out var dtEl))
-                        {
-                            resolved.DirectStreamUrl = dtEl.GetString();
+                            if (resEl.TryGetProperty("download", out var dlEl)) extractedDirectUrl = dlEl.GetString();
+                            else if (resEl.TryGetProperty("download_url", out var dlUrlEl)) extractedDirectUrl = dlUrlEl.GetString();
+                            else if (resEl.TryGetProperty("url", out var uEl)) extractedDirectUrl = uEl.GetString();
+                            else if (resEl.TryGetProperty("link", out var lkEl)) extractedDirectUrl = lkEl.GetString();
+                            else if (resEl.TryGetProperty("direct", out var dtEl)) extractedDirectUrl = dtEl.GetString();
+                            else if (resEl.TryGetProperty("video", out var vEl)) extractedDirectUrl = vEl.GetString();
+                            else if (resEl.TryGetProperty("audio", out var aEl)) extractedDirectUrl = aEl.GetString();
+                            else if (resEl.TryGetProperty("stream", out var sEl)) extractedDirectUrl = sEl.GetString();
                         }
 
-                        // Title
-                        if (resEl.TryGetProperty("title", out var titleEl))
+                        if (string.IsNullOrWhiteSpace(extractedTitle))
                         {
-                            resolved.Title = titleEl.GetString();
+                            if (resEl.TryGetProperty("title", out var titleEl)) extractedTitle = titleEl.GetString();
+                            else if (resEl.TryGetProperty("name", out var nEl)) extractedTitle = nEl.GetString();
                         }
 
-                        // Thumbnail
-                        if (resEl.TryGetProperty("thumbnail", out var thumbEl))
+                        if (string.IsNullOrWhiteSpace(extractedThumbnail))
                         {
-                            resolved.ThumbnailUrl = thumbEl.GetString();
-                        }
-                        else if (resEl.TryGetProperty("best", out var bestEl) && bestEl.TryGetProperty("url", out var bestUrlEl))
-                        {
-                            resolved.ThumbnailUrl = bestUrlEl.GetString();
+                            if (resEl.TryGetProperty("thumbnail", out var thumbEl)) extractedThumbnail = thumbEl.GetString();
+                            else if (resEl.TryGetProperty("image", out var imgEl)) extractedThumbnail = imgEl.GetString();
+                            else if (resEl.TryGetProperty("best", out var bestEl) && bestEl.TryGetProperty("url", out var bestUrlEl)) extractedThumbnail = bestUrlEl.GetString();
                         }
 
-                        // File size
-                        if (resEl.TryGetProperty("size", out var sizeEl))
+                        if (string.IsNullOrWhiteSpace(extractedSize))
                         {
-                            resolved.FormattedSize = sizeEl.GetString();
+                            if (resEl.TryGetProperty("size", out var sizeEl)) extractedSize = sizeEl.GetString();
+                            else if (resEl.TryGetProperty("filesize", out var fsEl)) extractedSize = fsEl.GetString();
                         }
                     }
                     else if (resEl.ValueKind == JsonValueKind.String)
                     {
-                        resolved.DirectStreamUrl = resEl.GetString();
+                        if (string.IsNullOrWhiteSpace(extractedDirectUrl)) extractedDirectUrl = resEl.GetString();
+                    }
+                    else if (resEl.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var arrItem in resEl.EnumerateArray())
+                        {
+                            if (arrItem.ValueKind == JsonValueKind.Object)
+                            {
+                                if (string.IsNullOrWhiteSpace(extractedDirectUrl))
+                                {
+                                    if (arrItem.TryGetProperty("download", out var dlEl)) extractedDirectUrl = dlEl.GetString();
+                                    else if (arrItem.TryGetProperty("download_url", out var dlUrlEl)) extractedDirectUrl = dlUrlEl.GetString();
+                                    else if (arrItem.TryGetProperty("url", out var uEl)) extractedDirectUrl = uEl.GetString();
+                                    else if (arrItem.TryGetProperty("link", out var lkEl)) extractedDirectUrl = lkEl.GetString();
+                                }
+                                if (string.IsNullOrWhiteSpace(extractedTitle) && arrItem.TryGetProperty("title", out var tEl)) extractedTitle = tEl.GetString();
+                                if (string.IsNullOrWhiteSpace(extractedThumbnail) && arrItem.TryGetProperty("image", out var iEl)) extractedThumbnail = iEl.GetString();
+                                if (!string.IsNullOrWhiteSpace(extractedDirectUrl)) break;
+                            }
+                        }
                     }
                 }
-                else if (root.TryGetProperty("download", out var rootDl))
+
+                if (string.IsNullOrWhiteSpace(extractedDirectUrl))
                 {
-                    resolved.DirectStreamUrl = rootDl.GetString();
+                    return new CloudResolvedMedia
+                    {
+                        Success = false,
+                        FallbackRequired = true,
+                        Url = url,
+                        ErrorMessage = "No stream or direct download URL found in cloud response."
+                    };
                 }
 
-                // If no direct URL could be found, signal fallback
-                if (string.IsNullOrWhiteSpace(resolved.DirectStreamUrl))
+                var resolved = new CloudResolvedMedia
                 {
-                    resolved.Success = false;
-                    resolved.FallbackRequired = true;
-                    return resolved;
-                }
+                    Success = true,
+                    Url = url,
+                    DirectStreamUrl = extractedDirectUrl,
+                    Title = extractedTitle,
+                    ThumbnailUrl = extractedThumbnail,
+                    FormattedSize = extractedSize
+                };
 
-                // Deduce Extension & Container
+                // Deduce Extension & Container intelligently
+                var cleanOriginal = url.Split('?')[0].TrimEnd('/');
+                var cleanStream = resolved.DirectStreamUrl.Split('?')[0].TrimEnd('/');
                 var lowerStream = resolved.DirectStreamUrl.ToLowerInvariant();
-                if (lowerStream.Contains(".mp3") || (format != null && format.Contains("mp3")))
+                var lowerOriginal = url.ToLowerInvariant();
+
+                string? detectedExt = null;
+
+                // 1. Check title for existing extension
+                if (!string.IsNullOrWhiteSpace(resolved.Title))
                 {
-                    resolved.Extension = "mp3";
+                    var ext = Path.GetExtension(resolved.Title).TrimStart('.').ToLowerInvariant();
+                    if (!string.IsNullOrWhiteSpace(ext) && ext.Length <= 5)
+                    {
+                        detectedExt = ext;
+                    }
+                }
+
+                // 2. Check stream URL path
+                if (string.IsNullOrWhiteSpace(detectedExt))
+                {
+                    var ext = Path.GetExtension(cleanStream).TrimStart('.').ToLowerInvariant();
+                    if (!string.IsNullOrWhiteSpace(ext) && ext.Length <= 5 && ext != "php" && ext != "cgi" && ext != "htm" && ext != "html")
+                    {
+                        detectedExt = ext;
+                    }
+                }
+
+                // 3. Check original URL path
+                if (string.IsNullOrWhiteSpace(detectedExt))
+                {
+                    var ext = Path.GetExtension(cleanOriginal).TrimStart('.').ToLowerInvariant();
+                    if (!string.IsNullOrWhiteSpace(ext) && ext.Length <= 5 && ext != "php" && ext != "cgi" && ext != "htm" && ext != "html")
+                    {
+                        detectedExt = ext;
+                    }
+                }
+
+                // 4. Check audio characteristics
+                if (lowerStream.Contains(".mp3") || (format != null && format.Contains("mp3")) || lowerOriginal.Contains("spotify") || lowerOriginal.Contains("sinhanada") || lowerOriginal.Contains("slmix"))
+                {
                     resolved.IsAudioOnly = true;
+                    detectedExt ??= "mp3";
                 }
                 else if (lowerStream.Contains(".m4a"))
                 {
-                    resolved.Extension = "m4a";
+                    resolved.IsAudioOnly = true;
+                    detectedExt ??= "m4a";
+                }
+                else if (lowerStream.Contains(".flac") || lowerStream.Contains(".wav") || lowerStream.Contains(".aac") || lowerStream.Contains(".opus"))
+                {
                     resolved.IsAudioOnly = true;
                 }
-                else if (lowerStream.Contains(".zip"))
+
+                // 5. Default by category
+                if (string.IsNullOrWhiteSpace(detectedExt))
                 {
-                    resolved.Extension = "zip";
+                    if (lowerOriginal.Contains("youtube.com") || lowerOriginal.Contains("youtu.be") ||
+                        lowerOriginal.Contains("tiktok.com") || lowerOriginal.Contains("facebook.com") ||
+                        lowerOriginal.Contains("instagram.com") || lowerOriginal.Contains("twitter.com") ||
+                        lowerOriginal.Contains("x.com") || lowerOriginal.Contains("pinterest.com"))
+                    {
+                        detectedExt = "mp4";
+                    }
+                    else if (lowerOriginal.Contains("paperhub") || lowerOriginal.Contains("pastpapers") || lowerOriginal.Contains("pdf"))
+                    {
+                        detectedExt = "pdf";
+                    }
+                    else if (lowerOriginal.Contains("apk") || lowerOriginal.Contains("happymod") || lowerOriginal.Contains("an1") || lowerOriginal.Contains("uptodown"))
+                    {
+                        detectedExt = "apk";
+                    }
+                    else
+                    {
+                        detectedExt = "bin";
+                    }
                 }
-                else if (lowerStream.Contains(".apk"))
-                {
-                    resolved.Extension = "apk";
-                }
-                else if (lowerStream.Contains(".pdf"))
-                {
-                    resolved.Extension = "pdf";
-                }
-                else
-                {
-                    resolved.Extension = "mp4";
-                }
+
+                resolved.Extension = detectedExt;
 
                 if (string.IsNullOrWhiteSpace(resolved.Title))
                 {
-                    resolved.Title = Path.GetFileNameWithoutExtension(url.Split('?')[0]);
+                    var leaf = Path.GetFileName(cleanOriginal);
+                    resolved.Title = !string.IsNullOrWhiteSpace(leaf) ? Path.GetFileNameWithoutExtension(leaf) : "Cloud_Download";
                 }
 
                 return resolved;
@@ -331,6 +420,10 @@ namespace PRRX.IDM.Services
                 {
                     tasks.Add(FetchApkItemsAsync($"{_baseUrl}/api/cloud/search/apksearch?query={cleanQuery}", "Ultra Store", ct));
                 }
+                if (provLower is "all" or "search_dl" or "unified" or "unified engine")
+                {
+                    tasks.Add(FetchApkItemsAsync($"{_baseUrl}/api/cloud/search/apk?mode=search_dl&query={cleanQuery}", "Unified Search & DL", ct));
+                }
                 if (provLower is "all" or "happymod" or "happymod mods")
                 {
                     tasks.Add(FetchApkItemsAsync($"{_baseUrl}/api/cloud/apk/happymod?query={cleanQuery}", "HappyMod MODs", ct));
@@ -393,17 +486,38 @@ namespace PRRX.IDM.Services
                 using var doc = JsonDocument.Parse(json);
                 var root = doc.RootElement;
 
-                if (root.TryGetProperty("result", out var resEl) && resEl.ValueKind == JsonValueKind.Array)
+                JsonElement? arrayElement = null;
+                if (root.TryGetProperty("result", out var resEl))
                 {
-                    foreach (var item in resEl.EnumerateArray())
+                    if (resEl.ValueKind == JsonValueKind.Array) arrayElement = resEl;
+                    else if (resEl.ValueKind == JsonValueKind.Object && resEl.TryGetProperty("data", out var dEl) && dEl.ValueKind == JsonValueKind.Array) arrayElement = dEl;
+                }
+                else if (root.TryGetProperty("data", out var rootData) && rootData.ValueKind == JsonValueKind.Array)
+                {
+                    arrayElement = rootData;
+                }
+
+                if (arrayElement.HasValue)
+                {
+                    foreach (var item in arrayElement.Value.EnumerateArray())
                     {
-                        var title = item.TryGetProperty("title", out var tEl) ? tEl.GetString() ?? "" : "";
+                        var title = item.TryGetProperty("title", out var tEl) ? tEl.GetString() ?? "" :
+                                    (item.TryGetProperty("name", out var nEl) ? nEl.GetString() ?? "" : "");
                         if (string.IsNullOrWhiteSpace(title)) continue;
 
-                        var image = item.TryGetProperty("image", out var imgEl) ? imgEl.GetString() : null;
-                        var size = item.TryGetProperty("size", out var szEl) ? szEl.GetString() : "Unknown";
+                        var image = item.TryGetProperty("image", out var imgEl) ? imgEl.GetString() :
+                                    (item.TryGetProperty("icon", out var icEl) ? icEl.GetString() :
+                                    (item.TryGetProperty("thumbnail", out var thEl) ? thEl.GetString() : null));
+
+                        var size = item.TryGetProperty("size", out var szEl) ? szEl.GetString() :
+                                   (item.TryGetProperty("filesize", out var fsEl) ? fsEl.GetString() : "Unknown");
+
                         var version = item.TryGetProperty("version", out var vEl) ? vEl.GetString() : "Latest";
-                        var link = item.TryGetProperty("link", out var lkEl) ? lkEl.GetString() : null;
+
+                        var link = item.TryGetProperty("link", out var lkEl) ? lkEl.GetString() :
+                                   (item.TryGetProperty("download", out var dlEl) ? dlEl.GetString() :
+                                   (item.TryGetProperty("download_url", out var dluEl) ? dluEl.GetString() :
+                                   (item.TryGetProperty("url", out var uEl) ? uEl.GetString() : null)));
 
                         list.Add(new ApkItem
                         {
@@ -440,25 +554,39 @@ namespace PRRX.IDM.Services
                     var json = await response.Content.ReadAsStringAsync(ct);
                     using var doc = JsonDocument.Parse(json);
                     var root = doc.RootElement;
+
+                    if (root.TryGetProperty("download_url", out var dlUrlRoot))
+                    {
+                        var direct = dlUrlRoot.GetString();
+                        if (!string.IsNullOrWhiteSpace(direct)) return direct;
+                    }
+                    if (root.TryGetProperty("download", out var dlRoot))
+                    {
+                        var direct = dlRoot.GetString();
+                        if (!string.IsNullOrWhiteSpace(direct)) return direct;
+                    }
+
                     if (root.TryGetProperty("result", out var resEl))
                     {
-                        if (resEl.ValueKind == JsonValueKind.Object && resEl.TryGetProperty("download", out var dlEl))
+                        if (resEl.ValueKind == JsonValueKind.Object)
                         {
-                            return dlEl.GetString();
+                            if (resEl.TryGetProperty("download", out var dlEl) && !string.IsNullOrWhiteSpace(dlEl.GetString())) return dlEl.GetString();
+                            if (resEl.TryGetProperty("download_url", out var dluEl) && !string.IsNullOrWhiteSpace(dluEl.GetString())) return dluEl.GetString();
+                            if (resEl.TryGetProperty("url", out var uEl) && !string.IsNullOrWhiteSpace(uEl.GetString())) return uEl.GetString();
                         }
                         if (resEl.ValueKind == JsonValueKind.String)
                         {
-                            return resEl.GetString();
+                            var s = resEl.GetString();
+                            if (!string.IsNullOrWhiteSpace(s)) return s;
                         }
                     }
                 }
             }
             catch { }
 
-            // If direct link was already an APK download link, return directly
+            // If direct link was already an actual APK file download link, return directly
             if (apkLinkOrPackage.EndsWith(".apk", StringComparison.OrdinalIgnoreCase) ||
-                apkLinkOrPackage.Contains("/app") ||
-                apkLinkOrPackage.Contains("aptoide.com"))
+                apkLinkOrPackage.Contains(".apk?", StringComparison.OrdinalIgnoreCase))
             {
                 return apkLinkOrPackage;
             }

@@ -55,6 +55,13 @@ namespace PRRX.IDM.Tests
         [InlineData("https://sinhanada.net/download/song123", true)]
         [InlineData("https://slmix.lk/download/track", true)]
         [InlineData("https://paperhub.lk/document", true)]
+        [InlineData("https://pastpapers.wiki/grade-11-maths.pdf", true)]
+        [InlineData("https://m.apkpure.com/pubg-mobile/com.tencent.ig", true)]
+        [InlineData("https://whatsapp-messenger.en.uptodown.com/android", true)]
+        [InlineData("https://happymod.com/subway-surfers-mod/com.kiloo.subwaysurf/", true)]
+        [InlineData("https://an1.com/6453-clash-of-clans-mod.html", true)]
+        [InlineData("https://cdn.example.org/downloads/sample.apk", true)]
+        [InlineData("https://example.com/files/research_paper.pdf", true)]
         [InlineData("https://unknown-random-site-999.org/file.iso", false)]
         public void CanResolve_RecognizesAll22SupportedDomains(string url, bool expectedCanResolve)
         {
@@ -96,6 +103,89 @@ namespace PRRX.IDM.Tests
             Assert.Equal("45.2 MB", resolved.FormattedSize);
             Assert.Equal("mp4", resolved.Extension);
             Assert.False(resolved.FallbackRequired);
+        }
+
+        [Fact]
+        public async Task ResolveMediaAsync_ParsesGoogleDriveRootSchema()
+        {
+            var gdriveJson = @"
+            {
+                ""status"": true,
+                ""creator"": ""Sasa Dev"",
+                ""file_id"": ""https://drive.google.com/file/d/123/view"",
+                ""download_url"": ""https://drive.google.com/uc?export=download&id=123"",
+                ""download_url_alt"": ""https://docs.google.com/uc?export=download&confirm=t&id=123"",
+                ""preview_url"": ""https://drive.google.com/file/d/123/preview""
+            }";
+
+            var handler = new FakeHttpMessageHandler(req => new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(gdriveJson, Encoding.UTF8, "application/json")
+            });
+
+            var client = new HttpClient(handler);
+            var resolver = new CloudResolverService("https://test-worker.local", client);
+
+            var resolved = await resolver.ResolveMediaAsync("https://drive.google.com/file/d/123/view");
+
+            Assert.NotNull(resolved);
+            Assert.True(resolved.Success);
+            Assert.Equal("https://drive.google.com/uc?export=download&id=123", resolved.DirectStreamUrl);
+            Assert.False(resolved.FallbackRequired);
+        }
+
+        [Fact]
+        public async Task ResolveMediaAsync_ParsesPixeldrainRootSchemaAndPreservesExtension()
+        {
+            var pixeldrainJson = @"
+            {
+                ""status"": true,
+                ""creator"": ""Sasa Dev"",
+                ""title"": ""ubuntu-24.04-desktop-amd64.iso"",
+                ""download_url"": ""https://pixeldrain.com/api/file/abc12345?download""
+            }";
+
+            var handler = new FakeHttpMessageHandler(req => new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(pixeldrainJson, Encoding.UTF8, "application/json")
+            });
+
+            var client = new HttpClient(handler);
+            var resolver = new CloudResolverService("https://test-worker.local", client);
+
+            var resolved = await resolver.ResolveMediaAsync("https://pixeldrain.com/u/abc12345");
+
+            Assert.NotNull(resolved);
+            Assert.True(resolved.Success);
+            Assert.Equal("ubuntu-24.04-desktop-amd64.iso", resolved.Title);
+            Assert.Equal("https://pixeldrain.com/api/file/abc12345?download", resolved.DirectStreamUrl);
+            Assert.Equal("iso", resolved.Extension); // MUST NOT force mp4!
+        }
+
+        [Fact]
+        public async Task ResolveMediaAsync_HandlesHttp200WithStatusFalseGracefully()
+        {
+            var fakeJson = @"
+            {
+                ""status"": false,
+                ""creator"": ""Sasa Dev"",
+                ""error"": ""YouTube engine is rate limited right now. Please try again in a couple of minutes.""
+            }";
+
+            var handler = new FakeHttpMessageHandler(req => new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(fakeJson, Encoding.UTF8, "application/json")
+            });
+
+            var client = new HttpClient(handler);
+            var resolver = new CloudResolverService("https://test-worker.local", client);
+
+            var resolved = await resolver.ResolveMediaAsync("https://www.youtube.com/watch?v=sample");
+
+            Assert.NotNull(resolved);
+            Assert.False(resolved.Success);
+            Assert.True(resolved.FallbackRequired);
+            Assert.Contains("rate limited", resolved.ErrorMessage, StringComparison.OrdinalIgnoreCase);
         }
 
         [Fact]
@@ -198,6 +288,68 @@ namespace PRRX.IDM.Tests
             Assert.Equal("WhatsApp Messenger (Mirror)", result.Items[0].Title);
             Assert.Equal("141.77 MB", result.Items[0].Size);
             Assert.Equal("2.26.39.71", result.Items[0].Version);
+        }
+
+        [Fact]
+        public async Task SearchApkAsync_SupportsUnifiedSearchDlMode()
+        {
+            var fakeJson = @"
+            {
+                ""status"": true,
+                ""creator"": ""Sasa Dev"",
+                ""result"": [
+                    {
+                        ""title"": ""Telegram (Mirror)"",
+                        ""image"": ""https://pool.img.aptoide.com/icon.png"",
+                        ""size"": ""78.85 MB"",
+                        ""version"": ""12.9.2"",
+                        ""link"": ""https://org.telegram.messenger.web.en.aptoide.com/app""
+                    }
+                ]
+            }";
+
+            var handler = new FakeHttpMessageHandler(req =>
+            {
+                Assert.Contains("mode=search_dl", req.RequestUri?.Query ?? "");
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(fakeJson, Encoding.UTF8, "application/json")
+                };
+            });
+
+            var client = new HttpClient(handler);
+            var resolver = new CloudResolverService("https://test-worker.local", client);
+
+            var result = await resolver.SearchApkAsync("telegram", "search_dl");
+
+            Assert.NotNull(result);
+            Assert.True(result.Success);
+            Assert.Single(result.Items);
+            Assert.Equal("Telegram (Mirror)", result.Items[0].Title);
+            Assert.Equal("Unified Search & DL", result.Items[0].Provider);
+        }
+
+        [Fact]
+        public async Task ResolveApkDownloadUrlAsync_RejectsHtmlPageFallback()
+        {
+            // When upstream API fails, an HTML page should NOT be treated as a direct APK download
+            var fakeJson = @"
+            {
+                ""status"": false,
+                ""error"": ""Backend API Route not found""
+            }";
+
+            var handler = new FakeHttpMessageHandler(req => new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(fakeJson, Encoding.UTF8, "application/json")
+            });
+
+            var client = new HttpClient(handler);
+            var resolver = new CloudResolverService("https://test-worker.local", client);
+
+            var downloadUrl = await resolver.ResolveApkDownloadUrlAsync("https://org.telegram.messenger.web.en.aptoide.com/app");
+
+            Assert.Null(downloadUrl);
         }
 
         [Fact]
