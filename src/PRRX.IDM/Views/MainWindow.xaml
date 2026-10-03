@@ -44,6 +44,9 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
         <DataTemplate DataType="{x:Type vm:SiteGrabberViewModel}">
             <tabs:SiteGrabberTab/>
         </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:ApkHubViewModel}">
+            <tabs:ApkHubTab/>
+        </DataTemplate>
         <DataTemplate DataType="{x:Type vm:SettingsViewModel}">
             <tabs:SettingsTab/>
         </DataTemplate>
@@ -103,6 +106,11 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
 
                     <ui:Button Content="Site Grabber" Icon="{ui:SymbolIcon Symbol=GlobeSearch24}"
                                Command="{Binding NavigateTabCommand}" CommandParameter="SiteGrabber"
+                               HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                               Height="44" Margin="0,0,0,8" Padding="16,0" CornerRadius="8"/>
+
+                    <ui:Button Content="APK &amp; MOD Store" Icon="{ui:SymbolIcon Symbol=Apps24}"
+                               Command="{Binding NavigateTabCommand}" CommandParameter="ApkHub"
                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
                                Height="44" Margin="0,0,0,8" Padding="16,0" CornerRadius="8"/>
                 </StackPanel>

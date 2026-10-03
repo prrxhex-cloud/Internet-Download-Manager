@@ -12,6 +12,61 @@ let currentWorkerEnv = null;
 let cachedBotToken = null;
 let lastTokenFetchTime = 0;
 
+let cachedSasaApiKey = null;
+let lastSasaApiKeyFetchTime = 0;
+
+async function getSasaApiKey(env) {
+  const activeEnv = env || currentWorkerEnv;
+  if (activeEnv?.SASA_API_KEY) return activeEnv.SASA_API_KEY.trim();
+  if (activeEnv?.SASA_DEV_API_KEY) return activeEnv.SASA_DEV_API_KEY.trim();
+
+  const now = Date.now();
+  if (cachedSasaApiKey && (now - lastSasaApiKeyFetchTime < 60000)) {
+    return cachedSasaApiKey;
+  }
+
+  const db = activeEnv?.DB;
+  if (db) {
+    try {
+      const row = await db.prepare("SELECT value FROM app_secrets WHERE key = 'sasa_api_key' LIMIT 1").first();
+      if (row && row.value) {
+        cachedSasaApiKey = row.value.trim();
+        lastSasaApiKeyFetchTime = now;
+        return cachedSasaApiKey;
+      }
+    } catch (e) {
+      console.warn("Could not load sasa_api_key from app_secrets table:", e);
+    }
+  }
+  return cachedSasaApiKey || "";
+}
+
+// In-Memory Cloud Edge Cache for SASA DEV APIs (Saves quota & accelerates response)
+const cloudEdgeCache = new Map();
+
+function getCachedCloudResponse(cacheKey) {
+  const item = cloudEdgeCache.get(cacheKey);
+  if (!item) return null;
+  if (Date.now() > item.expiresAt) {
+    cloudEdgeCache.delete(cacheKey);
+    return null;
+  }
+  return item.data;
+}
+
+function setCachedCloudResponse(cacheKey, data, ttlSeconds = 600) {
+  if (cloudEdgeCache.size > 2000) {
+    const now = Date.now();
+    for (const [k, v] of cloudEdgeCache.entries()) {
+      if (now > v.expiresAt) cloudEdgeCache.delete(k);
+    }
+  }
+  cloudEdgeCache.set(cacheKey, {
+    data,
+    expiresAt: Date.now() + (ttlSeconds * 1000)
+  });
+}
+
 async function getBotToken(env) {
   const activeEnv = env || currentWorkerEnv;
   if (activeEnv?.TELEGRAM_BOT_TOKEN) return activeEnv.TELEGRAM_BOT_TOKEN.trim();
@@ -953,6 +1008,10 @@ export default {
               cachedBotToken = secretValue;
               lastTokenFetchTime = Date.now();
             }
+            if (secretKey === "sasa_api_key") {
+              cachedSasaApiKey = secretValue;
+              lastSasaApiKeyFetchTime = Date.now();
+            }
 
             return new Response(JSON.stringify({ success: true, message: `Secret '${secretKey}' updated successfully in D1 database` }), { status: 200, headers: corsHeaders });
           } catch (dbErr) {
@@ -967,6 +1026,300 @@ export default {
       if ((path === "/api/telegram/check-presence" || path === "/api/telegram/cron") && (method === "GET" || method === "POST")) {
         const result = await checkPresenceForAllStaleClients(env);
         return new Response(JSON.stringify({ success: true, ...result }), { status: 200, headers: corsHeaders });
+      }
+
+      // ----------------------------------------------------------------------
+      // PRRX IDM Cloud Debrid, Media Resolver & Android APK Store Proxy Gateway
+      // All 22 Features from SASA DEV APIS (sasa-dev-api.xyz)
+      // Architecture: Zero Hardcoded Client Secrets, Server-Side Secret Vault,
+      // Dynamic Edge Quota Tracking, Anti-Abuse Rate Limiting & High-Speed Cache
+      // ----------------------------------------------------------------------
+      if (path.startsWith("/api/cloud")) {
+        // 1. Health & Status
+        if (path === "/api/cloud/health" || path === "/api/cloud/status") {
+          const sasaKey = await getSasaApiKey(env);
+          return new Response(JSON.stringify({
+            status: "online",
+            service: "PRRX IDM Cloud Debrid & Media Gateway",
+            features_supported: 22,
+            sasa_api_configured: !!sasaKey,
+            edge_cache_size: cloudEdgeCache.size,
+            edge_node: clientColo,
+            client_ip: clientPublicIp,
+            timestamp: new Date().toISOString()
+          }), { status: 200, headers: corsHeaders });
+        }
+
+        // 2. Secret Management Endpoint (Admin Authorization Required)
+        if (path === "/api/cloud/set-secret" && method === "POST") {
+          const body = await request.json().catch(() => ({}));
+          const adminKey = env.ADMIN_KEY || env.TELEGRAM_SECRET_TOKEN || "PRRX_TELEGRAM_WEBHOOK_SECRET_VAULT_2026";
+          const authHeader = request.headers.get("Authorization") || "";
+          const providedKey = authHeader.replace(/^Bearer\s+/i, "").trim() || body.admin_key || body.secret_token;
+          if (!providedKey || providedKey !== adminKey) {
+            return new Response(JSON.stringify({ error: "Unauthorized: Admin authorization required" }), { status: 401, headers: corsHeaders });
+          }
+
+          const secretKey = typeof body.key === "string" ? body.key.trim() : "";
+          const secretValue = typeof body.value === "string" ? body.value.trim() : "";
+          if (!secretKey || !secretValue) {
+            return new Response(JSON.stringify({ error: "Missing required fields: key and value" }), { status: 400, headers: corsHeaders });
+          }
+
+          if (env.DB) {
+            await ensureTelegramTables(env.DB);
+            try {
+              await env.DB.prepare(`
+                INSERT INTO app_secrets (key, value, updated_at)
+                VALUES (?1, ?2, CURRENT_TIMESTAMP)
+                ON CONFLICT(key) DO UPDATE SET value = ?2, updated_at = CURRENT_TIMESTAMP
+              `).bind(secretKey, secretValue).run();
+
+              if (secretKey === "sasa_api_key") {
+                cachedSasaApiKey = secretValue;
+                lastSasaApiKeyFetchTime = Date.now();
+              }
+
+              return new Response(JSON.stringify({ success: true, message: `Secret '${secretKey}' updated in D1 database` }), { status: 200, headers: corsHeaders });
+            } catch (dbErr) {
+              return new Response(JSON.stringify({ error: "Failed to persist secret in database", details: dbErr.message }), { status: 500, headers: corsHeaders });
+            }
+          }
+          return new Response(JSON.stringify({ error: "D1 database binding (DB) is not configured" }), { status: 503, headers: corsHeaders });
+        }
+
+        // 3. Client IP Edge Rate Limiting (60 requests/min per IP)
+        if (checkRateLimit(`cloud:${clientPublicIp}`, 60, 60)) {
+          return new Response(JSON.stringify({
+            status: false,
+            success: false,
+            error: "Rate limit exceeded. Please wait 60 seconds before making further cloud requests.",
+            rateLimitExceeded: true,
+            retryAfter: 60,
+            fallbackRequired: true
+          }), {
+            status: 429,
+            headers: { ...corsHeaders, "Retry-After": "60" }
+          });
+        }
+
+        // 4. Check In-Memory Edge Cache for GET requests
+        const cacheKey = `${method}:${path}:${url.search}`;
+        if (method === "GET") {
+          const cachedBody = getCachedCloudResponse(cacheKey);
+          if (cachedBody) {
+            return new Response(cachedBody, {
+              status: 200,
+              headers: { ...corsHeaders, "X-Edge-Cache": "HIT" }
+            });
+          }
+        }
+
+        // 5. Retrieve SASA DEV API Key dynamically from Server / D1 Database
+        const sasaApiKey = await getSasaApiKey(env);
+        if (!sasaApiKey) {
+          return new Response(JSON.stringify({
+            status: false,
+            success: false,
+            error: "SASA API key is not configured on Cloud Gateway.",
+            fallbackRequired: true
+          }), { status: 503, headers: corsHeaders });
+        }
+
+        // 6. Map / Dispatch Upstream Endpoint
+        let upstreamPath = "";
+        const queryParams = new URLSearchParams(url.search);
+
+        // Smart Universal Resolver Endpoint: /api/cloud/resolve?url=...
+        if (path === "/api/cloud/resolve") {
+          let targetUrl = queryParams.get("url") || "";
+          let reqFormat = queryParams.get("format") || queryParams.get("type") || "";
+
+          if (method === "POST") {
+            const body = await request.json().catch(() => ({}));
+            targetUrl = body.url || targetUrl;
+            reqFormat = body.format || body.type || reqFormat;
+          }
+
+          if (!targetUrl) {
+            return new Response(JSON.stringify({ status: false, error: "Missing required 'url' parameter" }), { status: 400, headers: corsHeaders });
+          }
+
+          const lowerUrl = targetUrl.toLowerCase();
+
+          // A. Social Video & Audio
+          if (lowerUrl.includes("youtube.com") || lowerUrl.includes("youtu.be")) {
+            if (reqFormat.includes("mp3") || reqFormat.includes("audio")) {
+              upstreamPath = "/api/yt/mp3-dl";
+            } else if (reqFormat.includes("thumb")) {
+              upstreamPath = "/api/yt/thumbnail-dl";
+            } else {
+              upstreamPath = "/api/yt/mp4-dl";
+            }
+          } else if (lowerUrl.includes("tiktok.com")) {
+            upstreamPath = "/api/tiktok/dl";
+          } else if (lowerUrl.includes("facebook.com") || lowerUrl.includes("fb.watch")) {
+            upstreamPath = "/api/facebook/dl";
+          } else if (lowerUrl.includes("instagram.com")) {
+            upstreamPath = "/api/instagram/dl";
+          } else if (lowerUrl.includes("pinterest.com") || lowerUrl.includes("pin.it")) {
+            upstreamPath = "/api/pinterest/dl";
+          } else if (lowerUrl.includes("twitter.com") || lowerUrl.includes("x.com")) {
+            upstreamPath = "/api/twitter";
+          }
+          // B. Cloud Storage Direct Link Bypasser (Debrid)
+          else if (lowerUrl.includes("drive.google.com")) {
+            upstreamPath = "/api/download/gdrive";
+          } else if (lowerUrl.includes("mediafire.com")) {
+            upstreamPath = "/api/mediafire";
+          } else if (lowerUrl.includes("pixeldrain.com")) {
+            upstreamPath = "/api/pixeldrain";
+          } else if (lowerUrl.includes("usersdrive.com")) {
+            upstreamPath = "/api/usersdrive";
+          }
+          // C. Music & Regional Media
+          else if (lowerUrl.includes("spotify.com")) {
+            upstreamPath = "/api/spotify";
+          } else if (lowerUrl.includes("sinhanada.net") || lowerUrl.includes("sinhanada")) {
+            upstreamPath = "/api/sinhanada/download";
+          } else if (lowerUrl.includes("slmix.lk") || lowerUrl.includes("slmix")) {
+            upstreamPath = "/api/slmixlk/download";
+          }
+          // D. Document Scraper
+          else if (lowerUrl.includes("paperhub")) {
+            upstreamPath = "/api/download";
+            queryParams.set("site", "paperhub");
+          } else if (lowerUrl.endsWith(".pdf") || lowerUrl.includes("pdf")) {
+            upstreamPath = "/api/download";
+            queryParams.set("site", "pdf");
+          } else {
+            // Default universal media fallback
+            upstreamPath = "/api/download";
+          }
+
+          queryParams.set("url", targetUrl);
+        } else {
+          // Explicit Endpoint Mapping
+          const cloudPrefix = "/api/cloud";
+          const sub = path.substring(cloudPrefix.length);
+
+          if (sub === "/yt/mp4" || sub === "/yt/mp4-dl") upstreamPath = "/api/yt/mp4-dl";
+          else if (sub === "/yt/mp3" || sub === "/yt/mp3-dl") upstreamPath = "/api/yt/mp3-dl";
+          else if (sub === "/yt/thumbnail" || sub === "/yt/thumbnail-dl" || sub === "/yt/thumb") upstreamPath = "/api/yt/thumbnail-dl";
+          else if (sub === "/tiktok" || sub === "/tiktok/dl") upstreamPath = "/api/tiktok/dl";
+          else if (sub === "/facebook" || sub === "/facebook/dl") upstreamPath = "/api/facebook/dl";
+          else if (sub === "/instagram" || sub === "/instagram/dl") upstreamPath = "/api/instagram/dl";
+          else if (sub === "/pinterest" || sub === "/pinterest/dl") upstreamPath = "/api/pinterest/dl";
+          else if (sub === "/twitter") upstreamPath = "/api/twitter";
+          else if (sub === "/twitter_v2") upstreamPath = "/api/twitter_v2";
+          else if (sub === "/download/gdrive" || sub === "/gdrive") upstreamPath = "/api/download/gdrive";
+          else if (sub === "/mediafire") upstreamPath = "/api/mediafire";
+          else if (sub === "/pixeldrain") upstreamPath = "/api/pixeldrain";
+          else if (sub === "/usersdrive") upstreamPath = "/api/usersdrive";
+          else if (sub === "/spotify") upstreamPath = "/api/spotify";
+          else if (sub === "/sinhanada" || sub === "/sinhanada/download") upstreamPath = "/api/sinhanada/download";
+          else if (sub === "/slmix" || sub === "/slmixlk/download") upstreamPath = "/api/slmixlk/download";
+          else if (sub === "/download") upstreamPath = "/api/download";
+          else if (sub === "/paperhub") { upstreamPath = "/api/download"; queryParams.set("site", "paperhub"); }
+          else if (sub === "/pdf") { upstreamPath = "/api/download"; queryParams.set("site", "pdf"); }
+          else if (sub === "/search/apksearch" || sub === "/apk/search") upstreamPath = "/api/search/apksearch";
+          else if (sub === "/download/apkdownload" || sub === "/apk/download") upstreamPath = "/api/download/apkdownload";
+          else if (sub === "/search/apk" || sub === "/apk/search-dl") {
+            upstreamPath = "/api/search/apk";
+            if (!queryParams.has("mode")) queryParams.set("mode", "search_dl");
+          }
+          else if (sub === "/apk/an1" || sub === "/apk/an1/search") upstreamPath = "/api/apk/an1/search";
+          else if (sub === "/apk/happymod" || sub === "/apk/happymod/search") upstreamPath = "/api/apk/happymod/search";
+          else if (sub === "/apk/apkpure" || sub === "/apk/apkpure/search") upstreamPath = "/api/apk/apkpure/search";
+          else if (sub === "/apk/uptodown" || sub === "/apk/uptodown/search") upstreamPath = "/api/apk/uptodown/search";
+          else {
+            // General proxy fallback for any additional subroutes under /api/cloud/*
+            upstreamPath = sub.startsWith("/api/") ? sub : `/api${sub}`;
+          }
+        }
+
+        // 7. Inject Secrets & Build Upstream Request URL
+        queryParams.set("apikey", sasaApiKey);
+        const upstreamUrl = `https://sasa-dev-api.xyz${upstreamPath}?${queryParams.toString()}`;
+
+        // 8. Forward Upstream with Timeout (12s)
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 12000);
+
+          const upstreamRes = await fetch(upstreamUrl, {
+            method: "GET",
+            headers: {
+              "Accept": "application/json, text/plain, */*",
+              "User-Agent": "PRRX-IDM/1.8.0 Cloud-Proxy"
+            },
+            signal: controller.signal
+          });
+          clearTimeout(timeoutId);
+
+          const resStatus = upstreamRes.status;
+          const textBody = await upstreamRes.text();
+
+          // 9. Inspect Upstream Rate Limits & Quotas
+          if (resStatus === 429 || textBody.toLowerCase().includes("rate limit") || textBody.toLowerCase().includes("rate limited")) {
+            let parsedErr = {};
+            try { parsedErr = JSON.parse(textBody); } catch {}
+            return new Response(JSON.stringify({
+              status: false,
+              success: false,
+              error: "Upstream API quota or rate limit exceeded.",
+              details: parsedErr.error || textBody.slice(0, 200),
+              rateLimitExceeded: true,
+              retryAfter: 60,
+              fallbackRequired: true
+            }), {
+              status: 429,
+              headers: { ...corsHeaders, "Retry-After": "60" }
+            });
+          }
+
+          // 10. Inspect Upstream Gateway Errors (502, 503, 504)
+          if (resStatus >= 500) {
+            return new Response(JSON.stringify({
+              status: false,
+              success: false,
+              error: `Upstream service error (HTTP ${resStatus}). Transparent fallback initiated.`,
+              upstreamUnavailable: true,
+              fallbackRequired: true
+            }), {
+              status: 502,
+              headers: corsHeaders
+            });
+          }
+
+          // 11. Edge Caching for Successful Responses
+          if (resStatus === 200 && textBody.trim().startsWith("{")) {
+            const ttlSeconds = (upstreamPath.includes("search") || upstreamPath.includes("apk")) ? 900
+              : (upstreamPath.includes("thumb") ? 1800 : 300);
+            setCachedCloudResponse(cacheKey, textBody, ttlSeconds);
+          }
+
+          return new Response(textBody, {
+            status: resStatus,
+            headers: {
+              ...corsHeaders,
+              "X-Edge-Cache": "MISS"
+            }
+          });
+        } catch (fetchErr) {
+          // Timeout or network drop - Graceful fallback signal
+          const isTimeout = fetchErr.name === "AbortError" || fetchErr.message?.includes("abort");
+          return new Response(JSON.stringify({
+            status: false,
+            success: false,
+            error: isTimeout ? "Upstream gateway timed out (12s)." : `Network proxy failure: ${fetchErr.message}`,
+            upstreamUnavailable: true,
+            fallbackRequired: true
+          }), {
+            status: isTimeout ? 504 : 502,
+            headers: corsHeaders
+          });
+        }
       }
 
       // Route Not Found

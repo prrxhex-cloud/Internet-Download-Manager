@@ -32,6 +32,7 @@ namespace PRRX.IDM.ViewModels
         private ThumbnailViewModel? _thumbnailViewModel;
         private SettingsViewModel? _settingsViewModel;
         private SiteGrabberViewModel? _siteGrabberViewModel;
+        private ApkHubViewModel? _apkHubViewModel;
 
         public VideoDownloaderViewModel VideoViewModel =>
             _videoViewModel ??= new VideoDownloaderViewModel(_mediaEngine, _configService, _historyService);
@@ -50,6 +51,9 @@ namespace PRRX.IDM.ViewModels
 
         public SiteGrabberViewModel SiteGrabberViewModel =>
             _siteGrabberViewModel ??= new SiteGrabberViewModel(_spiderService, _scheduleService, _configService);
+
+        public ApkHubViewModel ApkHubViewModel =>
+            _apkHubViewModel ??= new ApkHubViewModel(new CloudResolverService(), _configService, _historyService);
 
         public ViewModelBase CurrentTabViewModel
         {
@@ -137,6 +141,7 @@ namespace PRRX.IDM.ViewModels
                         "Video" => VideoViewModel,
                         "Audio" => AudioViewModel,
                         "Thumbnail" => ThumbnailViewModel,
+                        "ApkHub" => ApkHubViewModel,
                         "SiteGrabber" => SiteGrabberViewModel,
                         "Settings" => SettingsViewModel,
                         _ => VideoViewModel

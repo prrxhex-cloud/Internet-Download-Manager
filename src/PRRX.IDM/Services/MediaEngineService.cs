@@ -101,6 +101,7 @@ namespace PRRX.IDM.Services
 
         private readonly IConfigurationService? _configService;
         private readonly ITelegramLinkResolver _telegramResolver = new TelegramLinkResolver();
+        private readonly ICloudResolverService _cloudResolver = new CloudResolverService();
         private string _lastNonZeroSpeed = "Calculating...";
 
         public string EngineExecutablePath { get; private set; }
@@ -644,6 +645,25 @@ namespace PRRX.IDM.Services
                 catch
                 {
                     // Fall back to yt-dlp native Telegram extractor
+                }
+            }
+
+            // Fast zero-latency Cloud Debrid & Media Resolver (SASA Cloud Proxy Gateway)
+            if (_cloudResolver.CanResolve(safeUrl))
+            {
+                try
+                {
+                    using var cloudCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    cloudCts.CancelAfter(TimeSpan.FromSeconds(6));
+                    var cloudProbe = await _cloudResolver.ResolveMediaProbeAsync(safeUrl, cloudCts.Token);
+                    if (cloudProbe != null && cloudProbe.Formats.Count > 0)
+                    {
+                        return (cloudProbe, null);
+                    }
+                }
+                catch
+                {
+                    // Fall back cleanly to yt-dlp native extraction without failure
                 }
             }
 

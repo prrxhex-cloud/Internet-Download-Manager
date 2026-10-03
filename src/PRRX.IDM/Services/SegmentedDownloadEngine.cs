@@ -348,6 +348,27 @@ namespace PRRX.IDM.Services
                     }
                 }
 
+                // Cloud Debrid & Link Bypasser Provider Integration (Google Drive, MediaFire, Pixeldrain, UsersDrive, Spotify, etc.)
+                var cloudResolver = new CloudResolverService();
+                if (cloudResolver.CanResolve(url))
+                {
+                    try
+                    {
+                        using var resolveCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+                        resolveCts.CancelAfter(TimeSpan.FromSeconds(5));
+                        var directCloudUrl = await cloudResolver.ResolveDirectDownloadUrlAsync(url, resolveCts.Token);
+                        if (!string.IsNullOrWhiteSpace(directCloudUrl) && Uri.TryCreate(directCloudUrl, UriKind.Absolute, out _))
+                        {
+                            url = directCloudUrl;
+                            Uri.TryCreate(url, UriKind.Absolute, out targetUri);
+                        }
+                    }
+                    catch
+                    {
+                        // Fall back transparently to native stream / direct connection
+                    }
+                }
+
                 // Streaming Media Provider Integration (YouTube, TikTok, Instagram, Twitter/X, SoundCloud, etc.)
                 if (MediaEngineService.IsStreamingUrl(url))
                 {
