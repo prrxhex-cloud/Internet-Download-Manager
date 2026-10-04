@@ -49,6 +49,10 @@
       <Link>bin\aria2c.exe</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <None Include="..\..\bin\ffmpeg.exe" Condition="Exists('..\..\bin\ffmpeg.exe')">
+      <Link>bin\ffmpeg.exe</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
   <ItemGroup>
