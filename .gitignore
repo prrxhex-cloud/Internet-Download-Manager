@@ -1,6 +1,9 @@
 ## Build and Output Folders
 bin/
 obj/
+!/bin/
+!/bin/*.ps1
+/bin/*.exe
 publish/
 dist/
 *.user
