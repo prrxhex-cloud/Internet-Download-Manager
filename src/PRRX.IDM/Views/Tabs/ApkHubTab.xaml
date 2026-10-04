@@ -122,10 +122,14 @@ Confidential and Proprietary - Licensed under PRRX Open Source Initiative
 
         <!-- Results View -->
         <Grid Grid.Row="3">
-            <!-- Results List -->
+            <!-- Results List with Virtualization -->
             <ListView ItemsSource="{Binding ApkResults}" SelectedItem="{Binding SelectedApk}"
                       HorizontalContentAlignment="Stretch"
                       ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                      ScrollViewer.CanContentScroll="True"
+                      VirtualizingStackPanel.IsVirtualizing="True"
+                      VirtualizingStackPanel.VirtualizationMode="Recycling"
+                      VirtualizingStackPanel.ScrollUnit="Pixel"
                       BorderThickness="0" Background="Transparent"
                       Visibility="{Binding HasResults, Converter={StaticResource BoolToVis}}">
                 <ListView.ItemTemplate>

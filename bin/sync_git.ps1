@@ -26,6 +26,9 @@ if (Test-Path "$srcDir\LICENSE.txt") {
 if (Test-Path "$srcDir\.gitignore") {
     Copy-Item -Path "$srcDir\.gitignore" -Destination "$targetDir\.gitignore" -Force
 }
+if (Test-Path "$srcDir\cloudflare_worker.js") {
+    Copy-Item -Path "$srcDir\cloudflare_worker.js" -Destination "$targetDir\cloudflare_worker.js" -Force
+}
 if (Test-Path "$srcDir\bin") {
     if (-not (Test-Path "$targetDir\bin")) { New-Item -ItemType Directory -Path "$targetDir\bin" -Force | Out-Null }
     Copy-Item -Path "$srcDir\bin\*" -Destination "$targetDir\bin" -Recurse -Force

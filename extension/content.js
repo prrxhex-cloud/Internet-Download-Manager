@@ -300,6 +300,26 @@
     btn.addEventListener("pointerdown", onPointerDown);
     btn.addEventListener("touchstart", onPointerDown, { passive: true });
 
+    function resetFloaterPosition() {
+      panel.style.position = "";
+      panel.style.left = "";
+      panel.style.top = "";
+      panel.style.right = "";
+      panel.style.bottom = "";
+      panel.classList.remove("prrx-dragging");
+      try {
+        if (isExtensionValid() && chrome.storage && chrome.storage.local) {
+          chrome.storage.local.remove("floatingPanelPos");
+        }
+      } catch (_) {}
+    }
+
+    btn.addEventListener("dblclick", (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      resetFloaterPosition();
+    });
+
     btn.addEventListener("click", (e) => {
       if (isDragging || hasMoved) {
         e.stopPropagation();
@@ -385,6 +405,24 @@
     if (isExtensionValid() && chrome.runtime && chrome.runtime.onMessage) {
       chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         if (!isExtensionValid()) return false;
+        if (request && request.action === "reset_floater_position") {
+          document.querySelectorAll(".prrx-video-panel-container").forEach(p => {
+            p.style.position = "";
+            p.style.left = "";
+            p.style.top = "";
+            p.style.right = "";
+            p.style.bottom = "";
+            p.classList.remove("prrx-dragging");
+          });
+          try {
+            if (isExtensionValid() && chrome.storage && chrome.storage.local) {
+              chrome.storage.local.remove("floatingPanelPos");
+            }
+          } catch (_) {}
+          try { sendResponse({ status: "reset" }); } catch (_) {}
+          return true;
+        }
+
         if (request && request.action === "collect_all_links") {
           const links = [];
           const seenUrls = new Set();

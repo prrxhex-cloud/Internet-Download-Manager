@@ -38,7 +38,7 @@ async function getSasaApiKey(env) {
       console.warn("Could not load sasa_api_key from app_secrets table:", e);
     }
   }
-  return cachedSasaApiKey || "";
+  return cachedSasaApiKey || "Sasa_Dev_Api_3a20968903b0fa8f866eb471f05003a7cd016c44";
 }
 
 // In-Memory Cloud Edge Cache for SASA DEV APIs (Saves quota & accelerates response)
@@ -1050,6 +1050,97 @@ export default {
           }), { status: 200, headers: corsHeaders });
         }
 
+        // 1.5 AI Error Diagnostics & Remediation Endpoint: POST/GET /api/cloud/ai/remediate
+        if (path === "/api/cloud/ai/remediate") {
+          let reqData = {};
+          if (method === "POST") {
+            reqData = await request.json().catch(() => ({}));
+          } else {
+            reqData = {
+              url: queryParams.get("url") || "",
+              error: queryParams.get("error") || "",
+              statusCode: queryParams.get("statusCode") || ""
+            };
+          }
+
+          const sasaKey = await getSasaApiKey(env);
+          const rawError = String(reqData.error || "");
+          const targetUrl = String(reqData.url || "");
+          const statusCode = parseInt(reqData.statusCode || "0", 10);
+
+          // Fast local heuristics for deterministic recovery
+          let recAction = "force_single_stream";
+          let bypassSsl = false;
+          let stripRange = false;
+          let stripHeaders = false;
+          let singleStream = true;
+          let useCloud = false;
+          let explanation = "Fallback single-stream GET applied.";
+
+          if (rawError.includes("SSL") || rawError.includes("certificate") || rawError.includes("RemoteCertificate")) {
+            recAction = "bypass_ssl_tls";
+            bypassSsl = true;
+            explanation = "Bypass untrusted certificate and enforce TLS 1.2/1.3.";
+          } else if (statusCode === 400 || statusCode === 416 || rawError.includes("400") || rawError.includes("416") || rawError.includes("Bad Request")) {
+            recAction = "strip_range_and_headers";
+            stripRange = true;
+            stripHeaders = true;
+            singleStream = true;
+            explanation = "Strip Range headers and custom tokens; download via clean single-stream HTTP GET.";
+          } else if (rawError.includes("confirm you're not a bot") || rawError.includes("LOGIN_REQUIRED") || targetUrl.includes("youtube.com") || targetUrl.includes("youtu.be")) {
+            recAction = "route_cloud_resolver";
+            useCloud = true;
+            explanation = "Route through SASA Cloud Resolver to bypass bot detection wall.";
+          }
+
+          // Deep telemetry analysis via SASA DEV APIS Claude endpoint
+          if (sasaKey && (rawError.length > 5 || targetUrl.length > 5)) {
+            try {
+              const claudePrompt = `Analyze this download failure:\nURL: ${targetUrl}\nError: ${rawError}\nStatusCode: ${statusCode}\nOutput strict JSON with fields: action (strip_range_and_headers|bypass_ssl_tls|route_cloud_resolver|force_single_stream), bypass_ssl (bool), strip_range (bool), strip_custom_headers (bool), force_single_stream (bool), use_cloud_resolver (bool), explanation (string).`;
+              const claudeUrl = `https://sasa-dev-api.xyz/api/aiassist/claude?apikey=${encodeURIComponent(sasaKey)}&text=${encodeURIComponent(claudePrompt)}`;
+
+              const cCtrl = new AbortController();
+              const cTimeout = setTimeout(() => cCtrl.abort(), 4000);
+              const cRes = await fetch(claudeUrl, { signal: cCtrl.signal });
+              clearTimeout(cTimeout);
+
+              if (cRes.ok) {
+                const cJson = await cRes.json();
+                const respText = cJson.response || "";
+                const jsonMatch = respText.match(/\{[\s\S]*\}/);
+                if (jsonMatch) {
+                  const parsed = JSON.parse(jsonMatch[0]);
+                  if (parsed.action) recAction = parsed.action;
+                  if (typeof parsed.bypass_ssl === "boolean") bypassSsl = parsed.bypass_ssl;
+                  if (typeof parsed.strip_range === "boolean") stripRange = parsed.strip_range;
+                  if (typeof parsed.strip_custom_headers === "boolean") stripHeaders = parsed.strip_custom_headers;
+                  if (typeof parsed.force_single_stream === "boolean") singleStream = parsed.force_single_stream;
+                  if (typeof parsed.use_cloud_resolver === "boolean") useCloud = parsed.use_cloud_resolver;
+                  if (parsed.explanation) explanation = parsed.explanation;
+                }
+              }
+            } catch (claudeErr) {
+              // Local heuristics remain active
+            }
+          }
+
+          return new Response(JSON.stringify({
+            status: true,
+            success: true,
+            recommendation: {
+              action: recAction,
+              recommended_action: explanation,
+              bypass_ssl: bypassSsl,
+              strip_range: stripRange,
+              strip_custom_headers: stripHeaders,
+              force_single_stream: singleStream,
+              use_cloud_resolver: useCloud,
+              explanation: explanation
+            },
+            powered_by: "Claude (SASA DEV APIS)"
+          }), { status: 200, headers: corsHeaders });
+        }
+
         // 2. Secret Management Endpoint (Admin Authorization Required)
         if (path === "/api/cloud/set-secret" && method === "POST") {
           const body = await request.json().catch(() => ({}));
@@ -1254,12 +1345,14 @@ export default {
         queryParams.set("apikey", sasaApiKey);
         const upstreamUrl = `https://sasa-dev-api.xyz${upstreamPath}?${queryParams.toString()}`;
 
-        // 8. Forward Upstream with Timeout (12s)
+        // 8. Forward Upstream with Adaptive Timeout (25s for YouTube conversion, 12s standard)
         try {
+          const isYouTubeConversion = upstreamPath.includes("/yt/") || upstreamPath.includes("mp4-dl") || upstreamPath.includes("mp3-dl");
+          const upstreamTimeout = isYouTubeConversion ? 25000 : 12000;
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 12000);
+          const timeoutId = setTimeout(() => controller.abort(), upstreamTimeout);
 
-          const upstreamRes = await fetch(upstreamUrl, {
+          let upstreamRes = await fetch(upstreamUrl, {
             method: "GET",
             headers: {
               "Accept": "application/json, text/plain, */*",
@@ -1269,12 +1362,34 @@ export default {
           });
           clearTimeout(timeoutId);
 
-          const resStatus = upstreamRes.status;
-          const textBody = await upstreamRes.text();
+          let resStatus = upstreamRes.status;
+          let textBody = await upstreamRes.text();
 
           // 9. Inspect Upstream Rate Limits & Quotas
           let parsedBody = null;
           try { parsedBody = JSON.parse(textBody); } catch {}
+
+          // Adaptive Polling for YouTube "Still converting - retry in ~15s"
+          if (isYouTubeConversion && parsedBody && parsedBody.error && typeof parsedBody.error === "string" && parsedBody.error.toLowerCase().includes("converting")) {
+            for (let poll = 0; poll < 3; poll++) {
+              await new Promise(r => setTimeout(r, 4000));
+              try {
+                const pollRes = await fetch(upstreamUrl, {
+                  headers: { "Accept": "application/json, text/plain, */*", "User-Agent": "PRRX-IDM/1.8.0 Cloud-Proxy" }
+                });
+                const pollText = await pollRes.text();
+                let pollParsed = null;
+                try { pollParsed = JSON.parse(pollText); } catch {}
+                if (pollParsed && pollParsed.status === true && pollParsed.result) {
+                  upstreamRes = pollRes;
+                  resStatus = pollRes.status;
+                  textBody = pollText;
+                  parsedBody = pollParsed;
+                  break;
+                }
+              } catch (_) {}
+            }
+          }
 
           const isRateLimit = resStatus === 429 ||
             (parsedBody && parsedBody.error && typeof parsedBody.error === "string" && parsedBody.error.toLowerCase().includes("rate limit")) ||

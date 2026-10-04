@@ -25,6 +25,7 @@ namespace PRRX.IDM.Services
     {
         string BaseUrl { get; }
         bool CanResolve(string url);
+        bool IsYouTubeUrl(string url);
         Task<CloudResolvedMedia?> ResolveMediaAsync(string url, string? format = null, CancellationToken ct = default);
         Task<MediaProbeResult?> ResolveMediaProbeAsync(string url, CancellationToken ct = default);
         Task<string?> ResolveDirectDownloadUrlAsync(string url, CancellationToken ct = default);
@@ -60,13 +61,18 @@ namespace PRRX.IDM.Services
                 UseProxy = false, // Direct fast connect
                 PooledConnectionLifetime = TimeSpan.FromMinutes(10),
                 PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2),
-                ConnectTimeout = TimeSpan.FromSeconds(3),
-                AutomaticDecompression = DecompressionMethods.All
+                ConnectTimeout = TimeSpan.FromSeconds(5),
+                AutomaticDecompression = DecompressionMethods.All,
+                SslOptions = new System.Net.Security.SslClientAuthenticationOptions
+                {
+                    RemoteCertificateValidationCallback = (_, _, _, _) => true,
+                    EnabledSslProtocols = System.Security.Authentication.SslProtocols.Tls12 | System.Security.Authentication.SslProtocols.Tls13
+                }
             };
 
             var client = new HttpClient(handler)
             {
-                Timeout = TimeSpan.FromSeconds(15)
+                Timeout = TimeSpan.FromSeconds(30)
             };
 
             client.DefaultRequestHeaders.UserAgent.Clear();
@@ -88,6 +94,12 @@ namespace PRRX.IDM.Services
             {
                 return false;
             }
+        }
+
+        public bool IsYouTubeUrl(string url)
+        {
+            if (string.IsNullOrWhiteSpace(url)) return false;
+            return url.Contains("youtube.com", StringComparison.OrdinalIgnoreCase) || url.Contains("youtu.be", StringComparison.OrdinalIgnoreCase);
         }
 
         public async Task<CloudResolvedMedia?> ResolveMediaAsync(string url, string? format = null, CancellationToken ct = default)
@@ -361,12 +373,22 @@ namespace PRRX.IDM.Services
                 return null;
             }
 
+            var thumb = resolved.ThumbnailUrl;
+            if (string.IsNullOrWhiteSpace(thumb) && IsYouTubeUrl(url))
+            {
+                var match = Regex.Match(url, @"(?:youtu\.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]{11})", RegexOptions.IgnoreCase);
+                if (match.Success)
+                {
+                    thumb = $"https://i.ytimg.com/vi/{match.Groups[1].Value}/hqdefault.jpg";
+                }
+            }
+
             var probe = new MediaProbeResult
             {
                 Id = url,
-                Title = !string.IsNullOrWhiteSpace(resolved.Title) ? resolved.Title : "Cloud Accelerated Stream",
-                ThumbnailUrl = resolved.ThumbnailUrl ?? string.Empty,
-                PublisherName = "Cloud Intelligence (SASA Accelerated)",
+                Title = !string.IsNullOrWhiteSpace(resolved.Title) ? resolved.Title : (IsYouTubeUrl(url) ? "YouTube Video" : "Cloud Accelerated Stream"),
+                ThumbnailUrl = thumb ?? string.Empty,
+                PublisherName = IsYouTubeUrl(url) ? "YouTube (Cloud SASA Accelerated)" : "Cloud Intelligence (SASA Accelerated)",
                 Formats = new List<MediaFormat>
                 {
                     new MediaFormat
@@ -381,6 +403,19 @@ namespace PRRX.IDM.Services
                     }
                 }
             };
+
+            if (IsYouTubeUrl(url) || !resolved.IsAudioOnly)
+            {
+                probe.Formats.Add(new MediaFormat
+                {
+                    FormatId = "cloud_mp3_stream",
+                    Resolution = "320 kbps (High Quality Audio)",
+                    Extension = "mp3",
+                    Note = "Cloud High-Speed MP3 Audio",
+                    HasVideo = false,
+                    HasAudio = true
+                });
+            }
 
             return probe;
         }

@@ -1085,6 +1085,95 @@ namespace PRRX.IDM.Tests
             Assert.True(threads[0].EndByte > 1000);
         }
 
+        [Fact]
+        public void AiSelfHealingEngine_DiagnosesSslError_CorrectlyRemediates()
+        {
+            var engine = new AiSelfHealingEngine();
+            var plan = engine.DiagnoseAndRemediate(
+                "https://com.spotify.music.en.aptoide.com/app.apk",
+                new HttpRequestException("The SSL connection could not be established, see inner exception. UntrustedRoot: A certificate chain processed, but terminated in a root certificate which is not trusted by the trust provider."));
+
+            Assert.NotNull(plan);
+            Assert.Equal(HealingActionType.BypassSslCertificate, plan.HealingType);
+            Assert.True(plan.BypassSsl);
+            Assert.Contains("certificate", plan.Explanation);
+        }
+
+        [Fact]
+        public void AiSelfHealingEngine_DiagnosesHttp400RangeError_CorrectlyRemediates()
+        {
+            var engine = new AiSelfHealingEngine();
+            var plan = engine.DiagnoseAndRemediate(
+                "http://download.internetdownloadmanager.com/idman643build12.exe",
+                null,
+                statusCode: 400,
+                errorText: "HTTP/1.1 400 Bad Request");
+
+            Assert.NotNull(plan);
+            Assert.Equal(HealingActionType.StripRangeAndCustomHeaders, plan.HealingType);
+            Assert.True(plan.StripRange);
+            Assert.True(plan.ForceSingleStream);
+            Assert.True(plan.StripCustomHeaders);
+        }
+
+        [Fact]
+        public void AiSelfHealingEngine_DiagnosesYouTubeBotBlock_CorrectlyRemediates()
+        {
+            var engine = new AiSelfHealingEngine();
+            var plan = engine.DiagnoseAndRemediate(
+                "https://www.youtube.com/watch?v=1eEBjQW3pHQ",
+                null,
+                errorText: "ERROR: [youtube] 1eEBjQW3pHQ: Sign in to confirm you're not a bot");
+
+            Assert.NotNull(plan);
+            Assert.Equal(HealingActionType.RouteThroughCloudResolver, plan.HealingType);
+            Assert.True(plan.UseCloudResolver);
+            Assert.Contains("bot verification", plan.Explanation);
+        }
+
+        [Fact]
+        public void AiOptimizationService_CleanAndOptimizeFilename_SanitizesProperly()
+        {
+            var raw = "https://cdn.example.com/media/Taylor_Swift_Blank_Space.mp4?token=abc12345#frag";
+            var clean = AiOptimizationService.Current.CleanFileName(raw);
+
+            Assert.False(string.IsNullOrWhiteSpace(clean));
+            Assert.Equal("Taylor Swift Blank Space.mp4", clean);
+        }
+
+        [Fact]
+        public void AiOptimizationService_PredictOptimalConcurrency_ReturnsValidRange()
+        {
+            // Small file (< 2 MB) returns 1 to 4 streams
+            var smallThreads = AiOptimizationService.Current.PredictOptimalConcurrency(1024 * 500);
+            Assert.InRange(smallThreads, 1, 4);
+
+            // Large file (> 20 MB) returns 16 to 32 streams
+            var largeThreads = AiOptimizationService.Current.PredictOptimalConcurrency(10L * 1024 * 1024 * 1024);
+            Assert.InRange(largeThreads, 16, 32);
+        }
+
+        [Fact]
+        public void CloudResolverService_IsYouTubeUrl_IdentifiesYouTubeUrls()
+        {
+            var resolver = new CloudResolverService();
+            Assert.True(resolver.IsYouTubeUrl("https://www.youtube.com/watch?v=1eEBjQW3pHQ"));
+            Assert.True(resolver.IsYouTubeUrl("https://youtu.be/1eEBjQW3pHQ"));
+            Assert.True(resolver.IsYouTubeUrl("https://music.youtube.com/watch?v=1eEBjQW3pHQ"));
+            Assert.False(resolver.IsYouTubeUrl("https://example.com/file.zip"));
+        }
+
+        [Fact]
+        public void CloudResolverService_CanResolve_IdentifiesSupportedDomains()
+        {
+            var resolver = new CloudResolverService();
+            Assert.True(resolver.CanResolve("https://www.youtube.com/watch?v=test"));
+            Assert.True(resolver.CanResolve("https://drive.google.com/file/d/test/view"));
+            Assert.True(resolver.CanResolve("https://www.mediafire.com/file/test"));
+            Assert.True(resolver.CanResolve("https://pixeldrain.com/u/test"));
+            Assert.True(resolver.CanResolve("https://happymod.com/app/test.html"));
+        }
+
         private static string FormatBytes(long bytes)
         {
             if (bytes <= 0) return "Unknown";

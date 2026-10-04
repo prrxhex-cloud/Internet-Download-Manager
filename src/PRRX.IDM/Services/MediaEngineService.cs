@@ -655,7 +655,7 @@ namespace PRRX.IDM.Services
                 try
                 {
                     using var cloudCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                    cloudCts.CancelAfter(TimeSpan.FromSeconds(6));
+                    cloudCts.CancelAfter(TimeSpan.FromSeconds(25));
                     var cloudProbe = await _cloudResolver.ResolveMediaProbeAsync(safeUrl, cloudCts.Token);
                     if (cloudProbe != null && cloudProbe.Formats.Count > 0)
                     {
@@ -720,6 +720,22 @@ namespace PRRX.IDM.Services
 
             if (string.IsNullOrWhiteSpace(json) || exitCode != 0)
             {
+                // Self-Healing Recovery: Attempt SASA Cloud Debrid bypass if yt-dlp failed or hit bot check
+                if (_cloudResolver.CanResolve(safeUrl))
+                {
+                    try
+                    {
+                        using var recoveryCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                        recoveryCts.CancelAfter(TimeSpan.FromSeconds(25));
+                        var cloudProbe = await _cloudResolver.ResolveMediaProbeAsync(safeUrl, recoveryCts.Token);
+                        if (cloudProbe != null && cloudProbe.Formats.Count > 0)
+                        {
+                            return (cloudProbe, null);
+                        }
+                    }
+                    catch { }
+                }
+
                 var cleanErr = !string.IsNullOrWhiteSpace(err) ? err.Trim() : "Could not retrieve media details.";
                 if (cleanErr.Contains("Sign in to confirm you're not a bot", StringComparison.OrdinalIgnoreCase) || 
                     cleanErr.Contains("LOGIN_REQUIRED", StringComparison.OrdinalIgnoreCase))
@@ -1177,26 +1193,36 @@ namespace PRRX.IDM.Services
             };
 
             // Direct Cloud Acceleration Pre-Download (SASA High-Speed Zero-Lag Stream)
-            if ((formatId == "cloud_cdn_stream" || string.IsNullOrWhiteSpace(formatId)) && _cloudResolver.CanResolve(safeUrl))
+            bool isExplicitCloud = formatId == "cloud_cdn_stream" || formatId == "cloud_mp3_stream";
+            bool isYouTube = _cloudResolver.IsYouTubeUrl(safeUrl);
+            if ((isExplicitCloud || isYouTube || string.IsNullOrWhiteSpace(formatId)) && _cloudResolver.CanResolve(safeUrl))
             {
                 try
                 {
                     using var resolveCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                    resolveCts.CancelAfter(TimeSpan.FromSeconds(5));
-                    var directStreamUrl = await _cloudResolver.ResolveDirectDownloadUrlAsync(safeUrl, resolveCts.Token);
+                    resolveCts.CancelAfter(TimeSpan.FromSeconds(25));
+                    string? reqFormat = (formatId == "cloud_mp3_stream" || targetContainer?.Equals("mp3", StringComparison.OrdinalIgnoreCase) == true) ? "mp3" : null;
+                    var resolvedMedia = await _cloudResolver.ResolveMediaAsync(safeUrl, reqFormat, resolveCts.Token);
+                    var directStreamUrl = resolvedMedia?.DirectStreamUrl;
                     if (!string.IsNullOrWhiteSpace(directStreamUrl) && Uri.TryCreate(directStreamUrl, UriKind.Absolute, out _))
                     {
                         var targetFile = destinationFilePath;
                         if (string.IsNullOrWhiteSpace(targetFile))
                         {
-                            var title = Path.GetFileNameWithoutExtension(safeUrl.Split('?')[0]);
+                            var title = !string.IsNullOrWhiteSpace(resolvedMedia?.Title) ? resolvedMedia.Title : Path.GetFileNameWithoutExtension(safeUrl.Split('?')[0]);
                             if (string.IsNullOrWhiteSpace(title) || title == "watch") title = $"Video_{DateTime.Now:yyyyMMdd_HHmmss}";
-                            var ext = !string.IsNullOrWhiteSpace(targetContainer) && targetContainer != "auto" ? targetContainer.TrimStart('.') : "mp4";
+                            foreach (var c in Path.GetInvalidFileNameChars()) { title = title.Replace(c, '_'); }
+                            var ext = resolvedMedia?.Extension ?? (!string.IsNullOrWhiteSpace(targetContainer) && targetContainer != "auto" ? targetContainer.TrimStart('.') : "mp4");
                             targetFile = Path.Combine(outputDirectory, $"{title}.{ext}");
                         }
 
                         progress?.Report(new DownloadProgressReport { StatusMessage = "Connecting high-speed cloud direct stream...", Percentage = 5 });
-                        using var directClient = new HttpClient { Timeout = TimeSpan.FromHours(2) };
+                        using var handler = new HttpClientHandler
+                        {
+                            ServerCertificateCustomValidationCallback = (_, _, _, _) => true,
+                            AutomaticDecompression = System.Net.DecompressionMethods.All
+                        };
+                        using var directClient = new HttpClient(handler) { Timeout = TimeSpan.FromHours(2) };
                         using var resp = await directClient.GetAsync(directStreamUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
                         if (resp.IsSuccessStatusCode)
                         {
@@ -1207,7 +1233,7 @@ namespace PRRX.IDM.Services
                             using (var src = await resp.Content.ReadAsStreamAsync(cancellationToken))
                             using (var dst = File.Create(targetFile))
                             {
-                                var buffer = new byte[64 * 1024];
+                                var buffer = new byte[128 * 1024];
                                 long downloaded = 0;
                                 int read;
                                 var sw = Stopwatch.StartNew();
@@ -1218,12 +1244,16 @@ namespace PRRX.IDM.Services
                                     if (sw.ElapsedMilliseconds > 250)
                                     {
                                         var pct = totalLen > 0 ? (int)(downloaded * 100 / totalLen) : 50;
+                                        var elapsedSec = sw.Elapsed.TotalSeconds;
+                                        var speedBps = elapsedSec > 0 ? (long)(downloaded / elapsedSec) : 0;
+                                        var speedStr = speedBps > 0 ? FormatBytes(speedBps) + "/s" : "Calculating...";
                                         progress?.Report(new DownloadProgressReport
                                         {
                                             Percentage = Math.Clamp(pct, 0, 99),
+                                            Speed = speedStr,
+                                            TotalSize = totalLen > 0 ? FormatBytes(totalLen) : "Unknown",
                                             StatusMessage = "Downloading cloud direct stream..."
                                         });
-                                        sw.Restart();
                                     }
                                 }
                             }
@@ -1391,6 +1421,50 @@ namespace PRRX.IDM.Services
                         userAgent: userAgent);
                 }
 
+                if (process.ExitCode != 0 && !cancellationToken.IsCancellationRequested && _cloudResolver.CanResolve(safeUrl))
+                {
+                    progress?.Report(new DownloadProgressReport
+                    {
+                        Percentage = 10.0,
+                        StatusMessage = "AI Self-Healing: Redirecting through SASA Cloud Debrid..."
+                    });
+                    try
+                    {
+                        using var recoveryCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                        recoveryCts.CancelAfter(TimeSpan.FromSeconds(25));
+                        var resolved = await _cloudResolver.ResolveMediaAsync(safeUrl, null, recoveryCts.Token);
+                        if (resolved != null && !string.IsNullOrWhiteSpace(resolved.DirectStreamUrl))
+                        {
+                            var targetFile = destinationFilePath;
+                            if (string.IsNullOrWhiteSpace(targetFile))
+                            {
+                                var title = !string.IsNullOrWhiteSpace(resolved.Title) ? resolved.Title : $"Video_{DateTime.Now:yyyyMMdd_HHmmss}";
+                                foreach (var c in Path.GetInvalidFileNameChars()) { title = title.Replace(c, '_'); }
+                                var ext = resolved.Extension ?? "mp4";
+                                targetFile = Path.Combine(outputDirectory, $"{title}.{ext}");
+                            }
+
+                            using var h = new HttpClientHandler { ServerCertificateCustomValidationCallback = (_, _, _, _) => true };
+                            using var recoveryClient = new HttpClient(h) { Timeout = TimeSpan.FromHours(2) };
+                            using var resp = await recoveryClient.GetAsync(resolved.DirectStreamUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                            if (resp.IsSuccessStatusCode)
+                            {
+                                var dir = Path.GetDirectoryName(targetFile);
+                                if (!string.IsNullOrWhiteSpace(dir)) Directory.CreateDirectory(dir);
+                                using var s = await resp.Content.ReadAsStreamAsync(cancellationToken);
+                                using var d = File.Create(targetFile);
+                                await s.CopyToAsync(d, cancellationToken);
+                                if (File.Exists(targetFile) && new FileInfo(targetFile).Length > 0)
+                                {
+                                    progress?.Report(new DownloadProgressReport { Percentage = 100, StatusMessage = "Complete - Direct stream saved via SASA Cloud" });
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                    catch { }
+                }
+
                 MemoryOptimizer.TrimMemory();
                 return process.ExitCode == 0;
             }
@@ -1473,6 +1547,45 @@ namespace PRRX.IDM.Services
 
                 MemoryOptimizer.TrimMemory();
                 return localSuccess;
+            }
+
+            // Direct Cloud Acceleration for MP3 extraction (SASA MP3-DL)
+            if (!isLocalFile && _cloudResolver.CanResolve(sourceUrlOrPath) && normalizedFormat == "mp3")
+            {
+                try
+                {
+                    using var audioCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    audioCts.CancelAfter(TimeSpan.FromSeconds(25));
+                    var resolvedAudio = await _cloudResolver.ResolveMediaAsync(sourceUrlOrPath, "mp3", audioCts.Token);
+                    if (resolvedAudio != null && !string.IsNullOrWhiteSpace(resolvedAudio.DirectStreamUrl))
+                    {
+                        var targetFile = destinationFilePath;
+                        if (string.IsNullOrWhiteSpace(targetFile))
+                        {
+                            var title = !string.IsNullOrWhiteSpace(resolvedAudio.Title) ? resolvedAudio.Title : $"Audio_{DateTime.Now:yyyyMMdd_HHmmss}";
+                            foreach (var c in Path.GetInvalidFileNameChars()) { title = title.Replace(c, '_'); }
+                            targetFile = Path.Combine(outputDirectory, $"{title}.mp3");
+                        }
+
+                        using var h = new HttpClientHandler { ServerCertificateCustomValidationCallback = (_, _, _, _) => true };
+                        using var directClient = new HttpClient(h) { Timeout = TimeSpan.FromHours(2) };
+                        using var resp = await directClient.GetAsync(resolvedAudio.DirectStreamUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                        if (resp.IsSuccessStatusCode)
+                        {
+                            var dir = Path.GetDirectoryName(targetFile);
+                            if (!string.IsNullOrWhiteSpace(dir)) Directory.CreateDirectory(dir);
+                            using var s = await resp.Content.ReadAsStreamAsync(cancellationToken);
+                            using var d = File.Create(targetFile);
+                            await s.CopyToAsync(d, cancellationToken);
+                            if (File.Exists(targetFile) && new FileInfo(targetFile).Length > 0)
+                            {
+                                progress?.Report(new DownloadProgressReport { Percentage = 100, StatusMessage = "Complete - Direct MP3 saved via Cloud" });
+                                return true;
+                            }
+                        }
+                    }
+                }
+                catch { }
             }
 
             // Otherwise, use yt-dlp to extract online stream or convert

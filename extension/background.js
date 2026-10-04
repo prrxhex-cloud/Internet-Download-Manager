@@ -273,7 +273,8 @@ chrome.downloads.onDeterminingFilename.addListener((downloadItem, suggest) => {
         totalBytes: detectedSize,
         referer: downloadItem.referrer || "",
         userAgent: navigator.userAgent,
-        cookies: cookiesStr
+        cookies: cookiesStr,
+        isBrowserIntercepted: true
       });
     } else {
       suggest();
@@ -370,11 +371,27 @@ async function sendToPrrxIdm(payload) {
     chrome.runtime.sendNativeMessage(HOST_NAME, payload, (resp) => {
       if (chrome.runtime.lastError) {
         console.warn("Native Messaging Notice:", chrome.runtime.lastError.message);
+        if (payload.isBrowserIntercepted && payload.url) {
+          console.log("PRRX IDM: Falling back to browser native download engine.");
+          chrome.downloads.download({
+            url: payload.url,
+            filename: payload.fileName || undefined,
+            saveAs: false
+          });
+        }
       } else {
         console.log("PRRX IDM: Dispatched via Native Messaging Host.", resp);
       }
     });
   } catch (err) {
     console.error("PRRX IDM: Both dispatch channels encountered error:", err);
+    if (payload.isBrowserIntercepted && payload.url) {
+      console.log("PRRX IDM: Falling back to browser native download engine after error.");
+      chrome.downloads.download({
+        url: payload.url,
+        filename: payload.fileName || undefined,
+        saveAs: false
+      });
+    }
   }
 }

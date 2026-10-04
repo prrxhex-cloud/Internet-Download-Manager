@@ -43,6 +43,25 @@ document.addEventListener("DOMContentLoaded", () => {
     chrome.storage.local.set({ enableFloatingPanel: chkFloatingPanel.checked });
   });
 
+  const btnResetFloater = document.getElementById("btnResetFloater");
+  if (btnResetFloater) {
+    btnResetFloater.addEventListener("click", () => {
+      chrome.storage.local.remove("floatingPanelPos", () => {
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+          if (tabs && tabs[0]?.id) {
+            chrome.tabs.sendMessage(tabs[0].id, { action: "reset_floater_position" }, () => {
+              if (chrome.runtime.lastError) {}
+            });
+          }
+        });
+        btnResetFloater.textContent = "✔ Position Reset!";
+        setTimeout(() => {
+          btnResetFloater.textContent = "⚡ Reset Floater Position";
+        }, 1500);
+      });
+    });
+  }
+
   // Fast direct desktop check with timeout
   async function queryDesktopStatus() {
     try {

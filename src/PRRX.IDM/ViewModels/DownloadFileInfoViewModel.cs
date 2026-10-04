@@ -35,7 +35,12 @@ namespace PRRX.IDM.ViewModels
             PooledConnectionLifetime = TimeSpan.FromMinutes(5),
             AllowAutoRedirect = true,
             AutomaticDecompression = System.Net.DecompressionMethods.None,
-            ConnectTimeout = TimeSpan.FromSeconds(4)
+            ConnectTimeout = TimeSpan.FromSeconds(4),
+            SslOptions = new System.Net.Security.SslClientAuthenticationOptions
+            {
+                RemoteCertificateValidationCallback = (_, _, _, _) => true,
+                EnabledSslProtocols = System.Security.Authentication.SslProtocols.Tls12 | System.Security.Authentication.SslProtocols.Tls13
+            }
         }) { Timeout = TimeSpan.FromSeconds(10) };
 
         private readonly ICloudIntelligenceService _cloudService;
