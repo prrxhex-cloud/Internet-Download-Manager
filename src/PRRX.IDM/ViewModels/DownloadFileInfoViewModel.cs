@@ -348,7 +348,7 @@ namespace PRRX.IDM.ViewModels
             _fileName = !string.IsNullOrWhiteSpace(initialFileName)
                 ? SanitizeFileName(initialFileName)
                 : ExtractFileNameFromUrl(initialUrl);
-            _selectedCategory = FileCategoryHelper.DetectCategory(_fileName);
+            _selectedCategory = AiOptimizationService.Current.PredictCategory(_fileName);
             _cachedPageTitle = pageTitle;
             _currentFileHash = _cloudService.ExtractOrComputeSha256(initialUrl, _fileName);
 
@@ -1113,6 +1113,12 @@ namespace PRRX.IDM.ViewModels
 
             try
             {
+                var aiClean = AiOptimizationService.Current.CleanFileName(url);
+                if (!string.IsNullOrWhiteSpace(aiClean) && aiClean != "download" && Path.HasExtension(aiClean))
+                {
+                    return SanitizeFileName(aiClean);
+                }
+
                 var uri = new Uri(url);
                 var lastSeg = uri.Segments[^1].TrimEnd('/');
                 if (!string.IsNullOrWhiteSpace(lastSeg) && lastSeg.Contains('.'))
@@ -1151,7 +1157,8 @@ namespace PRRX.IDM.ViewModels
         public static string SanitizeFileName(string? fileName)
         {
             if (string.IsNullOrWhiteSpace(fileName)) return "download.bin";
-            var clean = SecurityGuard.SanitizeFileName(fileName);
+            var nlpClean = AiOptimizationService.Current.CleanFileName(fileName);
+            var clean = SecurityGuard.SanitizeFileName(nlpClean);
             return string.IsNullOrWhiteSpace(clean) ? "download.bin" : clean;
         }
     }

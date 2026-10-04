@@ -230,12 +230,83 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   }
 });
 
+// 3.5 Fallback & Auto-Reconnect Native Messaging Controller
+const bypassedDownloadUrls = new Set();
+
+function markUrlBypassed(url) {
+  if (!url) return;
+  bypassedDownloadUrls.add(url);
+  setTimeout(() => bypassedDownloadUrls.delete(url), 30000);
+}
+
+function fallbackToBrowserDownload(url, filename) {
+  if (!url) return;
+  try {
+    markUrlBypassed(url);
+    chrome.downloads.download({
+      url: url,
+      filename: filename || undefined,
+      saveAs: false
+    }, (downloadId) => {
+      if (chrome.runtime.lastError) {
+        console.warn("PRRX IDM: Browser download fallback notice:", chrome.runtime.lastError.message);
+      } else {
+        console.log("PRRX IDM: Resumed via browser download engine:", downloadId);
+      }
+    });
+  } catch (err) {
+    console.warn("PRRX IDM: Error during browser download fallback:", err);
+  }
+}
+
+let nativePort = null;
+let nativeReconnectTimer = null;
+
+function getOrConnectNativePort() {
+  if (nativePort) return nativePort;
+  try {
+    nativePort = chrome.runtime.connectNative(HOST_NAME);
+    nativePort.onMessage.addListener((msg) => {
+      console.log("PRRX IDM: Native host response:", msg);
+    });
+    nativePort.onDisconnect.addListener(() => {
+      const err = chrome.runtime.lastError ? chrome.runtime.lastError.message : "Disconnected";
+      console.debug("PRRX IDM: Native messaging host disconnected:", err);
+      nativePort = null;
+      scheduleNativeReconnect();
+    });
+    return nativePort;
+  } catch (e) {
+    console.debug("PRRX IDM: Native messaging connection unavailable:", e.message);
+    nativePort = null;
+    return null;
+  }
+}
+
+function scheduleNativeReconnect() {
+  if (nativeReconnectTimer) clearTimeout(nativeReconnectTimer);
+  nativeReconnectTimer = setTimeout(() => {
+    nativeReconnectTimer = null;
+    try {
+      getOrConnectNativePort();
+    } catch (_) {}
+  }, 4000);
+}
+
 // 4. Intercept Standard Browser Downloads
 chrome.downloads.onDeterminingFilename.addListener((downloadItem, suggest) => {
+  let targetUrl = downloadItem.finalUrl || downloadItem.url;
+
+  // If this download was triggered as a browser fallback from PRRX IDM, pass it through without re-intercepting!
+  if (bypassedDownloadUrls.has(targetUrl) || bypassedDownloadUrls.has(downloadItem.url)) {
+    bypassedDownloadUrls.delete(targetUrl);
+    bypassedDownloadUrls.delete(downloadItem.url);
+    suggest();
+    return true;
+  }
+
   chrome.storage.local.get({ enableInterception: true }, async (items) => {
     if (items.enableInterception && downloadItem.url) {
-      let targetUrl = downloadItem.finalUrl || downloadItem.url;
-
       // Safeguard against in-browser blob memory streams (e.g. YouTube media buffer, Telegram Web decrypted files)
       if (targetUrl.startsWith("blob:") || targetUrl.startsWith("data:")) {
         // Telegram Web decrypts files directly in browser memory - allow seamless saving
@@ -323,7 +394,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return true;
 });
 
-// 6. Dual-Channel Transmitter: Fast Local HTTP Bridge + Native Messaging Fallback
+// 6. Dual-Channel Transmitter: Fast Local HTTP Bridge + Reconnecting Native Messaging Fallback
 async function sendToPrrxIdm(payload) {
   if (payload && !payload.userAgent) {
     payload.userAgent = navigator.userAgent;
@@ -366,32 +437,37 @@ async function sendToPrrxIdm(payload) {
     console.log("PRRX IDM: Local HTTP bridge offline or timed out, falling back to Native Messaging Host...");
   }
 
-  // Channel B: Windows Native Messaging Host Fallback (launches application if closed)
+  // Channel B: Windows Native Messaging Host Fallback with Auto-Reconnect & Port Fallback
+  let dispatched = false;
+  try {
+    const port = getOrConnectNativePort();
+    if (port) {
+      port.postMessage(payload);
+      dispatched = true;
+      console.log("PRRX IDM: Dispatched via persistent Native Messaging port.");
+      return;
+    }
+  } catch (portErr) {
+    console.debug("PRRX IDM: Persistent native port postMessage notice:", portErr.message);
+  }
+
   try {
     chrome.runtime.sendNativeMessage(HOST_NAME, payload, (resp) => {
       if (chrome.runtime.lastError) {
         console.warn("Native Messaging Notice:", chrome.runtime.lastError.message);
         if (payload.isBrowserIntercepted && payload.url) {
-          console.log("PRRX IDM: Falling back to browser native download engine.");
-          chrome.downloads.download({
-            url: payload.url,
-            filename: payload.fileName || undefined,
-            saveAs: false
-          });
+          console.log("PRRX IDM: Native host unavailable; falling back smoothly to browser download engine.");
+          fallbackToBrowserDownload(payload.url, payload.fileName);
         }
       } else {
         console.log("PRRX IDM: Dispatched via Native Messaging Host.", resp);
       }
     });
   } catch (err) {
-    console.error("PRRX IDM: Both dispatch channels encountered error:", err);
+    console.warn("PRRX IDM: Native dispatch caught error:", err);
     if (payload.isBrowserIntercepted && payload.url) {
       console.log("PRRX IDM: Falling back to browser native download engine after error.");
-      chrome.downloads.download({
-        url: payload.url,
-        filename: payload.fileName || undefined,
-        saveAs: false
-      });
+      fallbackToBrowserDownload(payload.url, payload.fileName);
     }
   }
 }

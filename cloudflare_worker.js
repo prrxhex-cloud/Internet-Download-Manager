@@ -1035,6 +1035,8 @@ export default {
       // Dynamic Edge Quota Tracking, Anti-Abuse Rate Limiting & High-Speed Cache
       // ----------------------------------------------------------------------
       if (path.startsWith("/api/cloud")) {
+        const queryParams = new URLSearchParams(url.search);
+
         // 1. Health & Status
         if (path === "/api/cloud/health" || path === "/api/cloud/status") {
           const sasaKey = await getSasaApiKey(env);
@@ -1219,7 +1221,6 @@ export default {
 
         // 6. Map / Dispatch Upstream Endpoint
         let upstreamPath = "";
-        const queryParams = new URLSearchParams(url.search);
 
         // Smart Universal Resolver Endpoint: /api/cloud/resolve?url=...
         if (path === "/api/cloud/resolve") {

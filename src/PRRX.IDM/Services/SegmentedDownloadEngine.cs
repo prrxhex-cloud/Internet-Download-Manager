@@ -677,8 +677,8 @@ namespace PRRX.IDM.Services
                     }
                 }
 
-                // Maximize download throughput: adaptive high-speed multi-socket pooling (up to 32–64 parallel streams)
-                threadCount = MultiSegmentDownloader.CalculateOptimalConcurrency(_totalBytes, threadCount);
+                // Maximize download throughput: predictive AI multi-socket concurrency (up to 32–64 parallel streams)
+                threadCount = AiOptimizationService.Current.PredictOptimalConcurrency(_totalBytes, targetUri?.Host, threadCount);
 
                 // If server doesn't support ranges or size unknown, single-stream download
                 if (!acceptRanges || _totalBytes <= 0)
@@ -816,6 +816,10 @@ namespace PRRX.IDM.Services
                 IsRunning = false;
                 ReportProgress("Complete - Downloaded successfully");
                 PRRX.IDM.Security.SecurityGuard.ApplyMarkOfTheWeb(destinationFilePath, url, referer);
+                if (targetUri != null && _totalBytes > 0 && _speedStopwatch.Elapsed.TotalSeconds > 0)
+                {
+                    AiOptimizationService.Current.RecordHostPerformance(targetUri.Host, _speedStopwatch.ElapsedMilliseconds, _totalBytes / _speedStopwatch.Elapsed.TotalSeconds);
+                }
                 DownloadCompleted?.Invoke(this, destinationFilePath);
                 MemoryOptimizer.TrimMemory();
                 return true;
@@ -835,7 +839,7 @@ namespace PRRX.IDM.Services
                 // If server rejected multi-part Range headers with HTTP 400 or 416,
                 // automatically strip Range and custom headers and seamlessly fall back to clean single-stream GET.
                 var plan = AiSelfHealingEngine.Current.DiagnoseAndRemediate(url, ex, null, ex.Message);
-                if (threadCount > 1 && (plan.StripRange || plan.ForceSingleStream || ex.Message.Contains("400") || ex.Message.Contains("416")))
+                if (plan.StripRange || plan.ForceSingleStream || plan.StripCustomHeaders || ex.Message.Contains("400") || ex.Message.Contains("416"))
                 {
                     try
                     {
@@ -929,6 +933,7 @@ namespace PRRX.IDM.Services
         await using var dst = new FileStream(destinationFilePath, FileMode.Create, FileAccess.Write, FileShare.None, HighSpeedBufferSize, FileOptions.Asynchronous | FileOptions.SequentialScan);
 
         var buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(HighSpeedBufferSize);
+        var reportSw = Stopwatch.StartNew();
         try
         {
             int read;
@@ -944,7 +949,11 @@ namespace PRRX.IDM.Services
                 {
                     _threads[0].ProgressPercentage = Math.Min(100.0, (_totalDownloadedBytes / (double)_totalBytes) * 100.0);
                 }
-                ReportProgress("Receiving data (Single Stream)...");
+                if (reportSw.ElapsedMilliseconds >= 100)
+                {
+                    reportSw.Restart();
+                    ReportProgress("Receiving data (Single Stream)...");
+                }
             }
             await dst.FlushAsync(token);
         }
@@ -1039,15 +1048,9 @@ namespace PRRX.IDM.Services
 
                     if ((response.StatusCode == System.Net.HttpStatusCode.BadRequest || response.StatusCode == System.Net.HttpStatusCode.RequestedRangeNotSatisfiable) && request.Headers.Range != null)
                     {
+                        var sc = response.StatusCode;
                         response.Dispose();
-                        thread.DownloadedBytes = 0;
-                        existingBytes = 0;
-                        thread.CurrentByte = thread.StartByte;
-                        var fallbackReq = new HttpRequestMessage(HttpMethod.Get, url);
-                        var cleanUa = !string.IsNullOrWhiteSpace(userAgent) ? userAgent : "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
-                        fallbackReq.Headers.TryAddWithoutValidation("User-Agent", cleanUa);
-                        fallbackReq.Headers.TryAddWithoutValidation("Accept", "*/*");
-                        response = await workerClient.SendAsync(fallbackReq, HttpCompletionOption.ResponseHeadersRead, token);
+                        throw new HttpRequestException($"Server rejected multi-part byte Range request with HTTP {(int)sc} ({sc}). Initiating single-stream fallback.");
                     }
 
                     using (response)

@@ -35,6 +35,7 @@ namespace PRRX.IDM.ViewModels
         private MediaFormat? _selectedFormat;
         private CancellationTokenSource? _downloadCts;
         private readonly ITelegramLinkResolver _telegramResolver = new TelegramLinkResolver();
+        private readonly ICloudResolverService _cloudResolver;
 
         public bool IsTelegramUrl => _telegramResolver.IsTelegramUrl(InputUrl);
 
@@ -132,11 +133,13 @@ namespace PRRX.IDM.ViewModels
         public VideoDownloaderViewModel(
             IMediaEngineService mediaEngine, 
             IConfigurationService configService,
-            IHistoryService historyService)
+            IHistoryService historyService,
+            ICloudResolverService? cloudResolver = null)
         {
             _mediaEngine = mediaEngine;
             _configService = configService;
             _historyService = historyService;
+            _cloudResolver = cloudResolver ?? new CloudResolverService();
 
             PopulateDefaultFormats();
 
@@ -258,10 +261,30 @@ namespace PRRX.IDM.ViewModels
                 HasError = false;
                 StatusMessage = "Analyzing media link & extracting rich metadata...";
 
-                var (result, error) = await _mediaEngine.ProbeMediaAsync(InputUrl);
+                MediaProbeResult? result = null;
+                string? error = null;
+
+                // Priority Cloud Debrid & YouTube bot check bypass
+                if (_cloudResolver.IsYouTubeUrl(InputUrl) || _cloudResolver.CanResolve(InputUrl))
+                {
+                    try
+                    {
+                        using var cloudCts = new CancellationTokenSource(TimeSpan.FromSeconds(25));
+                        result = await _cloudResolver.ResolveMediaProbeAsync(InputUrl, cloudCts.Token);
+                    }
+                    catch { }
+                }
+
+                if (result == null)
+                {
+                    var (probeResult, probeError) = await _mediaEngine.ProbeMediaAsync(InputUrl);
+                    result = probeResult;
+                    error = probeError;
+                }
 
                 if (result != null)
                 {
+                    result.Title = AiOptimizationService.Current.CleanFileName(result.Title);
                     CurrentProbeResult = result;
                     AvailableFormats.Clear();
                     foreach (var fmt in result.Formats)

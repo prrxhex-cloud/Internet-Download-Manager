@@ -94,7 +94,7 @@ namespace PRRX.IDM.ViewModels
             return !_isExecuting && (_canExecute?.Invoke(parameter) ?? true);
         }
 
-        public async void Execute(object? parameter)
+        public async Task ExecuteAsync(object? parameter = null)
         {
             if (!CanExecute(parameter)) return;
 
@@ -109,6 +109,11 @@ namespace PRRX.IDM.ViewModels
                 _isExecuting = false;
                 CommandManager.InvalidateRequerySuggested();
             }
+        }
+
+        public async void Execute(object? parameter)
+        {
+            await ExecuteAsync(parameter);
         }
 
         public event EventHandler? CanExecuteChanged

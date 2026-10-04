@@ -1174,6 +1174,64 @@ namespace PRRX.IDM.Tests
             Assert.True(resolver.CanResolve("https://happymod.com/app/test.html"));
         }
 
+        [Fact]
+        public void AiOptimizationService_PredictCategory_AccuratelyClassifies()
+        {
+            var ai = AiOptimizationService.Current;
+            Assert.Equal(FileCategory.Music, ai.PredictCategory("track.mp3"));
+            Assert.Equal(FileCategory.Video, ai.PredictCategory("movie.mp4"));
+            Assert.Equal(FileCategory.Programs, ai.PredictCategory("setup.exe"));
+            Assert.Equal(FileCategory.Documents, ai.PredictCategory("manual.pdf"));
+            Assert.Equal(FileCategory.Compressed, ai.PredictCategory("archive.7z"));
+        }
+
+        [Fact]
+        public async Task VideoDownloaderViewModel_ProbeUrl_QueriesCloudResolverFirst()
+        {
+            var mediaEngine = new MediaEngineService();
+            var config = new ConfigurationService();
+            var history = new HistoryService();
+            var cloud = new TestCloudResolver();
+
+            var vm = new VideoDownloaderViewModel(mediaEngine, config, history, cloud);
+            vm.InputUrl = "https://www.youtube.com/watch?v=1eEBjQW3pHQ";
+
+            // Should probe without throwing any exception
+            await ((AsyncRelayCommand)vm.ProbeUrlCommand).ExecuteAsync(null);
+
+            Assert.False(vm.IsProbing);
+            Assert.NotNull(vm.CurrentProbeResult);
+            Assert.NotEmpty(vm.AvailableFormats);
+            Assert.Contains(vm.AvailableFormats, f => f.FormatId == "cloud_cdn_stream");
+        }
+
+        private class TestCloudResolver : ICloudResolverService
+        {
+            public string BaseUrl => "https://test";
+            public bool CanResolve(string url) => true;
+            public bool IsYouTubeUrl(string url) => url.Contains("youtube.com") || url.Contains("youtu.be");
+            public Task<CloudResolvedMedia?> ResolveMediaAsync(string url, string? format = null, CancellationToken ct = default) =>
+                Task.FromResult<CloudResolvedMedia?>(new CloudResolvedMedia { Success = true, DirectStreamUrl = "https://cdn.test/video.mp4", Title = "Test Video" });
+            public Task<MediaProbeResult?> ResolveMediaProbeAsync(string url, CancellationToken ct = default)
+            {
+                var probe = new MediaProbeResult
+                {
+                    Id = url,
+                    Title = "Test Video",
+                    Formats = new List<MediaFormat>
+                    {
+                        new MediaFormat { FormatId = "cloud_cdn_stream", Resolution = "1080p", Extension = "mp4" },
+                        new MediaFormat { FormatId = "cloud_mp3_stream", Resolution = "320kbps", Extension = "mp3" }
+                    }
+                };
+                return Task.FromResult<MediaProbeResult?>(probe);
+            }
+            public Task<string?> ResolveDirectDownloadUrlAsync(string url, CancellationToken ct = default) => Task.FromResult<string?>("https://cdn.test/video.mp4");
+            public Task<ApkSearchResult> SearchApkAsync(string query, string provider = "all", CancellationToken ct = default) => Task.FromResult(new ApkSearchResult { Success = true });
+            public Task<string?> ResolveApkDownloadUrlAsync(string apkLinkOrPackage, CancellationToken ct = default) => Task.FromResult<string?>("https://cdn.test/app.apk");
+            public Task<bool> CheckServiceHealthAsync(CancellationToken ct = default) => Task.FromResult(true);
+        }
+
         private static string FormatBytes(long bytes)
         {
             if (bytes <= 0) return "Unknown";
